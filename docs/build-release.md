@@ -30,6 +30,8 @@ Enable VM boot checks on hosts with QEMU/KVM available:
 YGG_ENABLE_QEMU_SMOKE=true ./mkconfig.sh --profile both
 ```
 
+Use `~/qemu_kvm.md` for harness prerequisites and environment validation.
+
 ## Retention
 
 Retention is profile-specific:

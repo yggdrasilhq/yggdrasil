@@ -30,6 +30,8 @@ The smoke bench is split into:
 ./tests/smoke/run.sh --profile both --require-artifacts --with-qemu-boot
 ```
 
+Prerequisites for this gate are documented in `~/qemu_kvm.md` (device passthrough, packages, OVMF).
+
 ## Post-Boot Runtime Bench (Required Before Ship)
 
 1. `systemctl status ygg-import-zpool-at-boot`
