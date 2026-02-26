@@ -1,0 +1,6 @@
+#!/bin/bash
+
+tee <<'EOL' /etc/lxc/lxc.conf
+lxc.lxcpath=/zroot/lxc
+EOL
+

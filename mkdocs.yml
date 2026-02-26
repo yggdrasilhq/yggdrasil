@@ -1,0 +1,14 @@
+site_name: Yggdrasil
+site_description: Debian live ISO build system for ZFS + LXC hosts
+site_url: https://yggdrasil.gour.top
+repo_name: yggdrasil
+repo_url: https://github.com/avikalpa/yggdrasil
+theme:
+  name: readthedocs
+nav:
+  - Home: docs/index.md
+  - Architecture: docs/architecture.md
+  - Build and Release: docs/build-release.md
+  - Smoke Test Bench: docs/smoke-tests.md
+  - TUI Guide: docs/tui.md
+  - Migration: docs/migration.md

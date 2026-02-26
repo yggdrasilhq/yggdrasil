@@ -1,0 +1,55 @@
+#!/bin/bash
+
+mkdir -p /opt/ygg
+
+tee <<'EOL' /opt/ygg/import-zpool-at-boot
+#!/bin/bash
+
+# change to maybe 'zones' or 'zroot'
+POOL_NAME="zroot"
+
+# Check if the named pool exists
+if ! zpool list "$POOL_NAME" >/dev/null 2>&1; then
+   # Try importing without force
+   zpool import "$POOL_NAME" || {
+       echo "Pool $POOL_NAME not found or cannot be imported"
+       exit 0
+   }
+fi
+
+# Set mountpoint only if pool is imported
+if zpool list "$POOL_NAME" >/dev/null 2>&1; then
+   current_mount=$(zfs get -H -o value mountpoint "$POOL_NAME" 2>/dev/null || echo "")
+   if [ "$current_mount" != "/$POOL_NAME" ]; then
+       zfs set mountpoint="/$POOL_NAME" "$POOL_NAME"
+   fi
+
+   # Handle /var dataset if it exists
+   if zfs list -H -o name | grep -q "^$POOL_NAME/var$"; then
+       current_var_mount=$(zfs get -H -o value mountpoint "$POOL_NAME/var" 2>/dev/null || echo "")
+       if [ "$current_var_mount" != "/var" ]; then
+           zfs set mountpoint=/var "$POOL_NAME/var"
+       fi
+   fi
+fi
+EOL
+chmod +777 /opt/ygg/import-zpool-at-boot
+
+# --- ZFS Service Configuration ---
+tee <<'EOL' /etc/systemd/system/ygg-import-zpool-at-boot.service
+[Unit]
+Description=Import the main zfs zpool after boot
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ygg/import-zpool-at-boot
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-import-zpool-at-boot.service
