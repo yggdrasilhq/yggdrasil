@@ -19,7 +19,16 @@ Release only if:
 
 1. `server` build succeeds
 2. `kde` build succeeds
-3. smoke tests pass for both profiles
+3. rootfs smoke tests pass for both profile artifacts
+4. optional QEMU boot smoke passes when `YGG_ENABLE_QEMU_SMOKE=true`
+
+## Optional QEMU/KVM Boot Gate
+
+Enable VM boot checks on hosts with QEMU/KVM available:
+
+```bash
+YGG_ENABLE_QEMU_SMOKE=true ./mkconfig.sh --profile both
+```
 
 ## Retention
 

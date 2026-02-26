@@ -11,4 +11,6 @@ nav:
   - Build and Release: docs/build-release.md
   - Smoke Test Bench: docs/smoke-tests.md
   - TUI Guide: docs/tui.md
+  - Release Checklist: docs/release-checklist.md
+  - GitHub Publish: docs/github-publish.md
   - Migration: docs/migration.md

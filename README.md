@@ -21,14 +21,15 @@ Apache-2.0, Copyright 2026 Avikalpa Kundu <avi@gour.top>.
 # 2) Build both profiles (default release behavior)
 ./mkconfig.sh --profile both
 
-# 3) Run smoke checks against repo/hook definitions
-./tests/smoke/run.sh
+# 3) Run smoke checks against artifacts (rootfs inspection enabled)
+./tests/smoke/run.sh --profile both --require-artifacts --with-iso-rootfs
 ```
 
 ## Build Modes
 
 - `recommended`: embeds SSH keys and asks for secure network settings.
 - `quick-try`: allows skipping keys/network customization; emits clear security reminders.
+- Static networking and macvlan values are configurable via the TUI output env file.
 
 ## Repository Layout
 

@@ -18,6 +18,18 @@ The smoke bench is split into:
 ./tests/smoke/run.sh --profile both --require-artifacts --artifacts-dir .
 ```
 
+## Rootfs Content Gate (recommended)
+
+```bash
+./tests/smoke/run.sh --profile both --require-artifacts --with-iso-rootfs
+```
+
+## Optional VM Boot Gate (QEMU/KVM hosts)
+
+```bash
+./tests/smoke/run.sh --profile both --require-artifacts --with-qemu-boot
+```
+
 ## Post-Boot Runtime Bench (Required Before Ship)
 
 1. `systemctl status ygg-import-zpool-at-boot`
