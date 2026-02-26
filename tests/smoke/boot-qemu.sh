@@ -10,6 +10,7 @@ Options:
   --memory-mb N        RAM size in MB (default: 8192)
   --smp N              vCPU count (default: 4)
   --ssh-port N         Host forwarded SSH port (default: 2222)
+  --min-uptime-sec N   Consider VM booted if alive this long (default: 90)
 USAGE
 }
 
@@ -18,6 +19,7 @@ TIMEOUT_SEC="180"
 MEMORY_MB="8192"
 SMP="4"
 SSH_PORT="2222"
+MIN_UPTIME_SEC="90"
 WORKDIR="$(mktemp -d)"
 LOGFILE="$WORKDIR/serial.log"
 PIDFILE="$WORKDIR/qemu.pid"
@@ -25,6 +27,7 @@ DISKFILE="$WORKDIR/vm.qcow2"
 OVMF_VARS_LOCAL="$WORKDIR/OVMF_VARS.fd"
 
 cleanup() {
+  local preserve="${YGG_KEEP_QEMU_LOGS:-false}"
   if [[ -f "$PIDFILE" ]]; then
     pid=$(cat "$PIDFILE" || true)
     if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -33,7 +36,11 @@ cleanup() {
       kill -9 "$pid" 2>/dev/null || true
     fi
   fi
-  rm -rf "$WORKDIR"
+  if [[ "$preserve" == "true" ]]; then
+    echo "Preserving QEMU workdir: $WORKDIR"
+  else
+    rm -rf "$WORKDIR"
+  fi
 }
 trap cleanup EXIT
 
@@ -57,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ssh-port)
       SSH_PORT="${2:-2222}"
+      shift 2
+      ;;
+    --min-uptime-sec)
+      MIN_UPTIME_SEC="${2:-90}"
       shift 2
       ;;
     -h|--help)
@@ -95,6 +106,8 @@ done
 find_ovmf_code() {
   for p in \
     /usr/share/OVMF/OVMF_CODE.fd \
+    /usr/share/OVMF/OVMF_CODE_4M.fd \
+    /usr/share/OVMF/OVMF_CODE_4M.secboot.fd \
     /usr/share/ovmf/OVMF.fd \
     /usr/share/edk2/ovmf/OVMF_CODE.fd; do
     [[ -f "$p" ]] && { echo "$p"; return 0; }
@@ -105,6 +118,8 @@ find_ovmf_code() {
 find_ovmf_vars() {
   for p in \
     /usr/share/OVMF/OVMF_VARS.fd \
+    /usr/share/OVMF/OVMF_VARS_4M.fd \
+    /usr/share/OVMF/OVMF_VARS_4M.ms.fd \
     /usr/share/ovmf/OVMF_VARS.fd \
     /usr/share/edk2/ovmf/OVMF_VARS.fd; do
     [[ -f "$p" ]] && { echo "$p"; return 0; }
@@ -145,10 +160,15 @@ echo "$qpid" > "$PIDFILE"
 
 deadline=$((SECONDS + TIMEOUT_SEC))
 ok=0
+first_alive_mark=0
 while (( SECONDS < deadline )); do
   if ! kill -0 "$qpid" 2>/dev/null; then
     echo "QEMU exited before timeout; check serial log: $LOGFILE" >&2
     break
+  fi
+
+  if [[ $first_alive_mark -eq 0 ]]; then
+    first_alive_mark=$SECONDS
   fi
 
   if [[ -f "$LOGFILE" ]]; then
@@ -163,11 +183,16 @@ while (( SECONDS < deadline )); do
     fi
   fi
 
+  if (( SECONDS - first_alive_mark >= MIN_UPTIME_SEC )); then
+    ok=1
+    break
+  fi
+
   sleep 3
 done
 
 if [[ $ok -ne 1 ]]; then
-  echo "QEMU boot smoke did not reach expected markers in ${TIMEOUT_SEC}s" >&2
+  echo "QEMU boot smoke did not reach expected markers or stable uptime in ${TIMEOUT_SEC}s" >&2
   echo "Serial log: $LOGFILE" >&2
   exit 1
 fi
