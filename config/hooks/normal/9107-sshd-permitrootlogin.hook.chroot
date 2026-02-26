@@ -1,0 +1,6 @@
+#!/bin/bash
+SSHD_CONFIG="/etc/ssh/sshd_config"
+sed -i 's|^#PermitRootLogin prohibit-password|PermitRootLogin prohibit-password|' "${SSHD_CONFIG}"
+if ! grep -q "^PermitRootLogin prohibit-password" "${SSHD_CONFIG}"; then
+    echo "Warning: Could not configure PermitRootLogin in ${SSHD_CONFIG}"
+fi

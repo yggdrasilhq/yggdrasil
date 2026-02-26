@@ -1,0 +1,40 @@
+#!/bin/bash
+
+tee <<'EOL' /etc/systemd/system/ygg-lxc-autostart.service
+[Unit]
+Description=Yggdrasil LXC Autostart
+Documentation=man:lxc-autostart(1)
+
+# CAVEAT 1: This is the most important part for you.
+# It ensures this service runs only AFTER your ZFS pool is imported AND its filesystems are mounted.
+# If the ZFS pool import fails, this service will not be started.
+Requires=ygg-import-zpool-at-boot.service zfs-mount.service
+
+# Pull in networking and LXC early but don't block on the slow network-online target.
+Wants=lxc.service network-online.target
+After=ygg-import-zpool-at-boot.service zfs-mount.service lxc.service network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# The main command to start all containers with lxc.start.auto = 1
+ExecStart=/usr/bin/lxc-autostart
+
+# CAVEAT 2: Define a clean shutdown command.
+# This will be executed on host shutdown/reboot.
+# -s tells it to honor stop order and delays.
+# -a tells it to stop all autostarted containers.
+# -t tells it to wait before hard-stopping.
+ExecStop=/usr/bin/lxc-autostart -s -a -t 30
+
+# CAVEAT 3: Disable timeout.
+# Starting many containers can take a long time.
+TimeoutSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-lxc-autostart.service

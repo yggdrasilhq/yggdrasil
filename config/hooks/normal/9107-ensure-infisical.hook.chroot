@@ -1,0 +1,97 @@
+#!/bin/bash
+
+tee <<'EOL' /usr/local/sbin/ygg-ensure-infisical
+#!/bin/bash
+set -euo pipefail
+
+log() {
+    echo "[ygg-infisical] $*"
+}
+
+container_exists() {
+    local name="$1"
+    lxc-ls -1 2>/dev/null | grep -qx "$name"
+}
+
+container_state() {
+    lxc-info -n "$1" -sH 2>/dev/null || echo "UNKNOWN"
+}
+
+ensure_running() {
+    local name="$1"
+    if ! container_exists "$name"; then
+        log "container $name not found; skipping"
+        return 1
+    fi
+    local state
+    state="$(container_state "$name")"
+    if [ "$state" != "RUNNING" ]; then
+        log "starting container $name (state: $state)"
+        lxc-start -n "$name" -d
+        sleep 2
+    fi
+}
+
+wait_for_infisical() {
+    local tries=30
+    local delay=2
+    local i
+    for i in $(seq 1 "$tries"); do
+        if lxc-attach -n infisical -- infisical-ctl status >/dev/null 2>&1; then
+            log "infisical reports ready"
+            return 0
+        fi
+        sleep "$delay"
+    done
+    log "infisical not ready after $((tries * delay))s; continuing"
+    return 1
+}
+
+main() {
+    if ! container_exists "infisical"; then
+        log "infisical container missing; nothing to do"
+        exit 0
+    fi
+
+    ensure_running "infisical" || true
+
+    if ! lxc-attach -n infisical -- infisical-ctl start >/dev/null 2>&1; then
+        log "infisical-ctl start failed (may already be running)"
+    fi
+
+    wait_for_infisical || true
+
+    if container_exists "owncloud"; then
+        ensure_running "owncloud" || true
+        if lxc-attach -n owncloud -- test -e /root/ygg_ocis_full/update-stack.sh >/dev/null 2>&1; then
+            log "running owncloud update-stack"
+            lxc-attach -n owncloud -- /bin/sh -lc "/root/ygg_ocis_full/update-stack.sh" || \
+                log "owncloud update-stack failed"
+        else
+            log "owncloud update-stack not found; skipping"
+        fi
+    fi
+}
+
+main "$@"
+EOL
+
+chmod +x /usr/local/sbin/ygg-ensure-infisical
+
+tee <<'EOL' /etc/systemd/system/ygg-infisical-ensure.service
+[Unit]
+Description=Ensure Infisical and dependent containers are ready
+After=ygg-lxc-autostart.service lxc.service network.target
+Requires=ygg-lxc-autostart.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-ensure-infisical
+TimeoutSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-infisical-ensure.service

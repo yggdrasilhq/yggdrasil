@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Root password setup
+# Note: Change this password in production
+echo "root:yggdrasil" | chpasswd
+
+# Bash aliases and configuration
+tee /root/.bashrc <<'EOL'
+source /usr/share/bash-completion/bash_completion
+alias ls='ls --color=auto'
+alias ll='ls -alhF'
+alias ls='ls --color=auto'
+alias ll='ls -alhF --color=auto'
+alias l='lxc-ls -f'
+alias s='lxc-start -n'
+alias x='lxc-stop -n'
+alias a='lxc-attach -n'
+alias c='lxc-copy -B zfs -s -n'
+alias deb='c deb -N'
+alias dock='c docker -N'
+alias arch='c arch -N'
+alias smb='c smb -N'
+alias cvx='c convexdb -N'
+EOL
+
+systemctl enable ssh

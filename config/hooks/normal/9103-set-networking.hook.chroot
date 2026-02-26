@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# LXC macvlan configuration
+tee <<'EOL' /etc/lxc/default.conf
+lxc.net.0.type = macvlan
+lxc.net.0.macvlan.mode = bridge
+lxc.net.0.link = eno1
+lxc.net.0.flags = up
+lxc.net.0.name = eth0
+
+lxc.apparmor.profile = generated
+lxc.apparmor.allow_nesting = 1
+EOL
+
+systemctl disable lxc-net.service
+
+# Host macvlan interface so the host can reach LXC macvlan guests
+cat <<'EOL' >/usr/local/sbin/ygg-setup-mac0
+#!/bin/bash
+set -euo pipefail
+
+PARENT_IF="eno1"
+MACVLAN_IF="mac0"
+MACVLAN_CIDR="192.168.0.250/22"
+MACVLAN_ROUTE="192.168.0.0/22"
+
+if ! ip link show "$PARENT_IF" >/dev/null 2>&1; then
+    echo "[ygg-mac0] Parent interface $PARENT_IF not found; skipping macvlan setup."
+    exit 0
+fi
+
+ip link delete "$MACVLAN_IF" 2>/dev/null || true
+ip link add "$MACVLAN_IF" link "$PARENT_IF" type macvlan mode bridge
+ip addr flush dev "$MACVLAN_IF" || true
+ip addr add "$MACVLAN_CIDR" dev "$MACVLAN_IF"
+ip link set "$MACVLAN_IF" up
+ip route replace "$MACVLAN_ROUTE" dev "$MACVLAN_IF"
+EOL
+chmod +x /usr/local/sbin/ygg-setup-mac0
+
+cat <<'EOL' >/etc/systemd/system/ygg-macvlan-mac0.service
+[Unit]
+Description=Yggdrasil macvlan interface for host access to LXC guests
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-setup-mac0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-macvlan-mac0.service

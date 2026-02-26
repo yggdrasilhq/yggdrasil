@@ -1,0 +1,20 @@
+# Live-build output
+binary/
+cache/
+chroot/
+config/binary
+config/chroot
+config/common
+config/source
+
+# Build artifacts
+*.iso
+*.hybrid.iso
+*.log
+.build/
+artifacts/
+
+# Editor/system
+.DS_Store
+*.swp
+*.swo

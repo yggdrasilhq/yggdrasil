@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# Create the lxc-runtime user for running unprivileged containers
+# This user will own the UID/GID maps for unprivileged containers
+# --system: create a system user
+# --no-create-home: no home directory needed for this service-like user
+# --shell /usr/sbin/nologin: prevent direct login
+if ! id -u lxc-runtime >/dev/null 2>&1; then
+    useradd --system --shell /usr/sbin/nologin --no-create-home lxc-runtime
+    echo "lxc-runtime user created."
+else
+    echo "lxc-runtime user already exists."
+fi
+
+# Configure subuid and subgid for the lxc-runtime user
+# This grants lxc-runtime a range of 65536 UIDs and GIDs starting from 200000
+# These ranges will be mapped to UIDs/GIDs inside unprivileged containers
+# (e.g., container root (UID 0) becomes host UID 200000)
+if ! grep -q "^lxc-runtime:" /etc/subuid; then
+    echo "lxc-runtime:200000:65536" >> /etc/subuid
+    echo "SubUID range added for lxc-runtime."
+else
+    echo "SubUID range for lxc-runtime already exists."
+fi
+
+if ! grep -q "^lxc-runtime:" /etc/subgid; then
+    echo "lxc-runtime:200000:65536" >> /etc/subgid
+    echo "SubGID range added for lxc-runtime."
+else
+    echo "SubGID range for lxc-runtime already exists."
+fi
+
+# Configure lxc-usernet to allow lxc-runtime to create network interfaces
+# This allows the lxc-runtime user to create a certain number of veth pairs
+# for its unprivileged containers.
+# The 'lxcbr0' is a common default bridge name; even if you disable the
+# lxc-net service and use macvlan, this permission is still useful for
+# the veth interface type. You can adjust the count (e.g., 10) as needed.
+# This file might not exist by default, so create it if necessary.
+LXC_USERNET_CONF="/etc/lxc/lxc-usernet"
+if ! grep -q "^lxc-runtime veth" "$LXC_USERNET_CONF" && \
+   ! grep -q "^lxc-runtime veth" "${LXC_USERNET_CONF}.d/"* 2>/dev/null; then
+    mkdir -p "$(dirname "$LXC_USERNET_CONF")"
+    echo "lxc-runtime veth lxcbr0 10" >> "$LXC_USERNET_CONF"
+    echo "lxc-usernet permissions added for lxc-runtime."
+else
+    echo "lxc-usernet permissions for lxc-runtime likely already exist."
+fi
+
+# Ensure LXC default configuration directory exists if not already
+mkdir -p /etc/lxc
+
+# Optional: Set up a default configuration for unprivileged containers
+# This could specify the lxc-runtime user's idmap.
+# However, this is often better handled in profiles or per-container configs.
+# If you want a system-wide default for *all* unprivileged containers not
+# otherwise specified:
+#
+# mkdir -p /etc/lxc/
+# tee /etc/lxc/default.conf <<EODEF
+# lxc.include = /usr/share/lxc/config/common.conf
+# lxc.idmap = u 0 200000 65536
+# lxc.idmap = g 0 200000 65536
+# # Add other unprivileged defaults if desired
+# EODEF
+# echo "LXC default.conf updated for unprivileged containers."
+
+echo "Unprivileged LXC setup for lxc-runtime completed."
+

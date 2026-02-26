@@ -1,0 +1,98 @@
+#!/bin/bash
+set -euo pipefail
+
+KEY="/root/.secureboot/MOK.key"
+CERT="/root/.secureboot/MOK.crt"
+ENROLL_HELPER="/usr/local/sbin/ygg-enroll-mok"
+
+if [[ ! -f "$KEY" || ! -f "$CERT" ]]; then
+    echo "[ygg-mok] Signing material missing; skipping DKMS signing."
+    exit 0
+fi
+
+find_sign_file() {
+    local kernel_release="$1"
+    local candidate
+
+    candidate="/lib/modules/${kernel_release}/build/scripts/sign-file"
+    if [[ -x "$candidate" ]]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    candidate=$(find /usr/lib -type f -path '*/scripts/sign-file' 2>/dev/null | head -n1 || true)
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    return 1
+}
+
+signed_count=0
+sign_module_file() {
+    local sign_file="$1"
+    local module="$2"
+    local tmpdir tmp_ko
+
+    case "$module" in
+        *.ko)
+            "$sign_file" sha256 "$KEY" "$CERT" "$module"
+            ;;
+        *.ko.zst)
+            tmpdir=$(mktemp -d)
+            tmp_ko="${tmpdir}/module.ko"
+            zstd -d -q -c "$module" > "$tmp_ko"
+            "$sign_file" sha256 "$KEY" "$CERT" "$tmp_ko"
+            zstd -q -19 -c "$tmp_ko" > "$module"
+            rm -rf "$tmpdir"
+            ;;
+        *.ko.xz)
+            tmpdir=$(mktemp -d)
+            tmp_ko="${tmpdir}/module.ko"
+            xz -d -c "$module" > "$tmp_ko"
+            "$sign_file" sha256 "$KEY" "$CERT" "$tmp_ko"
+            xz -z -c "$tmp_ko" > "$module"
+            rm -rf "$tmpdir"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+while IFS= read -r module; do
+    kernel_release=$(echo "$module" | cut -d/ -f4)
+    if ! sign_file=$(find_sign_file "$kernel_release"); then
+        echo "[ygg-mok] sign-file not found for ${kernel_release}; skipping ${module}"
+        continue
+    fi
+    sign_module_file "$sign_file" "$module" || continue
+    signed_count=$((signed_count + 1))
+done < <(find /lib/modules -type f \( -path '*/updates/dkms/*.ko' -o -path '*/updates/dkms/*.ko.zst' -o -path '*/updates/dkms/*.ko.xz' \) 2>/dev/null | sort)
+
+if [[ "$signed_count" -gt 0 ]]; then
+    echo "[ygg-mok] Signed ${signed_count} DKMS modules."
+else
+    echo "[ygg-mok] No DKMS modules found to sign."
+fi
+
+cat <<'EOL' > "$ENROLL_HELPER"
+#!/bin/bash
+set -euo pipefail
+
+CERT="/root/ygg-local-mok.cer"
+if [[ ! -f "$CERT" ]]; then
+    echo "MOK certificate not found at $CERT"
+    exit 1
+fi
+
+echo "Importing MOK cert: $CERT"
+echo "Set a one-time enrollment password when prompted."
+mokutil --import "$CERT"
+echo "Reboot and complete enrollment in MokManager."
+EOL
+chmod 0755 "$ENROLL_HELPER"
+
+rm -f /root/.secureboot/MOK.key /root/.secureboot/MOK.crt
+rmdir /root/.secureboot 2>/dev/null || true
