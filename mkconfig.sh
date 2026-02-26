@@ -91,10 +91,16 @@ else
 fi
 
 if [[ "$SKIP_SMOKE" != "true" ]]; then
+  smoke_cmd=(./tests/smoke/run.sh --profile "$PROFILE" --require-artifacts --with-iso-rootfs)
+  if [[ "${YGG_ENABLE_QEMU_SMOKE:-false}" == "true" ]]; then
+    smoke_cmd+=(--with-qemu-boot)
+  fi
+
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[dry-run] ./tests/smoke/run.sh --profile $PROFILE"
+    printf '[dry-run] %q ' "${smoke_cmd[@]}"
+    echo
   else
-    ./tests/smoke/run.sh --profile "$PROFILE"
+    "${smoke_cmd[@]}"
   fi
 fi
 

@@ -68,6 +68,11 @@ else
   msg "Security Reminder" "Quick-try is for test drives only.\nUse recommended mode before production deployment."
 fi
 
+HOSTNAME=$(input "Hostname" "Live hostname (leave empty for profile default):" "")
+LXC_PARENT_IF=$(input "LXC Parent Iface" "Parent interface for LXC macvlan:" "eno1")
+MACVLAN_CIDR=$(input "Macvlan CIDR" "Host macvlan CIDR for LXC reachability:" "192.168.0.250/22")
+MACVLAN_ROUTE=$(input "Macvlan Route" "Route CIDR for guest subnet:" "192.168.0.0/22")
+
 NET_MODE=$(menu "Networking" \
   dhcp "Use DHCP" \
   static "Set static IPv4")
@@ -75,7 +80,9 @@ NET_MODE=$(menu "Networking" \
 STATIC_IP=""
 STATIC_GW=""
 STATIC_DNS=""
+STATIC_IFACE="$LXC_PARENT_IF"
 if [[ "$NET_MODE" == "static" ]]; then
+  STATIC_IFACE=$(input "Static Iface" "Interface for static IP:" "$LXC_PARENT_IF")
   STATIC_IP=$(input "Static IP" "IPv4 CIDR (example: 192.168.1.20/24):" "")
   STATIC_GW=$(input "Gateway" "Default gateway IPv4:" "")
   STATIC_DNS=$(input "DNS" "DNS servers (space-separated):" "1.1.1.1 8.8.8.8")
@@ -85,7 +92,12 @@ cat > "$OUT_FILE" <<EOC
 YGG_SETUP_MODE="$MODE"
 YGG_EMBED_SSH_KEYS="$EMBED_SSH_KEYS"
 YGG_SSH_AUTHORIZED_KEYS_FILE="$SSH_KEYS_FILE"
+YGG_HOSTNAME="$HOSTNAME"
 YGG_NET_MODE="$NET_MODE"
+YGG_LXC_PARENT_IF="$LXC_PARENT_IF"
+YGG_MACVLAN_CIDR="$MACVLAN_CIDR"
+YGG_MACVLAN_ROUTE="$MACVLAN_ROUTE"
+YGG_STATIC_IFACE="$STATIC_IFACE"
 YGG_STATIC_IP="$STATIC_IP"
 YGG_STATIC_GATEWAY="$STATIC_GW"
 YGG_STATIC_DNS="$STATIC_DNS"

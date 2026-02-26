@@ -4,6 +4,10 @@ set -euo pipefail
 PROFILE="both"
 ARTIFACT_DIR="."
 REQUIRE_ARTIFACTS="false"
+WITH_ISO_ROOTFS="false"
+WITH_QEMU_BOOT="false"
+SERVER_ISO=""
+KDE_ISO=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -19,12 +23,36 @@ while [[ $# -gt 0 ]]; do
       REQUIRE_ARTIFACTS="true"
       shift
       ;;
+    --with-iso-rootfs)
+      WITH_ISO_ROOTFS="true"
+      shift
+      ;;
+    --with-qemu-boot)
+      WITH_QEMU_BOOT="true"
+      shift
+      ;;
+    --server-iso)
+      SERVER_ISO="${2:-}"
+      shift 2
+      ;;
+    --kde-iso)
+      KDE_ISO="${2:-}"
+      shift 2
+      ;;
     *)
       echo "Unknown option: $1" >&2
       exit 1
       ;;
   esac
 done
+
+case "$PROFILE" in
+  server|kde|both) ;;
+  *)
+    echo "Invalid --profile: $PROFILE" >&2
+    exit 1
+    ;;
+esac
 
 fail=0
 pass() { echo "[PASS] $1"; }
@@ -43,12 +71,17 @@ check_file "scripts/mkconfig-legacy.sh"
 check_file "scripts/build-profile.sh"
 check_file "scripts/mkconfig-tui.sh"
 check_file "scripts/prune-isos.sh"
+check_file "tests/smoke/iso-rootfs-check.sh"
+check_file "tests/smoke/boot-qemu.sh"
 
 check_contains "scripts/mkconfig-legacy.sh" "ygg-import-zpool-at-boot.service"
 check_contains "scripts/mkconfig-legacy.sh" "ygg-lxc-autostart.service"
 check_contains "scripts/mkconfig-legacy.sh" "ygg-infisical-ensure.service"
 check_contains "scripts/mkconfig-legacy.sh" "/etc/lxc/lxc.conf"
 check_contains "scripts/mkconfig-legacy.sh" "/etc/lxc/default.conf"
+check_contains "scripts/mkconfig-legacy.sh" "YGG_SSH_AUTHORIZED_KEYS_FILE"
+check_contains "scripts/mkconfig-legacy.sh" "YGG_STATIC_IP"
+check_contains "scripts/mkconfig-tui.sh" "quick-try"
 
 if [[ "$PROFILE" == "kde" || "$PROFILE" == "both" ]]; then
   check_contains "scripts/mkconfig-legacy.sh" "--with-kde"
@@ -72,6 +105,53 @@ if [[ "$REQUIRE_ARTIFACTS" == "true" ]]; then
     else
       failf "kde iso artifact missing"
     fi
+  fi
+fi
+
+latest_iso() {
+  local mode="$1"
+  if [[ "$mode" == "server" ]]; then
+    ls -1t "$ARTIFACT_DIR"/yggdrasil-*-amd64.hybrid.iso 2>/dev/null | rg -v -- '-kde-amd64\.hybrid\.iso$' | head -n1
+  else
+    ls -1t "$ARTIFACT_DIR"/yggdrasil-*-kde-amd64.hybrid.iso 2>/dev/null | head -n1
+  fi
+}
+
+if [[ -z "$SERVER_ISO" ]]; then
+  SERVER_ISO="$(latest_iso server || true)"
+fi
+if [[ -z "$KDE_ISO" ]]; then
+  KDE_ISO="$(latest_iso kde || true)"
+fi
+
+run_optional_checks() {
+  local mode="$1"
+  local iso="$2"
+
+  if [[ -z "$iso" || ! -f "$iso" ]]; then
+    failf "${mode} iso not found for optional checks"
+    return
+  fi
+
+  if [[ "$WITH_ISO_ROOTFS" == "true" ]]; then
+    if [[ "$mode" == "kde" ]]; then
+      ./tests/smoke/iso-rootfs-check.sh --iso "$iso" --expect-kde || fail=1
+    else
+      ./tests/smoke/iso-rootfs-check.sh --iso "$iso" || fail=1
+    fi
+  fi
+
+  if [[ "$WITH_QEMU_BOOT" == "true" ]]; then
+    ./tests/smoke/boot-qemu.sh --iso "$iso" || fail=1
+  fi
+}
+
+if [[ "$WITH_ISO_ROOTFS" == "true" || "$WITH_QEMU_BOOT" == "true" ]]; then
+  if [[ "$PROFILE" == "server" || "$PROFILE" == "both" ]]; then
+    run_optional_checks "server" "$SERVER_ISO"
+  fi
+  if [[ "$PROFILE" == "kde" || "$PROFILE" == "both" ]]; then
+    run_optional_checks "kde" "$KDE_ISO"
   fi
 fi
 

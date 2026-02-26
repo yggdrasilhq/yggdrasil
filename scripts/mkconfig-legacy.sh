@@ -213,6 +213,9 @@ LIVE_HOSTNAME="manin.gour.top"
 if [[ "$KDE_PROFILE" == "true" ]]; then
     LIVE_HOSTNAME="yggdrasil"
 fi
+if [[ -n "${YGG_HOSTNAME:-}" ]]; then
+    LIVE_HOSTNAME="$YGG_HOSTNAME"
+fi
 
 lb config \
   --apt apt \
@@ -779,15 +782,18 @@ cp "config/includes.chroot/etc/apt/apt.conf.d/99ygg-zfs-dkms.conf" \
    "config/includes.chroot_before_packages/etc/apt/apt.conf.d/99ygg-zfs-dkms.conf"
 
 # 3. Copy authorized_keys for root user if present
-AUTHORIZED_KEYS_SOURCE="$ssh_host_keys_dir/authorized_keys"
+AUTHORIZED_KEYS_SOURCE="${YGG_SSH_AUTHORIZED_KEYS_FILE:-$ssh_host_keys_dir/authorized_keys}"
 AUTHORIZED_KEYS_TARGET_DIR="config/includes.chroot/root/.ssh"
+YGG_EMBED_SSH_KEYS="${YGG_EMBED_SSH_KEYS:-true}"
 
-if [ -f "$AUTHORIZED_KEYS_SOURCE" ]; then
+if [[ "$YGG_EMBED_SSH_KEYS" == "true" ]] && [ -f "$AUTHORIZED_KEYS_SOURCE" ]; then
     echo "Copying authorized_keys for root from $AUTHORIZED_KEYS_SOURCE..."
     mkdir -p "$AUTHORIZED_KEYS_TARGET_DIR"
     chmod 700 "$AUTHORIZED_KEYS_TARGET_DIR"
     cp "$AUTHORIZED_KEYS_SOURCE" "$AUTHORIZED_KEYS_TARGET_DIR/authorized_keys"
     chmod 600 "$AUTHORIZED_KEYS_TARGET_DIR/authorized_keys"
+elif [[ "$YGG_EMBED_SSH_KEYS" != "true" ]]; then
+    echo "Skipping authorized_keys embedding by configuration (YGG_EMBED_SSH_KEYS=$YGG_EMBED_SSH_KEYS)."
 else
     echo "Warning: No authorized_keys found at $AUTHORIZED_KEYS_SOURCE. Root SSH key auth will be unavailable."
 fi
@@ -869,14 +875,23 @@ install -m 0755 "$RUNTIME_CACHE_DIR/codex-litellm" "config/includes.chroot/usr/l
 install -m 0755 "$RUNTIME_CACHE_DIR/codex-session-tui" "config/includes.chroot/usr/local/bin/codex-session-tui"
 
 # --- Network Configuration ---
-tee config/hooks/normal/9103-set-networking.hook.chroot <<'EOF'
+LXC_PARENT_IF="${YGG_LXC_PARENT_IF:-eno1}"
+MACVLAN_CIDR="${YGG_MACVLAN_CIDR:-192.168.0.250/22}"
+MACVLAN_ROUTE="${YGG_MACVLAN_ROUTE:-192.168.0.0/22}"
+HOST_NET_MODE="${YGG_NET_MODE:-dhcp}"
+HOST_STATIC_IFACE="${YGG_STATIC_IFACE:-$LXC_PARENT_IF}"
+HOST_STATIC_IP="${YGG_STATIC_IP:-}"
+HOST_STATIC_GATEWAY="${YGG_STATIC_GATEWAY:-}"
+HOST_STATIC_DNS="${YGG_STATIC_DNS:-}"
+
+tee config/hooks/normal/9103-set-networking.hook.chroot <<EOF
 #!/bin/bash
 
 # LXC macvlan configuration
 tee <<'EOL' /etc/lxc/default.conf
 lxc.net.0.type = macvlan
 lxc.net.0.macvlan.mode = bridge
-lxc.net.0.link = eno1
+lxc.net.0.link = ${LXC_PARENT_IF}
 lxc.net.0.flags = up
 lxc.net.0.name = eth0
 
@@ -891,10 +906,10 @@ cat <<'EOL' >/usr/local/sbin/ygg-setup-mac0
 #!/bin/bash
 set -euo pipefail
 
-PARENT_IF="eno1"
+PARENT_IF="${LXC_PARENT_IF}"
 MACVLAN_IF="mac0"
-MACVLAN_CIDR="192.168.0.250/22"
-MACVLAN_ROUTE="192.168.0.0/22"
+MACVLAN_CIDR="${MACVLAN_CIDR}"
+MACVLAN_ROUTE="${MACVLAN_ROUTE}"
 
 if ! ip link show "$PARENT_IF" >/dev/null 2>&1; then
     echo "[ygg-mac0] Parent interface $PARENT_IF not found; skipping macvlan setup."
@@ -928,6 +943,61 @@ EOL
 systemctl daemon-reload
 systemctl enable ygg-macvlan-mac0.service
 EOF
+
+if [[ "$HOST_NET_MODE" == "static" && -n "$HOST_STATIC_IP" ]]; then
+    tee -a config/hooks/normal/9103-set-networking.hook.chroot <<EOF
+cat <<'EOL' >/usr/local/sbin/ygg-apply-static-ip
+#!/bin/bash
+set -euo pipefail
+
+IFACE="${HOST_STATIC_IFACE}"
+ADDR="${HOST_STATIC_IP}"
+GW="${HOST_STATIC_GATEWAY}"
+DNS="${HOST_STATIC_DNS}"
+
+if ! ip link show "\$IFACE" >/dev/null 2>&1; then
+    echo "[ygg-net] interface \$IFACE not found; skipping static config"
+    exit 0
+fi
+
+ip addr flush dev "\$IFACE" || true
+ip addr add "\$ADDR" dev "\$IFACE"
+ip link set "\$IFACE" up
+
+if [[ -n "\$GW" ]]; then
+    ip route replace default via "\$GW" dev "\$IFACE"
+fi
+
+if [[ -n "\$DNS" ]]; then
+    install -d -m 0755 /etc/systemd/resolved.conf.d
+    {
+        echo "[Resolve]"
+        echo "DNS=\$DNS"
+    } >/etc/systemd/resolved.conf.d/ygg-static-dns.conf
+    systemctl restart systemd-resolved.service || true
+fi
+EOL
+chmod +x /usr/local/sbin/ygg-apply-static-ip
+
+cat <<'EOL' >/etc/systemd/system/ygg-static-ip.service
+[Unit]
+Description=Apply static host networking for Yggdrasil
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-apply-static-ip
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-static-ip.service
+EOF
+fi
 chmod +777 config/hooks/normal/9103-set-networking.hook.chroot
 
 # --- ZFS Configuration ---

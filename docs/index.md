@@ -6,4 +6,6 @@ Yggdrasil docs are intended for publication at `yggdrasil.gour.top`.
 - [Build and Release](build-release.md)
 - [Smoke Test Bench](smoke-tests.md)
 - [TUI Guide](tui.md)
+- [Release Checklist](release-checklist.md)
+- [GitHub Publish](github-publish.md)
 - [Migration Notes](migration.md)
