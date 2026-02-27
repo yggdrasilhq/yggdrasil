@@ -58,8 +58,10 @@ if command -v mount >/dev/null 2>&1 && mount -o loop,ro "$ISO" "$MNT_DIR" 2>/dev
   :
 elif command -v bsdtar >/dev/null 2>&1; then
   bsdtar -C "$MNT_DIR" -xf "$ISO"
+elif command -v xorriso >/dev/null 2>&1; then
+  xorriso -osirrox on -indev "$ISO" -extract / "$MNT_DIR" >/dev/null 2>&1
 else
-  echo "Unable to open ISO: loop mount failed and bsdtar is unavailable" >&2
+  echo "Unable to open ISO: no mount/bsdtar/xorriso path available" >&2
   exit 1
 fi
 

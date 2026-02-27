@@ -18,3 +18,15 @@ artifacts/
 .DS_Store
 *.swp
 *.swo
+
+# Local user config
+ygg.local.toml
+.graveyard/
+assets/ssh/*
+!assets/ssh/README.md
+*.contents
+*.files
+*.packages
+*.hybrid.iso.keep
+runtime-cache/
+runtime-target/
