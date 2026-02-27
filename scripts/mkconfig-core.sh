@@ -196,12 +196,18 @@ extract_proxy_value() {
     awk -F'"' -v key="$key" '$0 ~ key {print $2; exit}' "$file"
 }
 
-APT_HTTP_PROXY=""
-APT_HTTPS_PROXY=""
+APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
+APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-}"
+APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
 
-if [[ -f "$APT_PROXY_CONF" ]]; then
+if [[ -z "$APT_HTTP_PROXY" && -f "$APT_PROXY_CONF" ]]; then
     APT_HTTP_PROXY=$(extract_proxy_value "Acquire::http::Proxy" "$APT_PROXY_CONF" || true)
+fi
+if [[ -z "$APT_HTTPS_PROXY" && -f "$APT_PROXY_CONF" ]]; then
     APT_HTTPS_PROXY=$(extract_proxy_value "Acquire::https::Proxy" "$APT_PROXY_CONF" || true)
+fi
+if [[ -z "$APT_HTTPS_PROXY" ]]; then
+    APT_HTTPS_PROXY="$APT_HTTP_PROXY"
 fi
 
 LB_APT_PROXY_FLAGS=()
@@ -209,7 +215,7 @@ if [[ -n "$APT_HTTP_PROXY" ]]; then
     LB_APT_PROXY_FLAGS+=(--apt-http-proxy "$APT_HTTP_PROXY")
 fi
 
-LIVE_HOSTNAME="manin.gour.top"
+LIVE_HOSTNAME="yggdrasil.local"
 if [[ "$KDE_PROFILE" == "true" ]]; then
     LIVE_HOSTNAME="yggdrasil"
 fi
@@ -761,11 +767,26 @@ cp "config/includes.chroot/etc/live/config.conf.d/ssh-hostkeys.conf" \
    "config/includes.chroot_before_packages/etc/live/config.conf.d/ssh-hostkeys.conf"
 
 mkdir -p "config/includes.chroot/etc/apt/apt.conf.d" "config/includes.chroot_before_packages/etc/apt/apt.conf.d"
-if [[ -f "$APT_PROXY_CONF" ]]; then
-    cp "$APT_PROXY_CONF" "config/includes.chroot/etc/apt/apt.conf.d/02proxy"
-    cp "$APT_PROXY_CONF" "config/includes.chroot_before_packages/etc/apt/apt.conf.d/02proxy"
+if [[ -n "$APT_HTTP_PROXY" ]]; then
+    {
+        echo "Acquire::http::Proxy \"$APT_HTTP_PROXY\";"
+        echo "Acquire::https::Proxy \"$APT_HTTPS_PROXY\";"
+        if [[ -n "$APT_PROXY_BYPASS_HOST" ]]; then
+            echo "Acquire::http::Proxy::$APT_PROXY_BYPASS_HOST \"DIRECT\";"
+            echo "Acquire::https::Proxy::$APT_PROXY_BYPASS_HOST \"DIRECT\";"
+        fi
+    } > "config/includes.chroot/etc/apt/apt.conf.d/02proxy"
+    cp "config/includes.chroot/etc/apt/apt.conf.d/02proxy" \
+       "config/includes.chroot_before_packages/etc/apt/apt.conf.d/02proxy"
 else
-    echo "WARN: $APT_PROXY_CONF not found; apt cache proxy will not be embedded."
+    cat <<'EOF' > "config/includes.chroot/etc/apt/apt.conf.d/02proxy"
+// Optional APT proxy override.
+// Example:
+// Acquire::http::Proxy "http://apt-proxy.local:3142";
+// Acquire::https::Proxy "http://apt-proxy.local:3142";
+EOF
+    cp "config/includes.chroot/etc/apt/apt.conf.d/02proxy" \
+       "config/includes.chroot_before_packages/etc/apt/apt.conf.d/02proxy"
 fi
 
 if [[ -f "$APT_CACHE_TUNING_CONF" ]]; then
@@ -876,8 +897,8 @@ install -m 0755 "$RUNTIME_CACHE_DIR/codex-session-tui" "config/includes.chroot/u
 
 # --- Network Configuration ---
 LXC_PARENT_IF="${YGG_LXC_PARENT_IF:-eno1}"
-MACVLAN_CIDR="${YGG_MACVLAN_CIDR:-192.168.0.250/22}"
-MACVLAN_ROUTE="${YGG_MACVLAN_ROUTE:-192.168.0.0/22}"
+MACVLAN_CIDR="${YGG_MACVLAN_CIDR:-10.10.0.250/24}"
+MACVLAN_ROUTE="${YGG_MACVLAN_ROUTE:-10.10.0.0/24}"
 HOST_NET_MODE="${YGG_NET_MODE:-dhcp}"
 HOST_STATIC_IFACE="${YGG_STATIC_IFACE:-$LXC_PARENT_IF}"
 HOST_STATIC_IP="${YGG_STATIC_IP:-}"
@@ -911,17 +932,17 @@ MACVLAN_IF="mac0"
 MACVLAN_CIDR="${MACVLAN_CIDR}"
 MACVLAN_ROUTE="${MACVLAN_ROUTE}"
 
-if ! ip link show "$PARENT_IF" >/dev/null 2>&1; then
-    echo "[ygg-mac0] Parent interface $PARENT_IF not found; skipping macvlan setup."
+if ! ip link show "\$PARENT_IF" >/dev/null 2>&1; then
+    echo "[ygg-mac0] Parent interface \$PARENT_IF not found; skipping macvlan setup."
     exit 0
 fi
 
-ip link delete "$MACVLAN_IF" 2>/dev/null || true
-ip link add "$MACVLAN_IF" link "$PARENT_IF" type macvlan mode bridge
-ip addr flush dev "$MACVLAN_IF" || true
-ip addr add "$MACVLAN_CIDR" dev "$MACVLAN_IF"
-ip link set "$MACVLAN_IF" up
-ip route replace "$MACVLAN_ROUTE" dev "$MACVLAN_IF"
+ip link delete "\$MACVLAN_IF" 2>/dev/null || true
+ip link add "\$MACVLAN_IF" link "\$PARENT_IF" type macvlan mode bridge
+ip addr flush dev "\$MACVLAN_IF" || true
+ip addr add "\$MACVLAN_CIDR" dev "\$MACVLAN_IF"
+ip link set "\$MACVLAN_IF" up
+ip route replace "\$MACVLAN_ROUTE" dev "\$MACVLAN_IF"
 EOL
 chmod +x /usr/local/sbin/ygg-setup-mac0
 

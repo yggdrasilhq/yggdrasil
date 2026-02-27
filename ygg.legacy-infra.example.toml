@@ -1,0 +1,24 @@
+# Private infrastructure profile template.
+# Copy to ygg.local.toml and fill with your exact internal values.
+
+build_profile = "both"
+enable_qemu_smoke = true
+
+setup_mode = "recommended"
+embed_ssh_keys = true
+ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
+
+hostname = "build-host.example"
+net_mode = "dhcp"
+lxc_parent_if = "eno1"
+macvlan_cidr = "10.10.0.250/22"
+macvlan_route = "10.10.0.0/22"
+
+static_iface = "eno1"
+static_ip = ""
+static_gateway = ""
+static_dns = ""
+
+apt_http_proxy = "http://apt-cache.example:3142"
+apt_https_proxy = "http://apt-cache.example:3142"
+apt_proxy_bypass_host = "apt-cache.example"

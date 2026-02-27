@@ -21,8 +21,8 @@ set -euo pipefail
 
 PARENT_IF="eno1"
 MACVLAN_IF="mac0"
-MACVLAN_CIDR="192.168.0.250/22"
-MACVLAN_ROUTE="192.168.0.0/22"
+MACVLAN_CIDR="10.10.0.250/24"
+MACVLAN_ROUTE="10.10.0.0/24"
 
 if ! ip link show "$PARENT_IF" >/dev/null 2>&1; then
     echo "[ygg-mac0] Parent interface $PARENT_IF not found; skipping macvlan setup."

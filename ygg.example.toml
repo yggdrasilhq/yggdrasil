@@ -1,0 +1,25 @@
+# Generalized public configuration example.
+# Copy to ygg.local.toml (gitignored).
+
+build_profile = "both"            # server | kde | both
+enable_qemu_smoke = true
+
+setup_mode = "recommended"        # recommended | quick-try
+embed_ssh_keys = true
+ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
+
+hostname = "yggdrasil"
+net_mode = "dhcp"                 # dhcp | static
+lxc_parent_if = "eno1"
+macvlan_cidr = "10.10.0.250/24"
+macvlan_route = "10.10.0.0/24"
+
+# Used when net_mode = "static"
+static_iface = "eno1"
+static_ip = ""
+static_gateway = ""
+static_dns = "1.1.1.1 8.8.8.8"
+
+apt_http_proxy = ""
+apt_https_proxy = ""
+apt_proxy_bypass_host = ""

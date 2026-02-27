@@ -22,6 +22,7 @@ SSH_PORT="2222"
 MIN_UPTIME_SEC="90"
 WORKDIR="$(mktemp -d)"
 LOGFILE="$WORKDIR/serial.log"
+ERRLOG="$WORKDIR/qemu.stderr.log"
 PIDFILE="$WORKDIR/qemu.pid"
 DISKFILE="$WORKDIR/vm.qcow2"
 OVMF_VARS_LOCAL="$WORKDIR/OVMF_VARS.fd"
@@ -138,6 +139,41 @@ fi
 cp "$OVMF_VARS_TEMPLATE" "$OVMF_VARS_LOCAL"
 qemu-img create -f qcow2 "$DISKFILE" 24G >/dev/null
 
+is_port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "( sport = :$port )" 2>/dev/null | rg -q ":$port\\b"
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+resolve_ssh_port() {
+  local requested="$1"
+  local p="$requested"
+  local tries=30
+  local i
+  for i in $(seq 1 "$tries"); do
+    if ! is_port_in_use "$p"; then
+      echo "$p"
+      return 0
+    fi
+    p=$((p + 1))
+  done
+  return 1
+}
+
+SSH_PORT_RESOLVED="$(resolve_ssh_port "$SSH_PORT" || true)"
+if [[ -z "$SSH_PORT_RESOLVED" ]]; then
+  echo "Could not find a free host SSH forward port starting from $SSH_PORT" >&2
+  exit 1
+fi
+if [[ "$SSH_PORT_RESOLVED" != "$SSH_PORT" ]]; then
+  echo "Requested SSH port $SSH_PORT is busy; using $SSH_PORT_RESOLVED instead"
+fi
+
 qemu-system-x86_64 \
   -enable-kvm \
   -machine q35 \
@@ -148,12 +184,12 @@ qemu-system-x86_64 \
   -drive if=pflash,format=raw,file="$OVMF_VARS_LOCAL" \
   -drive file="$DISKFILE",if=virtio,format=qcow2 \
   -drive file="$ISO",media=cdrom,if=ide,readonly=on \
-  -netdev user,id=n1,hostfwd=tcp::"$SSH_PORT"-:22 \
+  -netdev user,id=n1,hostfwd=tcp::"$SSH_PORT_RESOLVED"-:22 \
   -device virtio-net-pci,netdev=n1 \
   -display none \
   -serial file:"$LOGFILE" \
   -no-reboot \
-  >/dev/null 2>&1 &
+  >"$ERRLOG" 2>&1 &
 
 qpid=$!
 echo "$qpid" > "$PIDFILE"
@@ -194,8 +230,12 @@ done
 if [[ $ok -ne 1 ]]; then
   echo "QEMU boot smoke did not reach expected markers or stable uptime in ${TIMEOUT_SEC}s" >&2
   echo "Serial log: $LOGFILE" >&2
+  if [[ -s "$ERRLOG" ]]; then
+    echo "QEMU stderr tail:" >&2
+    tail -n 20 "$ERRLOG" >&2
+  fi
   exit 1
 fi
 
 echo "QEMU boot smoke passed: $ISO"
-echo "SSH forward available on localhost:$SSH_PORT"
+echo "SSH forward available on localhost:$SSH_PORT_RESOLVED"

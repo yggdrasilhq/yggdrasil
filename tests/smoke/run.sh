@@ -92,7 +92,11 @@ fi
 
 if [[ "$REQUIRE_ARTIFACTS" == "true" ]]; then
   if [[ "$PROFILE" == "server" || "$PROFILE" == "both" ]]; then
-    if ls "$ARTIFACT_DIR"/yggdrasil-*-amd64.hybrid.iso >/dev/null 2>&1; then
+    if [[ -n "$SERVER_ISO" && -f "$SERVER_ISO" ]]; then
+      pass "server iso artifact exists (explicit path)"
+    elif [[ -f "$ARTIFACT_DIR/server-latest.iso" ]]; then
+      pass "server iso artifact exists (server-latest.iso)"
+    elif ls "$ARTIFACT_DIR"/yggdrasil-*-amd64.hybrid.iso >/dev/null 2>&1; then
       pass "server iso artifact exists"
     else
       failf "server iso artifact missing"
@@ -100,7 +104,11 @@ if [[ "$REQUIRE_ARTIFACTS" == "true" ]]; then
   fi
 
   if [[ "$PROFILE" == "kde" || "$PROFILE" == "both" ]]; then
-    if ls "$ARTIFACT_DIR"/yggdrasil-*-kde-amd64.hybrid.iso >/dev/null 2>&1; then
+    if [[ -n "$KDE_ISO" && -f "$KDE_ISO" ]]; then
+      pass "kde iso artifact exists (explicit path)"
+    elif [[ -f "$ARTIFACT_DIR/kde-latest.iso" ]]; then
+      pass "kde iso artifact exists (kde-latest.iso)"
+    elif ls "$ARTIFACT_DIR"/yggdrasil-*-kde-amd64.hybrid.iso >/dev/null 2>&1; then
       pass "kde iso artifact exists"
     else
       failf "kde iso artifact missing"
@@ -111,9 +119,17 @@ fi
 latest_iso() {
   local mode="$1"
   if [[ "$mode" == "server" ]]; then
-    ls -1t "$ARTIFACT_DIR"/yggdrasil-*-amd64.hybrid.iso 2>/dev/null | rg -v -- '-kde-amd64\.hybrid\.iso$' | head -n1
+    if [[ -f "$ARTIFACT_DIR/server-latest.iso" ]]; then
+      echo "$ARTIFACT_DIR/server-latest.iso"
+    else
+      ls -1t "$ARTIFACT_DIR"/yggdrasil-*-amd64.hybrid.iso 2>/dev/null | rg -v -- '-kde-amd64\.hybrid\.iso$' | head -n1
+    fi
   else
-    ls -1t "$ARTIFACT_DIR"/yggdrasil-*-kde-amd64.hybrid.iso 2>/dev/null | head -n1
+    if [[ -f "$ARTIFACT_DIR/kde-latest.iso" ]]; then
+      echo "$ARTIFACT_DIR/kde-latest.iso"
+    else
+      ls -1t "$ARTIFACT_DIR"/yggdrasil-*-kde-amd64.hybrid.iso 2>/dev/null | head -n1
+    fi
   fi
 }
 
