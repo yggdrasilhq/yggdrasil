@@ -15,7 +15,7 @@ Build and release dual-profile Debian live ISOs (`server` and `kde`) with ZFS + 
 ## Build Entrypoints
 
 - `./mkconfig.sh --profile both`
-- `./scripts/mkconfig-tui.sh`
+- `ygg-cli` (external TUI repo)
 - `./tests/smoke/run.sh`
 
 ## Testing Expectations
@@ -30,4 +30,4 @@ Smoke tests must cover, at minimum:
 
 ## Public Docs
 
-Documentation is docs-as-code and published to `yggdrasil.gour.top`.
+Documentation lives in the separate `ygg-docs` repository and is published to your docs host.
