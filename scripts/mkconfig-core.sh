@@ -1152,6 +1152,35 @@ chmod +777 config/hooks/normal/9104-set-lxc-path.hook.chroot
 tee config/hooks/normal/9105-set-lxc-autostart.hook.chroot <<'EOF'
 #!/bin/bash
 
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostart
+#!/bin/bash
+set -euo pipefail
+
+# No container roots/configs yet is a valid first-boot state.
+if [[ ! -d /zroot/lxc ]]; then
+    exit 0
+fi
+
+if ! find /zroot/lxc -mindepth 2 -maxdepth 2 -type f -name config | grep -q .; then
+    exit 0
+fi
+
+exec /usr/bin/lxc-autostart
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostart
+
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostop
+#!/bin/bash
+set -euo pipefail
+
+if [[ ! -d /zroot/lxc ]]; then
+    exit 0
+fi
+
+exec /usr/bin/lxc-autostart -s -a -t 30
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostop
+
 tee <<'EOL' /etc/systemd/system/ygg-lxc-autostart.service
 [Unit]
 Description=Yggdrasil LXC Autostart
@@ -1171,14 +1200,14 @@ Type=oneshot
 RemainAfterExit=yes
 
 # The main command to start all containers with lxc.start.auto = 1
-ExecStart=/usr/bin/lxc-autostart
+ExecStart=/usr/local/sbin/ygg-lxc-autostart
 
 # CAVEAT 2: Define a clean shutdown command.
 # This will be executed on host shutdown/reboot.
 # -s tells it to honor stop order and delays.
 # -a tells it to stop all autostarted containers.
 # -t tells it to wait before hard-stopping.
-ExecStop=/usr/bin/lxc-autostart -s -a -t 30
+ExecStop=/usr/local/sbin/ygg-lxc-autostop
 
 # CAVEAT 3: Disable timeout.
 # Starting many containers can take a long time.
@@ -1529,7 +1558,7 @@ signed_count=0
 sign_module_file() {
     local sign_file="$1"
     local module="$2"
-    local tmpdir tmp_ko
+    local tmpdir tmp_ko target
 
     case "$module" in
         *.ko)
@@ -1540,7 +1569,9 @@ sign_module_file() {
             tmp_ko="${tmpdir}/module.ko"
             zstd -d -q -c "$module" > "$tmp_ko"
             "$sign_file" sha256 "$KEY" "$CERT" "$tmp_ko"
-            zstd -q -19 -c "$tmp_ko" > "$module"
+            target="${module%.zst}"
+            install -m 0644 "$tmp_ko" "$target"
+            rm -f "$module"
             rm -rf "$tmpdir"
             ;;
         *.ko.xz)
@@ -1548,7 +1579,9 @@ sign_module_file() {
             tmp_ko="${tmpdir}/module.ko"
             xz -d -c "$module" > "$tmp_ko"
             "$sign_file" sha256 "$KEY" "$CERT" "$tmp_ko"
-            xz -z -c "$tmp_ko" > "$module"
+            target="${module%.xz}"
+            install -m 0644 "$tmp_ko" "$target"
+            rm -f "$module"
             rm -rf "$tmpdir"
             ;;
         *)
@@ -1569,6 +1602,10 @@ done < <(find /lib/modules -type f \( -path '*/updates/dkms/*.ko' -o -path '*/up
 
 if [[ "$signed_count" -gt 0 ]]; then
     echo "[ygg-mok] Signed ${signed_count} DKMS modules."
+    for kr in /lib/modules/*; do
+        [[ -d "$kr" ]] || continue
+        depmod -a "$(basename "$kr")" || true
+    done
 else
     echo "[ygg-mok] No DKMS modules found to sign."
 fi
