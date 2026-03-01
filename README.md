@@ -24,7 +24,7 @@ Use a local untracked config file.
 
 ```bash
 ./mkconfig.sh --config ./ygg.local.toml --profile both
-./mkconfig.sh --profile server --skip-smoke
+./mkconfig.sh --config ./ygg.local.toml --profile server --skip-smoke
 ```
 
 ## License

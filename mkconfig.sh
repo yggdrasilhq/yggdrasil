@@ -7,7 +7,7 @@ Usage: ./mkconfig.sh [options]
 
 Options:
   --profile server|kde|both   Build target profile(s). Default: both.
-  --config PATH               Optional config file (.toml or env YGG_*).
+  --config PATH               Config file (.toml or env YGG_*). Default: ./ygg.local.toml.
   --skip-smoke                Skip post-build smoke tests (not recommended).
   --dry-run                   Print actions without executing build.
   -h, --help                  Show this help.
@@ -60,8 +60,13 @@ case "$PROFILE" in
     ;;
 esac
 
-if [[ -n "$USER_CONFIG" && ! -f "$USER_CONFIG" ]]; then
+if [[ -z "$USER_CONFIG" ]]; then
+  USER_CONFIG="./ygg.local.toml"
+fi
+
+if [[ ! -f "$USER_CONFIG" ]]; then
   echo "Config file not found: $USER_CONFIG" >&2
+  echo "Create it from ./ygg.example.toml and re-run." >&2
   exit 1
 fi
 

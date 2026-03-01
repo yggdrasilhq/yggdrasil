@@ -67,27 +67,28 @@ check_contains() {
   rg -q -- "$s" "$p" && pass "$p contains: $s" || failf "$p missing: $s"
 }
 
-check_file "scripts/mkconfig-legacy.sh"
+check_file "scripts/mkconfig-core.sh"
 check_file "scripts/build-profile.sh"
-check_file "scripts/mkconfig-tui.sh"
 check_file "scripts/prune-isos.sh"
 check_file "tests/smoke/iso-rootfs-check.sh"
 check_file "tests/smoke/boot-qemu.sh"
+check_file "ygg.example.toml"
 
-check_contains "scripts/mkconfig-legacy.sh" "ygg-import-zpool-at-boot.service"
-check_contains "scripts/mkconfig-legacy.sh" "ygg-lxc-autostart.service"
-check_contains "scripts/mkconfig-legacy.sh" "ygg-infisical-ensure.service"
-check_contains "scripts/mkconfig-legacy.sh" "/etc/lxc/lxc.conf"
-check_contains "scripts/mkconfig-legacy.sh" "/etc/lxc/default.conf"
-check_contains "scripts/mkconfig-legacy.sh" "YGG_SSH_AUTHORIZED_KEYS_FILE"
-check_contains "scripts/mkconfig-legacy.sh" "YGG_STATIC_IP"
-check_contains "scripts/mkconfig-tui.sh" "quick-try"
+check_contains "scripts/mkconfig-core.sh" "ygg-import-zpool-at-boot.service"
+check_contains "scripts/mkconfig-core.sh" "ygg-lxc-autostart.service"
+check_contains "scripts/mkconfig-core.sh" "ygg-infisical-ensure.service"
+check_contains "scripts/mkconfig-core.sh" "/etc/lxc/lxc.conf"
+check_contains "scripts/mkconfig-core.sh" "/etc/lxc/default.conf"
+check_contains "scripts/mkconfig-core.sh" "YGG_SSH_AUTHORIZED_KEYS_FILE"
+check_contains "scripts/mkconfig-core.sh" "YGG_STATIC_IP"
+check_contains "ygg.example.toml" "build_profile = \"both\""
+check_contains "ygg.example.toml" "setup_mode = \"recommended\""
 
 if [[ "$PROFILE" == "kde" || "$PROFILE" == "both" ]]; then
-  check_contains "scripts/mkconfig-legacy.sh" "--with-kde"
+  check_contains "scripts/mkconfig-core.sh" "--with-kde"
 fi
 if [[ "$PROFILE" == "server" || "$PROFILE" == "both" ]]; then
-  check_contains "scripts/mkconfig-legacy.sh" "nvidia-firstboot.service"
+  check_contains "scripts/mkconfig-core.sh" "nvidia-firstboot.service"
 fi
 
 if [[ "$REQUIRE_ARTIFACTS" == "true" ]]; then

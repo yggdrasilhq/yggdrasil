@@ -14,5 +14,5 @@ Do not open public issues for unpatched vulnerabilities.
 
 ## Hardening Notes
 
-- `quick-try` mode is intentionally permissive for evaluation and is not recommended for production.
+- Use `setup_mode = "recommended"` in local config and complete post-boot hardening before deployment.
 - Release docs include post-boot hardening checklist requirements before deployment.

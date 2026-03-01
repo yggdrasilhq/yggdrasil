@@ -4,7 +4,7 @@
 build_profile = "both"            # server | kde | both
 enable_qemu_smoke = true
 
-setup_mode = "recommended"        # recommended | quick-try
+setup_mode = "recommended"        # recommended
 embed_ssh_keys = true
 ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
 

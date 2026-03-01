@@ -92,7 +92,7 @@ YGG_APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
 YGG_APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-$YGG_APT_HTTP_PROXY}"
 YGG_APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
 
-if [[ "$YGG_SETUP_MODE" != "recommended" && "$YGG_SETUP_MODE" != "quick-try" ]]; then
+if [[ "$YGG_SETUP_MODE" != "recommended" ]]; then
   echo "Invalid YGG_SETUP_MODE: $YGG_SETUP_MODE" >&2
   exit 1
 fi
@@ -105,11 +105,6 @@ fi
 if [[ "$YGG_NET_MODE" == "static" && -z "$YGG_STATIC_IP" ]]; then
   echo "YGG_STATIC_IP is required when YGG_NET_MODE=static" >&2
   exit 1
-fi
-
-if [[ "${YGG_SETUP_MODE:-recommended}" == "quick-try" ]]; then
-  echo "WARNING: quick-try mode selected. This mode is for evaluation only."
-  echo "WARNING: configure SSH keys and hardened networking before production use."
 fi
 
 export \
