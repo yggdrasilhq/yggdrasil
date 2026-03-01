@@ -159,7 +159,12 @@ run_optional_checks() {
   fi
 
   if [[ "$WITH_QEMU_BOOT" == "true" ]]; then
-    ./tests/smoke/boot-qemu.sh --iso "$iso" || fail=1
+    if [[ -z "${YGG_QEMU_SSH_PRIVATE_KEY:-}" ]]; then
+      echo "[FAIL] YGG_QEMU_SSH_PRIVATE_KEY is required for QEMU guest SSH smoke" >&2
+      fail=1
+    else
+      ./tests/smoke/boot-qemu.sh --iso "$iso" --mode "$mode" --ssh-private-key "$YGG_QEMU_SSH_PRIVATE_KEY" || fail=1
+    fi
   fi
 }
 
