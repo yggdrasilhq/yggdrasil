@@ -848,6 +848,45 @@ RUNTIME_CACHE_DIR="$PWD/runtime-cache/$BUILD_DAY"
 RUNTIME_CARGO_TARGET_DIR="$PWD/runtime-target/$BUILD_DAY"
 mkdir -p "$RUNTIME_CACHE_DIR" "$RUNTIME_CARGO_TARGET_DIR"
 
+LEGACY_RUNTIME_CACHE_DIR="${YGG_LEGACY_RUNTIME_CACHE_DIR:-}"
+if [[ -z "$LEGACY_RUNTIME_CACHE_DIR" && -d "/root/git/yggdrasil/runtime-cache" ]]; then
+    # Transition helper for local migration from the deprecated private repo.
+    LEGACY_RUNTIME_CACHE_DIR="/root/git/yggdrasil/runtime-cache"
+fi
+
+find_latest_runtime_binary() {
+    local base_dir="$1"
+    local binary_name="$2"
+    if [[ ! -d "$base_dir" ]]; then
+        return 0
+    fi
+    find "$base_dir" -mindepth 2 -maxdepth 2 -type f -name "$binary_name" -printf '%T@ %p\n' 2>/dev/null \
+        | sort -nr | awk 'NR==1 {print $2}'
+}
+
+seed_runtime_from_cache() {
+    local binary_name="$1"
+    local source_path=""
+
+    if [[ -s "$RUNTIME_CACHE_DIR/$binary_name" ]]; then
+        return 0
+    fi
+
+    source_path="$(find_latest_runtime_binary "$PWD/runtime-cache" "$binary_name" || true)"
+    if [[ -z "$source_path" && -n "$LEGACY_RUNTIME_CACHE_DIR" ]]; then
+        source_path="$(find_latest_runtime_binary "$LEGACY_RUNTIME_CACHE_DIR" "$binary_name" || true)"
+    fi
+
+    if [[ -n "$source_path" && -s "$source_path" ]]; then
+        echo "Seeding runtime binary from cache: $binary_name <- $source_path"
+        install -m 0755 "$source_path" "$RUNTIME_CACHE_DIR/$binary_name"
+    fi
+}
+
+seed_runtime_from_cache "codex"
+seed_runtime_from_cache "codex-litellm"
+seed_runtime_from_cache "codex-session-tui"
+
 if [[ -s "$RUNTIME_CACHE_DIR/codex" && -s "$RUNTIME_CACHE_DIR/codex-litellm" && -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
     echo "Using cached runtime binaries for day $BUILD_DAY."
 else
@@ -856,40 +895,58 @@ else
     CODEX_LITELLM_SRC_DIR="$RUNTIME_BUILD_ROOT/codex-litellm"
     CODEX_SESSION_TUI_SRC_DIR="$RUNTIME_BUILD_ROOT/codex-session-tui"
 
-    echo "Building release runtime: openai/codex (codex-rs/codex)..."
-    "$GIT_BIN_PATH" clone --depth 1 https://github.com/openai/codex "$CODEx_SRC_DIR"
-    (
-        cd "$CODEx_SRC_DIR/codex-rs"
-        CARGO_TARGET_DIR="$RUNTIME_CARGO_TARGET_DIR/codex-rs" \
-        CARGO_PROFILE_RELEASE_LTO=off \
-        CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-        "$CARGO_BIN_PATH" build --release --locked -p codex-cli --bin codex
-    )
-    install -m 0755 "$RUNTIME_CARGO_TARGET_DIR/codex-rs/release/codex" "$RUNTIME_CACHE_DIR/codex"
+    if [[ ! -s "$RUNTIME_CACHE_DIR/codex" ]]; then
+        echo "Building release runtime: openai/codex (codex-rs/codex)..."
+        "$GIT_BIN_PATH" clone --depth 1 https://github.com/openai/codex "$CODEx_SRC_DIR"
+        (
+            cd "$CODEx_SRC_DIR/codex-rs"
+            CARGO_TARGET_DIR="$RUNTIME_CARGO_TARGET_DIR/codex-rs" \
+            CARGO_PROFILE_RELEASE_LTO=off \
+            CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+            "$CARGO_BIN_PATH" build --release --locked -p codex-cli --bin codex
+        )
+        install -m 0755 "$RUNTIME_CARGO_TARGET_DIR/codex-rs/release/codex" "$RUNTIME_CACHE_DIR/codex"
+    fi
 
-    echo "Building release runtime: avikalpa/codex-litellm..."
-    "$GIT_BIN_PATH" clone --depth 1 https://github.com/avikalpa/codex-litellm "$CODEX_LITELLM_SRC_DIR"
-    (
-        cd "$CODEX_LITELLM_SRC_DIR"
-        CARGO_PROFILE_RELEASE_LTO=off \
-        CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-        TARGET=x86_64-unknown-linux-gnu SUFFIX=linux-x64 ./build.sh
-    )
-    install -m 0755 "$CODEX_LITELLM_SRC_DIR/dist/linux-x64/codex-litellm" "$RUNTIME_CACHE_DIR/codex-litellm"
+    if [[ ! -s "$RUNTIME_CACHE_DIR/codex-litellm" ]]; then
+        echo "Building release runtime: avikalpa/codex-litellm..."
+        "$GIT_BIN_PATH" clone --depth 1 https://github.com/avikalpa/codex-litellm "$CODEX_LITELLM_SRC_DIR"
+        if ! (
+            cd "$CODEX_LITELLM_SRC_DIR"
+            CARGO_PROFILE_RELEASE_LTO=off \
+            CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+            TARGET=x86_64-unknown-linux-gnu SUFFIX=linux-x64 ./build.sh
+        ); then
+            echo "WARN: codex-litellm build failed; retrying from cache fallback."
+            seed_runtime_from_cache "codex-litellm"
+        fi
+        if [[ -s "$CODEX_LITELLM_SRC_DIR/dist/linux-x64/codex-litellm" ]]; then
+            install -m 0755 "$CODEX_LITELLM_SRC_DIR/dist/linux-x64/codex-litellm" "$RUNTIME_CACHE_DIR/codex-litellm"
+        fi
+    fi
 
-    echo "Building release runtime: avikalpa/codex-session-tui..."
-    "$GIT_BIN_PATH" clone --depth 1 https://github.com/avikalpa/codex-session-tui "$CODEX_SESSION_TUI_SRC_DIR"
-    (
-        cd "$CODEX_SESSION_TUI_SRC_DIR"
-        CARGO_TARGET_DIR="$RUNTIME_CARGO_TARGET_DIR/codex-session-tui" \
-        CARGO_PROFILE_RELEASE_LTO=off \
-        CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-        "$CARGO_BIN_PATH" build --release --locked --bin codex-session-tui
-    )
-    install -m 0755 "$RUNTIME_CARGO_TARGET_DIR/codex-session-tui/release/codex-session-tui" "$RUNTIME_CACHE_DIR/codex-session-tui"
+    if [[ ! -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
+        echo "Building release runtime: avikalpa/codex-session-tui..."
+        "$GIT_BIN_PATH" clone --depth 1 https://github.com/avikalpa/codex-session-tui "$CODEX_SESSION_TUI_SRC_DIR"
+        (
+            cd "$CODEX_SESSION_TUI_SRC_DIR"
+            CARGO_TARGET_DIR="$RUNTIME_CARGO_TARGET_DIR/codex-session-tui" \
+            CARGO_PROFILE_RELEASE_LTO=off \
+            CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+            "$CARGO_BIN_PATH" build --release --locked --bin codex-session-tui
+        )
+        install -m 0755 "$RUNTIME_CARGO_TARGET_DIR/codex-session-tui/release/codex-session-tui" "$RUNTIME_CACHE_DIR/codex-session-tui"
+    fi
 
     rm -rf "$RUNTIME_BUILD_ROOT"
 fi
+
+for runtime_bin in codex codex-litellm codex-session-tui; do
+    if [[ ! -s "$RUNTIME_CACHE_DIR/$runtime_bin" ]]; then
+        echo "ERROR: required runtime binary is unavailable: $runtime_bin" >&2
+        exit 1
+    fi
+done
 
 install -m 0755 "$RUNTIME_CACHE_DIR/codex" "config/includes.chroot/usr/local/bin/codex"
 install -m 0755 "$RUNTIME_CACHE_DIR/codex-litellm" "config/includes.chroot/usr/local/bin/codex-litellm"
