@@ -5,6 +5,7 @@ build_profile = "both"
 enable_qemu_smoke = true
 
 setup_mode = "recommended"
+apt_proxy_mode = "explicit"
 embed_ssh_keys = true
 ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
 

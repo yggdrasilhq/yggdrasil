@@ -5,6 +5,7 @@ build_profile = "both"            # server | kde | both
 enable_qemu_smoke = true
 
 setup_mode = "recommended"        # recommended
+apt_proxy_mode = "off"            # off | explicit | host
 embed_ssh_keys = true
 ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
 
