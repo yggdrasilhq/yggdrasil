@@ -199,11 +199,12 @@ extract_proxy_value() {
 APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
 APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-}"
 APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
+APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
 
-if [[ -z "$APT_HTTP_PROXY" && -f "$APT_PROXY_CONF" ]]; then
+if [[ "$APT_PROXY_MODE" == "host" && -z "$APT_HTTP_PROXY" && -f "$APT_PROXY_CONF" ]]; then
     APT_HTTP_PROXY=$(extract_proxy_value "Acquire::http::Proxy" "$APT_PROXY_CONF" || true)
 fi
-if [[ -z "$APT_HTTPS_PROXY" && -f "$APT_PROXY_CONF" ]]; then
+if [[ "$APT_PROXY_MODE" == "host" && -z "$APT_HTTPS_PROXY" && -f "$APT_PROXY_CONF" ]]; then
     APT_HTTPS_PROXY=$(extract_proxy_value "Acquire::https::Proxy" "$APT_PROXY_CONF" || true)
 fi
 if [[ -z "$APT_HTTPS_PROXY" ]]; then
