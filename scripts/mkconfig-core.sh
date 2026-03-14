@@ -106,13 +106,23 @@ rm -fr config/
 set -euo pipefail
 
 # Function framework for error management
+HOST_APT_PROXY_BACKUP=""
+
+restore_host_apt_proxy() {
+    if [[ -n "${HOST_APT_PROXY_BACKUP:-}" && -f "$HOST_APT_PROXY_BACKUP" ]]; then
+        mv -f "$HOST_APT_PROXY_BACKUP" "$APT_PROXY_CONF"
+    fi
+}
+
 handle_error() {
     local exit_code=$?
+    restore_host_apt_proxy
     echo "Error occurred in build process (exit code: $exit_code)"
     # Cleanup logic here
     exit $exit_code
 }
 trap handle_error ERR
+trap restore_host_apt_proxy EXIT
 
 mkdir -p "$MOK_WORKDIR"
 if [[ ! -f "$MOK_KEY" || ! -f "$MOK_CERT_PEM" || ! -f "$MOK_CERT_DER" ]]; then
@@ -200,6 +210,11 @@ APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
 APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-}"
 APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
 APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
+
+if [[ "$APT_PROXY_MODE" != "host" && -f "$APT_PROXY_CONF" ]]; then
+    HOST_APT_PROXY_BACKUP="$(mktemp /tmp/ygg-host-apt-proxy-XXXXXX.conf)"
+    mv "$APT_PROXY_CONF" "$HOST_APT_PROXY_BACKUP"
+fi
 
 if [[ "$APT_PROXY_MODE" == "host" && -z "$APT_HTTP_PROXY" && -f "$APT_PROXY_CONF" ]]; then
     APT_HTTP_PROXY=$(extract_proxy_value "Acquire::http::Proxy" "$APT_PROXY_CONF" || true)
