@@ -11,6 +11,7 @@ USAGE
 PROFILE=""
 USER_CONFIG=""
 USER_CONFIG_ENV=""
+TEMP_CONFIG_ENV=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,8 +51,8 @@ if ! command -v lb >/dev/null 2>&1; then
 fi
 
 cleanup() {
-  if [[ -n "${USER_CONFIG_ENV:-}" && "$USER_CONFIG_ENV" == /tmp/ygg-config-*.env ]]; then
-    rm -f "$USER_CONFIG_ENV"
+  if [[ -n "${TEMP_CONFIG_ENV:-}" && -f "$TEMP_CONFIG_ENV" ]]; then
+    rm -f "$TEMP_CONFIG_ENV"
   fi
 }
 trap cleanup EXIT
@@ -59,8 +60,9 @@ trap cleanup EXIT
 if [[ -n "$USER_CONFIG" ]]; then
   USER_CONFIG_ENV="$USER_CONFIG"
   if [[ "$USER_CONFIG" == *.toml ]]; then
-    USER_CONFIG_ENV="$(mktemp /tmp/ygg-config-XXXXXX.env)"
-    ./scripts/toml-to-env.sh "$USER_CONFIG" > "$USER_CONFIG_ENV"
+    TEMP_CONFIG_ENV="$(mktemp /tmp/ygg-config-XXXXXX.env)"
+    ./scripts/toml-to-env.sh "$USER_CONFIG" > "$TEMP_CONFIG_ENV"
+    USER_CONFIG_ENV="$TEMP_CONFIG_ENV"
   fi
   # shellcheck disable=SC1090
   source "$USER_CONFIG_ENV"
