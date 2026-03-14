@@ -1,0 +1,3 @@
+// Example only. Set proxies through ygg.local.toml or mkconfig flags.
+// Acquire::http::Proxy "http://apt-proxy.local:3142";
+// Acquire::https::Proxy "http://apt-proxy.local:3142";
