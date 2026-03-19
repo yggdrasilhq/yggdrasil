@@ -3,6 +3,8 @@
 
 build_profile = "both"            # server | kde | both
 enable_qemu_smoke = true
+with_nvidia = false
+with_lts = false
 
 setup_mode = "recommended"        # recommended
 apt_proxy_mode = "off"            # off | explicit | host

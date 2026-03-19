@@ -3,6 +3,8 @@
 
 build_profile = "both"
 enable_qemu_smoke = true
+with_nvidia = true
+with_lts = false
 
 setup_mode = "recommended"
 apt_proxy_mode = "explicit"

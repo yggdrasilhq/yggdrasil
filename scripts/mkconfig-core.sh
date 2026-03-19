@@ -13,6 +13,7 @@
 #   --with-xen        Include Xen hypervisor (default: off)
 #   --with-kvm        Include KVM support (default: on)
 #   --without-nvidia  Exclude NVIDIA support (default: on)
+#   --with-lts        Use the compatibility-pinned kernel path (default: off)
 #   --with-kde        KDE laptop profile (broad firmware, NVIDIA disabled, hostname yggdrasil)
 #
 # Boot Process Notes:
@@ -34,6 +35,7 @@
 WITH_XEN=false
 WITH_KVM=false
 WITH_NVIDIA=true
+WITH_LTS=false
 WITH_KDE=false
 KDE_PROFILE=false
 
@@ -49,6 +51,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --without-nvidia)
             WITH_NVIDIA=false
+            shift
+            ;;
+        --with-lts)
+            WITH_LTS=true
             shift
             ;;
         --with-kde)
@@ -89,6 +95,7 @@ echo "Configuration Matrix:"
 echo "  → Xen Support: $WITH_XEN"
 echo "  → KVM Support: $WITH_KVM"
 echo "  → NVIDIA Integration: $WITH_NVIDIA"
+echo "  → LTS Kernel Path: $WITH_LTS"
 echo "  → KDE Integration: $WITH_KDE"
 echo "  → KDE Profile: $KDE_PROFILE"
 
@@ -680,7 +687,7 @@ cp "$ssh_host_keys_dir/ssh_host_"* "$target_ssh_config_dir/"
 # Copy the hostid to the correct system location for ZFS
 cp "$ssh_host_keys_dir/hostid" "config/includes.chroot/etc/hostid"
 
-if [[ "$WITH_NVIDIA" == "true" ]]; then
+if [[ "$WITH_LTS" == "true" ]]; then
     # Ensure Debian trixie repo is available for kernel/headers while the rest stays on unstable.
     mkdir -p config/archives
     cat <<'EOF' > config/archives/debian-trixie.list.chroot
@@ -709,7 +716,11 @@ EOF
     cp config/archives/kernel-trixie.pref "config/includes.chroot/etc/apt/preferences.d/kernel-trixie.pref"
     cp config/archives/kernel-trixie.pref "config/includes.chroot_before_packages/etc/apt/preferences.d/kernel-trixie.pref"
 else
-    echo "NVIDIA disabled: using default unstable (sid) kernel packages."
+    echo "Using default unstable (sid) kernel packages."
+fi
+
+if [[ "$WITH_NVIDIA" == "true" && "$WITH_LTS" != "true" ]]; then
+    echo "WARN: NVIDIA enabled without --with-lts; sid kernel ABI may break NVIDIA or DKMS builds."
 fi
 
 # Pre-apt hook to patch zfs-dkms so it allows experimental kernels
@@ -1705,6 +1716,7 @@ echo "Configuration:"
 echo "  - Xen support: $WITH_XEN"
 echo "  - KVM support: $WITH_KVM"
 echo "  - NVIDIA support: $WITH_NVIDIA"
+echo "  - LTS kernel path: $WITH_LTS"
 echo "  - KDE support: $WITH_KDE"
 
 DEFAULT_APT_OPTIONS="${APT_OPTIONS:-"--yes -o Acquire::Retries=5"}"
