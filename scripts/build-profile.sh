@@ -94,6 +94,7 @@ YGG_APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
 YGG_APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
 YGG_APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-$YGG_APT_HTTP_PROXY}"
 YGG_APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
+YGG_WITH_NVIDIA="$(bool_or_default "${YGG_WITH_NVIDIA:-${YGG_ENABLE_NVIDIA:-}}" "true")"
 
 if [[ "$YGG_SETUP_MODE" != "recommended" ]]; then
   echo "Invalid YGG_SETUP_MODE: $YGG_SETUP_MODE" >&2
@@ -131,6 +132,9 @@ export \
 cmd=("./scripts/mkconfig-core.sh")
 if [[ "$PROFILE" == "kde" ]]; then
   cmd+=("--with-kde")
+fi
+if [[ "$YGG_WITH_NVIDIA" != "true" ]]; then
+  cmd+=("--without-nvidia")
 fi
 
 echo "Starting build pipeline for profile: $PROFILE"
