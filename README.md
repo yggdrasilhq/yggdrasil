@@ -185,6 +185,12 @@ That sequence is deliberate.
 The first success should be legible.
 Speed comes after trust.
 
+Kernel policy:
+
+- `with_lts = false` uses Debian unstable's current kernel line
+- `with_lts = true` switches to the compatibility-pinned kernel path
+- that compatibility path is useful when a driver or DKMS stack needs a steadier ABI
+
 ## Examples
 
 ### 1. First server with defaults
@@ -203,6 +209,7 @@ yggcli --workspace ~/gh \
   --set yggdrasil.hostname=mewmew \
   --set yggdrasil.net_mode=dhcp \
   --set yggdrasil.static_dns="192.168.1.1 9.11.11.11" \
+  --set yggdrasil.with_lts=false \
   --set yggdrasil.with_nvidia=false \
   --build-iso --profile server
 ```
