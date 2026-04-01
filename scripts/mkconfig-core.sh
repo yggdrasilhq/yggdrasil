@@ -217,6 +217,8 @@ APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
 APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-}"
 APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
 APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
+INFISICAL_BOOT_MODE="${YGG_INFISICAL_BOOT_MODE:-disabled}"
+INFISICAL_CONTAINER_NAME="${YGG_INFISICAL_CONTAINER_NAME:-infisical}"
 
 if [[ "$APT_PROXY_MODE" != "host" && -f "$APT_PROXY_CONF" ]]; then
     HOST_APT_PROXY_BACKUP="$(mktemp /tmp/ygg-host-apt-proxy-XXXXXX.conf)"
@@ -435,6 +437,8 @@ if [[ "$WITH_KVM" == "true" ]]; then
    cat <<'EOF' >> config/package-lists/ygg.list.chroot
 # KVM packages for Android Studio development
 qemu-system-x86
+qemu-utils
+ovmf
 bridge-utils
 cpu-checker
 libvirt-daemon-system
@@ -1236,9 +1240,9 @@ ExecStart=/usr/local/sbin/ygg-lxc-autostart
 # -t tells it to wait before hard-stopping.
 ExecStop=/usr/local/sbin/ygg-lxc-autostop
 
-# CAVEAT 3: Disable timeout.
-# Starting many containers can take a long time.
-TimeoutSec=0
+# CAVEAT 3: Keep a generous but finite timeout so broken autostarts do not
+# stall boot forever.
+TimeoutSec=10min
 
 [Install]
 WantedBy=multi-user.target
@@ -1253,9 +1257,36 @@ chmod +777 config/hooks/normal/9105-set-lxc-autostart.hook.chroot
 tee config/hooks/normal/9107-ensure-infisical.hook.chroot <<'EOF'
 #!/bin/bash
 
+mkdir -p /etc/ygg
+
+tee <<'EOL' /etc/default/ygg-infisical-ensure
+# Optional site-local boot tuning for ygg-infisical-ensure.service.
+YGG_INFISICAL_BOOT_MODE=__YGG_INFISICAL_BOOT_MODE__
+YGG_INFISICAL_CONTAINER=__YGG_INFISICAL_CONTAINER__
+YGG_INFISICAL_WAIT_TRIES=30
+YGG_INFISICAL_WAIT_DELAY_SEC=2
+# YGG_DEPENDENT_CONTAINERS_FILE=/etc/ygg/infisical-dependent-containers
+# YGG_RUN_POST_BOOT_HOOK=0
+# YGG_POST_BOOT_HOOK=/usr/local/sbin/ygg-infisical-post-boot
+EOL
+
 tee <<'EOL' /usr/local/sbin/ygg-ensure-infisical
 #!/bin/bash
 set -euo pipefail
+
+DEFAULTS_FILE="/etc/default/ygg-infisical-ensure"
+if [[ -r "$DEFAULTS_FILE" ]]; then
+    # shellcheck disable=SC1091
+    . "$DEFAULTS_FILE"
+fi
+
+INFISICAL_BOOT_MODE="${YGG_INFISICAL_BOOT_MODE:-disabled}"
+INFISICAL_CONTAINER="${YGG_INFISICAL_CONTAINER:-infisical}"
+WAIT_TRIES="${YGG_INFISICAL_WAIT_TRIES:-30}"
+WAIT_DELAY="${YGG_INFISICAL_WAIT_DELAY_SEC:-2}"
+DEPENDENT_CONTAINERS_FILE="${YGG_DEPENDENT_CONTAINERS_FILE:-/etc/ygg/infisical-dependent-containers}"
+RUN_POST_BOOT_HOOK="${YGG_RUN_POST_BOOT_HOOK:-0}"
+POST_BOOT_HOOK="${YGG_POST_BOOT_HOOK:-}"
 
 log() {
     echo "[ygg-infisical] $*"
@@ -1286,44 +1317,81 @@ ensure_running() {
 }
 
 wait_for_infisical() {
-    local tries=30
-    local delay=2
     local i
-    for i in $(seq 1 "$tries"); do
-        if lxc-attach -n infisical -- infisical-ctl status >/dev/null 2>&1; then
-            log "infisical reports ready"
+    for i in $(seq 1 "$WAIT_TRIES"); do
+        if lxc-attach -n "$INFISICAL_CONTAINER" -- infisical-ctl status >/dev/null 2>&1; then
+            log "$INFISICAL_CONTAINER reports ready"
             return 0
         fi
-        sleep "$delay"
+        sleep "$WAIT_DELAY"
     done
-    log "infisical not ready after $((tries * delay))s; continuing"
+    log "$INFISICAL_CONTAINER not ready after $((WAIT_TRIES * WAIT_DELAY))s; continuing"
     return 1
 }
 
+start_dependent_containers() {
+    local raw name
+
+    if [[ ! -r "$DEPENDENT_CONTAINERS_FILE" ]]; then
+        return 0
+    fi
+
+    while IFS= read -r raw || [[ -n "$raw" ]]; do
+        name="$(printf '%s' "$raw" | sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
+        if [[ -z "$name" ]]; then
+            continue
+        fi
+        ensure_running "$name" || true
+    done < "$DEPENDENT_CONTAINERS_FILE"
+}
+
+run_post_boot_hook() {
+    if [[ "$RUN_POST_BOOT_HOOK" != "1" ]]; then
+        return 0
+    fi
+
+    if [[ -z "$POST_BOOT_HOOK" ]]; then
+        log "post-boot hook requested but YGG_POST_BOOT_HOOK is empty; skipping"
+        return 0
+    fi
+
+    if [[ ! -x "$POST_BOOT_HOOK" ]]; then
+        log "post-boot hook $POST_BOOT_HOOK is not executable; skipping"
+        return 0
+    fi
+
+    log "running site-local post-boot hook $POST_BOOT_HOOK"
+    "$POST_BOOT_HOOK" || log "post-boot hook failed"
+}
+
 main() {
-    if ! container_exists "infisical"; then
-        log "infisical container missing; nothing to do"
+    case "$INFISICAL_BOOT_MODE" in
+        disabled|off|none)
+            log "infisical boot mode disabled; skipping"
+            exit 0
+            ;;
+        container)
+            ;;
+        *)
+            log "unsupported infisical boot mode: $INFISICAL_BOOT_MODE"
+            exit 0
+            ;;
+    esac
+
+    if ! container_exists "$INFISICAL_CONTAINER"; then
+        log "$INFISICAL_CONTAINER container missing; nothing to do"
         exit 0
     fi
 
-    ensure_running "infisical" || true
+    ensure_running "$INFISICAL_CONTAINER" || true
 
-    if ! lxc-attach -n infisical -- infisical-ctl start >/dev/null 2>&1; then
+    if ! lxc-attach -n "$INFISICAL_CONTAINER" -- infisical-ctl start >/dev/null 2>&1; then
         log "infisical-ctl start failed (may already be running)"
     fi
 
     wait_for_infisical || true
-
-    if container_exists "owncloud"; then
-        ensure_running "owncloud" || true
-        if lxc-attach -n owncloud -- test -e /root/ygg_ocis_full/update-stack.sh >/dev/null 2>&1; then
-            log "running owncloud update-stack"
-            lxc-attach -n owncloud -- /bin/sh -lc "/root/ygg_ocis_full/update-stack.sh" || \
-                log "owncloud update-stack failed"
-        else
-            log "owncloud update-stack not found; skipping"
-        fi
-    fi
+    start_dependent_containers
+    run_post_boot_hook
 }
 
 main "$@"
@@ -1339,8 +1407,9 @@ Requires=ygg-lxc-autostart.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/etc/default/ygg-infisical-ensure
 ExecStart=/usr/local/sbin/ygg-ensure-infisical
-TimeoutSec=0
+TimeoutSec=2min
 
 [Install]
 WantedBy=multi-user.target
@@ -1349,6 +1418,10 @@ EOL
 systemctl daemon-reload
 systemctl enable ygg-infisical-ensure.service
 EOF
+sed -i \
+    -e "s|__YGG_INFISICAL_BOOT_MODE__|${INFISICAL_BOOT_MODE}|g" \
+    -e "s|__YGG_INFISICAL_CONTAINER__|${INFISICAL_CONTAINER_NAME}|g" \
+    config/hooks/normal/9107-ensure-infisical.hook.chroot
 chmod +777 config/hooks/normal/9107-ensure-infisical.hook.chroot
 
 # --- Setup for Unprivileged LXC ---
