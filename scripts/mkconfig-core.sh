@@ -947,47 +947,13 @@ seed_runtime_from_cache() {
     fi
 }
 
-seed_runtime_from_cache "codex"
-seed_runtime_from_cache "codex-litellm"
 seed_runtime_from_cache "codex-session-tui"
 
-if [[ -s "$RUNTIME_CACHE_DIR/codex" && -s "$RUNTIME_CACHE_DIR/codex-litellm" && -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
+if [[ -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
     echo "Using cached runtime binaries for day $BUILD_DAY."
 else
     RUNTIME_BUILD_ROOT=$(mktemp -d)
-    CODEx_SRC_DIR="$RUNTIME_BUILD_ROOT/codex"
-    CODEX_LITELLM_SRC_DIR="$RUNTIME_BUILD_ROOT/codex-litellm"
     CODEX_SESSION_TUI_SRC_DIR="$RUNTIME_BUILD_ROOT/codex-session-tui"
-
-    if [[ ! -s "$RUNTIME_CACHE_DIR/codex" ]]; then
-        echo "Building release runtime: openai/codex (codex-rs/codex)..."
-        "$GIT_BIN_PATH" clone --depth 1 https://github.com/openai/codex "$CODEx_SRC_DIR"
-        (
-            cd "$CODEx_SRC_DIR/codex-rs"
-            CARGO_TARGET_DIR="$RUNTIME_CARGO_TARGET_DIR/codex-rs" \
-            CARGO_PROFILE_RELEASE_LTO=off \
-            CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-            "$CARGO_BIN_PATH" build --release --locked -p codex-cli --bin codex
-        )
-        install -m 0755 "$RUNTIME_CARGO_TARGET_DIR/codex-rs/release/codex" "$RUNTIME_CACHE_DIR/codex"
-    fi
-
-    if [[ ! -s "$RUNTIME_CACHE_DIR/codex-litellm" ]]; then
-        echo "Building release runtime: avikalpa/codex-litellm..."
-        "$GIT_BIN_PATH" clone --depth 1 https://github.com/avikalpa/codex-litellm "$CODEX_LITELLM_SRC_DIR"
-        if ! (
-            cd "$CODEX_LITELLM_SRC_DIR"
-            CARGO_PROFILE_RELEASE_LTO=off \
-            CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-            TARGET=x86_64-unknown-linux-gnu SUFFIX=linux-x64 ./build.sh
-        ); then
-            echo "WARN: codex-litellm build failed; retrying from cache fallback."
-            seed_runtime_from_cache "codex-litellm"
-        fi
-        if [[ -s "$CODEX_LITELLM_SRC_DIR/dist/linux-x64/codex-litellm" ]]; then
-            install -m 0755 "$CODEX_LITELLM_SRC_DIR/dist/linux-x64/codex-litellm" "$RUNTIME_CACHE_DIR/codex-litellm"
-        fi
-    fi
 
     if [[ ! -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
         echo "Building release runtime: avikalpa/codex-session-tui..."
@@ -1005,15 +971,13 @@ else
     rm -rf "$RUNTIME_BUILD_ROOT"
 fi
 
-for runtime_bin in codex codex-litellm codex-session-tui; do
+for runtime_bin in codex-session-tui; do
     if [[ ! -s "$RUNTIME_CACHE_DIR/$runtime_bin" ]]; then
         echo "ERROR: required runtime binary is unavailable: $runtime_bin" >&2
         exit 1
     fi
 done
 
-install -m 0755 "$RUNTIME_CACHE_DIR/codex" "config/includes.chroot/usr/local/bin/codex"
-install -m 0755 "$RUNTIME_CACHE_DIR/codex-litellm" "config/includes.chroot/usr/local/bin/codex-litellm"
 install -m 0755 "$RUNTIME_CACHE_DIR/codex-session-tui" "config/includes.chroot/usr/local/bin/codex-session-tui"
 
 # --- Network Configuration ---
