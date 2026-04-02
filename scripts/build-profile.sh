@@ -168,7 +168,43 @@ if [[ "$YGG_WITH_LTS" == "true" ]]; then
 fi
 
 echo "Starting build pipeline for profile: $PROFILE"
-"${cmd[@]}"
+
+retry_cleanup_hash_mismatch() {
+  echo "Transient Debian archive mismatch detected, clearing live-build caches before retry..."
+  rm -rf     ./cache/indices.bootstrap     ./cache/packages.bootstrap     ./cache/packages.chroot     ./cache/bootstrap/var/lib/apt/lists     ./chroot/var/lib/apt/lists     ./chroot/var/cache/apt/archives 2>/dev/null || true
+}
+
+run_with_hash_mismatch_retry() {
+  local -a build_cmd=("$@")
+  local attempt max_attempts rc
+  local tmp_log
+
+  max_attempts=3
+  for attempt in $(seq 1 "$max_attempts"); do
+    tmp_log="$(mktemp /tmp/ygg-build-attempt-XXXXXX.log)"
+    set +e
+    "${build_cmd[@]}" 2>&1 | tee "$tmp_log"
+    rc=${PIPESTATUS[0]}
+    set -e
+
+    if [[ "$rc" -eq 0 ]]; then
+      rm -f "$tmp_log"
+      return 0
+    fi
+
+    if grep -q 'Hash Sum mismatch' "$tmp_log" && [[ "$attempt" -lt "$max_attempts" ]]; then
+      retry_cleanup_hash_mismatch
+      rm -f "$tmp_log"
+      sleep 15
+      continue
+    fi
+
+    rm -f "$tmp_log"
+    return "$rc"
+  done
+}
+
+run_with_hash_mismatch_retry "${cmd[@]}"
 
 ./scripts/prune-isos.sh
 
