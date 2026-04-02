@@ -347,8 +347,6 @@ need_cmd lsmod
 need_cmd lxc-ls
 need_cmd lxc-start
 need_cmd lxc-attach
-need_cmd codex
-need_cmd codex-litellm
 need_cmd codex-session-tui
 
 require_service_healthy ygg-import-zpool-at-boot.service
