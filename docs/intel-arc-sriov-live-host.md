@@ -74,6 +74,28 @@ The service:
 3. creates the requested VF count
 4. binds VFs to `vfio-pci` if configured
 
+## BIOS prerequisites
+
+Before you blame Linux, verify the platform is configured to expose the PF correctly:
+
+- `Above 4G Decoding = Enabled`
+- `Re-Size BAR Support = Enabled`
+- `SR-IOV Support = Enabled`
+- `IOMMU = Enabled`
+
+If the GPU still comes up without `sriov_numvfs`, the image will now log the live PCIe state it sees, including:
+
+- `LnkSta`
+- `BAR 2`
+- `Physical Resizable BAR`
+- `Single Root I/O Virtualization`
+
+That is the fastest way to separate:
+
+- Linux/service bugs
+- BIOS prerequisites not actually taking effect
+- a GPU/slot/platform path that still is not exposing SR-IOV
+
 ## Validation after boot
 
 Check the PF and VF state:
@@ -91,6 +113,24 @@ cat /sys/bus/pci/devices/0000:83:00.0/sriov_numvfs
 ls -l /sys/bus/pci/devices/0000:83:00.0/virtfn*
 ```
 
+If the service fails with:
+
+```text
+PF 0000:83:00.0 does not expose sriov_numvfs
+```
+
+then check:
+
+```bash
+lspci -s 83:00.0 -vv | egrep 'LnkSta|BAR 2|Resizable BAR|SR-IOV'
+```
+
+Interpretation:
+
+- `Physical Resizable BAR` active is necessary but not sufficient
+- missing `SR-IOV` capability means Linux cannot create VFs for that PF
+- a degraded PCIe link such as `Width x1` is a hardware-path smell and should be fixed before deeper guest work
+
 If binding to `vfio-pci` is enabled, verify:
 
 ```bash
@@ -105,3 +145,9 @@ That is a host prerequisite only.
 
 Guest support is a separate question.
 For macOS guests especially, you should treat the host SR-IOV build as the first milestone, not the final graphics guarantee.
+
+Also note:
+
+- Intel does not officially support `Arc A-Series` SR-IOV
+- the `i915-sriov-dkms` route is an out-of-tree community path
+- success on one board/slot/firmware combination does not imply success on another
