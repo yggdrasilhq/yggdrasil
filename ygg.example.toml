@@ -12,6 +12,7 @@ infisical_boot_mode = "disabled"  # disabled | container
 infisical_container_name = "infisical"
 embed_ssh_keys = true
 ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
+ssh_host_keys_dir = ""
 
 hostname = "yggdrasil"
 net_mode = "dhcp"                 # dhcp | static
