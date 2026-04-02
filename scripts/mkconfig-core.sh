@@ -408,6 +408,7 @@ iputils-ping
 # Essential utilities
 coreutils
 bash
+cpio
 gpg
 gpg-agent
 gpm
