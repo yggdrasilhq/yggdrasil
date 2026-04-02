@@ -1,9 +1,1 @@
-#!/bin/sh
-
-set -e
-
-# Remove GNOME icon cache.
-#
-# This saves some space.
-
-rm -f /usr/share/icons/*/icon-theme.cache
+/usr/share/live/build/hooks/normal/9000-remove-gnome-icon-cache.hook.chroot

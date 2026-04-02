@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# --- Step 1: Create the group if it doesn't exist ---
+if ! getent group datashare >/dev/null; then
+  groupadd --gid 3000 --system datashare
+  echo "Group 'datashare' created."
+else
+  echo "Group 'datashare' already exists."
+fi
+
+# --- Step 2: Create the user with adduser ---
+# --disabled-password -> Guarantees no password prompt.
+# --disabled-login    -> Sets shell to /usr/sbin/nologin, a good security practice.
+if ! getent passwd datauser >/dev/null; then
+  adduser     --uid 3001     --system     --no-create-home     --ingroup datashare     --disabled-password     --disabled-login     datauser
+  echo "User 'datauser' created."
+else
+  echo "User 'datauser' already exists."
+fi
+

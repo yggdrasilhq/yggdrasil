@@ -1,6 +1,1 @@
-#!/bin/sh
-
-set -e
-
-# Remove the cache
-rm -rf /var/cache/man/*
+/usr/share/live/build/hooks/normal/9020-remove-man-cache.hook.chroot

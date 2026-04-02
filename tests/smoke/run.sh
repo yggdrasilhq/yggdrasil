@@ -66,6 +66,15 @@ check_contains() {
   local s="$2"
   rg -q -- "$s" "$p" && pass "$p contains: $s" || failf "$p missing: $s"
 }
+check_not_contains() {
+  local p="$1"
+  local s="$2"
+  if rg -q -- "$s" "$p"; then
+    failf "$p unexpectedly contains: $s"
+  else
+    pass "$p does not contain: $s"
+  fi
+}
 
 check_file "scripts/mkconfig-core.sh"
 check_file "scripts/build-profile.sh"
@@ -81,6 +90,15 @@ check_contains "scripts/mkconfig-core.sh" "/etc/lxc/lxc.conf"
 check_contains "scripts/mkconfig-core.sh" "/etc/lxc/default.conf"
 check_contains "scripts/mkconfig-core.sh" "YGG_SSH_AUTHORIZED_KEYS_FILE"
 check_contains "scripts/mkconfig-core.sh" "YGG_STATIC_IP"
+check_contains "scripts/mkconfig-core.sh" "/etc/default/ygg-infisical-ensure"
+check_contains "scripts/mkconfig-core.sh" "YGG_INFISICAL_BOOT_MODE"
+check_contains "scripts/mkconfig-core.sh" "YGG_POST_BOOT_HOOK"
+check_contains "config/hooks/normal/9107-ensure-infisical.hook.chroot" "YGG_POST_BOOT_HOOK"
+check_contains "ygg.example.toml" "infisical_boot_mode = \"disabled\""
+check_not_contains "scripts/mkconfig-core.sh" "update-stack.sh"
+check_not_contains "scripts/mkconfig-core.sh" "docker compose down"
+check_not_contains "config/hooks/normal/9107-ensure-infisical.hook.chroot" "update-stack.sh"
+check_not_contains "config/hooks/normal/9107-ensure-infisical.hook.chroot" "docker compose down"
 check_contains "ygg.example.toml" "build_profile = \"both\""
 check_contains "ygg.example.toml" "setup_mode = \"recommended\""
 

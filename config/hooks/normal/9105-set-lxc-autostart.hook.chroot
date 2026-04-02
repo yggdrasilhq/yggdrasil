@@ -57,9 +57,9 @@ ExecStart=/usr/local/sbin/ygg-lxc-autostart
 # -t tells it to wait before hard-stopping.
 ExecStop=/usr/local/sbin/ygg-lxc-autostop
 
-# CAVEAT 3: Disable timeout.
-# Starting many containers can take a long time.
-TimeoutSec=0
+# CAVEAT 3: Keep a generous but finite timeout so broken autostarts do not
+# stall boot forever.
+TimeoutSec=10min
 
 [Install]
 WantedBy=multi-user.target

@@ -30,3 +30,22 @@ assets/ssh/*
 *.hybrid.iso.keep
 runtime-cache/
 runtime-target/
+.staging/
+binary.modified_timestamps
+*.iso.sha256
+
+# Local embedded host identity and signing material
+config/includes.chroot/etc/hostid
+config/includes.chroot/etc/ssh/ssh_host_*
+config/includes.chroot/root/.secureboot/
+config/includes.chroot/root/ygg-local-mok.cer
+config/includes.chroot_before_packages/root/.secureboot/
+config/includes.chroot_before_packages/root/ygg-local-mok.cer
+
+# Local bundled workstation binaries
+config/includes.chroot/usr/local/bin/codex
+config/includes.chroot/usr/local/bin/codex-litellm
+config/includes.chroot/usr/local/bin/codex-session-tui
+config/includes.chroot/usr/local/bin/edit
+chroot.packages.*
+config/includes.chroot/root/.ssh/

@@ -98,12 +98,44 @@ check_file() {
   fi
 }
 
+check_rootfs_contains() {
+  local path="$1"
+  local text="$2"
+  if rg -q --fixed-strings -- "$text" "$ROOTFS_DIR$path"; then
+    echo "[PASS] $path contains: $text"
+  else
+    echo "[FAIL] $path missing: $text"
+    return 1
+  fi
+}
+
+check_rootfs_not_contains() {
+  local path="$1"
+  local text="$2"
+  if rg -q --fixed-strings -- "$text" "$ROOTFS_DIR$path"; then
+    echo "[FAIL] $path unexpectedly contains: $text"
+    return 1
+  else
+    echo "[PASS] $path does not contain: $text"
+  fi
+}
+
 status=0
 check_bin "/usr/sbin/zpool" || status=1
 check_bin "/usr/sbin/zfs" || status=1
 check_file "/etc/systemd/system/ygg-import-zpool-at-boot.service" || status=1
 check_file "/etc/systemd/system/ygg-lxc-autostart.service" || status=1
 check_file "/etc/systemd/system/ygg-infisical-ensure.service" || status=1
+check_file "/etc/default/ygg-infisical-ensure" || status=1
+check_file "/usr/local/sbin/ygg-ensure-infisical" || status=1
+check_rootfs_contains "/etc/systemd/system/ygg-lxc-autostart.service" "TimeoutSec=10min" || status=1
+check_rootfs_contains "/etc/systemd/system/ygg-infisical-ensure.service" "EnvironmentFile=-/etc/default/ygg-infisical-ensure" || status=1
+check_rootfs_contains "/etc/systemd/system/ygg-infisical-ensure.service" "TimeoutSec=2min" || status=1
+check_rootfs_contains "/etc/default/ygg-infisical-ensure" "YGG_INFISICAL_BOOT_MODE=" || status=1
+check_rootfs_contains "/usr/local/sbin/ygg-ensure-infisical" "YGG_POST_BOOT_HOOK" || status=1
+check_rootfs_contains "/usr/local/sbin/ygg-ensure-infisical" "INFISICAL_BOOT_MODE=" || status=1
+check_rootfs_not_contains "/usr/local/sbin/ygg-ensure-infisical" "update-stack.sh" || status=1
+check_rootfs_not_contains "/usr/local/sbin/ygg-ensure-infisical" "docker compose down" || status=1
 
 if [[ "$EXPECT_KDE" == "true" ]]; then
   check_file "/usr/bin/startplasma-x11" || status=1

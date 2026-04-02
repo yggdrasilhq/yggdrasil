@@ -1,0 +1,2 @@
+Acquire::Retries "5";
+Acquire::http::Pipeline-Depth "0";
