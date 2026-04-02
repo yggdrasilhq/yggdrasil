@@ -220,7 +220,11 @@ If you want the live host to expose Intel Arc virtual functions for KVM guests, 
 
 - `docs/intel-arc-sriov-live-host.md`
 
-This path is intended for experimental graphics virtualization hosts. It bakes the out-of-tree `i915-sriov-dkms` driver into the ISO, adds the required kernel arguments, provisions VFs at boot, and can bind those VFs to `vfio-pci` for guest assignment.
+By default, `yggdrasil` uses the stock in-kernel `i915` driver.
+
+The SR-IOV path is intentionally opt-in and experimental. It bakes the out-of-tree `i915-sriov-dkms` driver into the ISO, adds the required kernel arguments, provisions VFs at boot, and can bind those VFs to `vfio-pci` for guest assignment.
+
+Use the stock in-kernel `i915` path unless you are explicitly experimenting with Intel GPU SR-IOV or other unsupported Intel graphics virtualization work.
 
 ### 2. Automated server build with explicit overrides
 

@@ -1112,9 +1112,26 @@ if ! find /zroot/lxc -mindepth 2 -maxdepth 2 -type f -name config | grep -q .; t
     exit 0
 fi
 
-exec /usr/bin/lxc-autostart
+if /usr/bin/systemctl is-active --quiet ygg-lxc-autostart-worker.service; then
+    exit 0
+fi
+
+exec /usr/bin/systemd-run \
+    --unit=ygg-lxc-autostart-worker.service \
+    --no-block \
+    --collect \
+    --property=Type=exec \
+    /usr/local/sbin/ygg-lxc-autostart-worker
 EOL
 chmod +x /usr/local/sbin/ygg-lxc-autostart
+
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostart-worker
+#!/bin/bash
+set -euo pipefail
+
+exec /usr/bin/lxc-autostart
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostart-worker
 
 tee <<'EOL' /usr/local/sbin/ygg-lxc-autostop
 #!/bin/bash
@@ -1159,7 +1176,8 @@ After=ygg-import-zpool-at-boot.service zfs-mount.service lxc.service network.tar
 Type=oneshot
 RemainAfterExit=yes
 
-# The main command to start all containers with lxc.start.auto = 1
+# Dispatch autostart into a transient worker so boot does not block on every
+# container reaching its runtime state before graphical and remote services.
 ExecStart=/usr/local/sbin/ygg-lxc-autostart
 
 # CAVEAT 2: Define a clean shutdown command.
