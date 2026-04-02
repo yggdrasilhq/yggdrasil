@@ -3,8 +3,8 @@ set -euo pipefail
 
 install -d -m 0755 /etc/default /usr/local/sbin /etc/systemd/system
 cat > /etc/default/ygg-intel-arc-sriov <<'EOCFG'
-ENABLE_INTEL_ARC_SRIOV=true
-INTEL_ARC_SRIOV_PF_PCI="0000:83:00.0"
+ENABLE_INTEL_ARC_SRIOV=false
+INTEL_ARC_SRIOV_PF_PCI=""
 INTEL_ARC_SRIOV_DEVICE_ID="0x56a0"
 INTEL_ARC_SRIOV_VF_COUNT="7"
 INTEL_ARC_SRIOV_BIND_VFS="vfio-pci"

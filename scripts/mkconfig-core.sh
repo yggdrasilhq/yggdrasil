@@ -272,6 +272,8 @@ if [[ "$ENABLE_INTEL_ARC_SRIOV" == "true" ]]; then
     BOOTAPPEND_LIVE+=" intel_iommu=on iommu=pt i915.max_vfs=${INTEL_ARC_SRIOV_VF_COUNT} module_blacklist=xe"
 fi
 
+rm -f config/hooks/normal/9190-install-intel-arc-sriov-dkms.hook.chroot
+
 lb config \
   --apt apt \
   --apt-recommends false \
@@ -889,97 +891,13 @@ fi
 # --- Bundle local helper binaries ---
 mkdir -p "config/includes.chroot/usr/local/bin"
 EDIT_BIN_PATH=$(command -v edit || true)
-GIT_BIN_PATH=$(command -v git || true)
-CARGO_BIN_PATH=$(command -v cargo || true)
 
 if [[ -z "$EDIT_BIN_PATH" ]]; then
     echo "ERROR: 'edit' binary not found on host; install it before running mkconfig." >&2
     exit 1
 fi
 
-if [[ -z "$GIT_BIN_PATH" ]]; then
-    echo "ERROR: 'git' binary not found on host; install it before running mkconfig." >&2
-    exit 1
-fi
-
-if [[ -z "$CARGO_BIN_PATH" ]]; then
-    echo "ERROR: 'cargo' binary not found on host; install Rust tooling before running mkconfig." >&2
-    exit 1
-fi
-
 install -m 0755 "$EDIT_BIN_PATH" "config/includes.chroot/usr/local/bin/edit"
-
-RUNTIME_CACHE_DIR="$PWD/runtime-cache/$BUILD_DAY"
-RUNTIME_CARGO_TARGET_DIR="$PWD/runtime-target/$BUILD_DAY"
-mkdir -p "$RUNTIME_CACHE_DIR" "$RUNTIME_CARGO_TARGET_DIR"
-
-LEGACY_RUNTIME_CACHE_DIR="${YGG_LEGACY_RUNTIME_CACHE_DIR:-}"
-if [[ -z "$LEGACY_RUNTIME_CACHE_DIR" && -d "/root/git/yggdrasil/runtime-cache" ]]; then
-    # Transition helper for local migration from the deprecated private repo.
-    LEGACY_RUNTIME_CACHE_DIR="/root/git/yggdrasil/runtime-cache"
-fi
-
-find_latest_runtime_binary() {
-    local base_dir="$1"
-    local binary_name="$2"
-    if [[ ! -d "$base_dir" ]]; then
-        return 0
-    fi
-    find "$base_dir" -mindepth 2 -maxdepth 2 -type f -name "$binary_name" -printf '%T@ %p\n' 2>/dev/null \
-        | sort -nr | awk 'NR==1 {print $2}'
-}
-
-seed_runtime_from_cache() {
-    local binary_name="$1"
-    local source_path=""
-
-    if [[ -s "$RUNTIME_CACHE_DIR/$binary_name" ]]; then
-        return 0
-    fi
-
-    source_path="$(find_latest_runtime_binary "$PWD/runtime-cache" "$binary_name" || true)"
-    if [[ -z "$source_path" && -n "$LEGACY_RUNTIME_CACHE_DIR" ]]; then
-        source_path="$(find_latest_runtime_binary "$LEGACY_RUNTIME_CACHE_DIR" "$binary_name" || true)"
-    fi
-
-    if [[ -n "$source_path" && -s "$source_path" ]]; then
-        echo "Seeding runtime binary from cache: $binary_name <- $source_path"
-        install -m 0755 "$source_path" "$RUNTIME_CACHE_DIR/$binary_name"
-    fi
-}
-
-seed_runtime_from_cache "codex-session-tui"
-
-if [[ -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
-    echo "Using cached runtime binaries for day $BUILD_DAY."
-else
-    RUNTIME_BUILD_ROOT=$(mktemp -d)
-    CODEX_SESSION_TUI_SRC_DIR="$RUNTIME_BUILD_ROOT/codex-session-tui"
-
-    if [[ ! -s "$RUNTIME_CACHE_DIR/codex-session-tui" ]]; then
-        echo "Building release runtime: avikalpa/codex-session-tui..."
-        "$GIT_BIN_PATH" clone --depth 1 https://github.com/avikalpa/codex-session-tui "$CODEX_SESSION_TUI_SRC_DIR"
-        (
-            cd "$CODEX_SESSION_TUI_SRC_DIR"
-            CARGO_TARGET_DIR="$RUNTIME_CARGO_TARGET_DIR/codex-session-tui" \
-            CARGO_PROFILE_RELEASE_LTO=off \
-            CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-            "$CARGO_BIN_PATH" build --release --locked --bin codex-session-tui
-        )
-        install -m 0755 "$RUNTIME_CARGO_TARGET_DIR/codex-session-tui/release/codex-session-tui" "$RUNTIME_CACHE_DIR/codex-session-tui"
-    fi
-
-    rm -rf "$RUNTIME_BUILD_ROOT"
-fi
-
-for runtime_bin in codex-session-tui; do
-    if [[ ! -s "$RUNTIME_CACHE_DIR/$runtime_bin" ]]; then
-        echo "ERROR: required runtime binary is unavailable: $runtime_bin" >&2
-        exit 1
-    fi
-done
-
-install -m 0755 "$RUNTIME_CACHE_DIR/codex-session-tui" "config/includes.chroot/usr/local/bin/codex-session-tui"
 
 # --- Network Configuration ---
 LXC_PARENT_IF="${YGG_LXC_PARENT_IF:-eno1}"
