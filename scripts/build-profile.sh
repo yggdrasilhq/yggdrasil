@@ -154,6 +154,9 @@ export \
   YGG_INTEL_ARC_SRIOV_BIND_VFS
 
 cmd=("./scripts/mkconfig-core.sh")
+if [[ "$PROFILE" == "server" ]]; then
+  cmd+=("--with-kvm")
+fi
 if [[ "$PROFILE" == "kde" ]]; then
   cmd+=("--with-kde")
 fi
