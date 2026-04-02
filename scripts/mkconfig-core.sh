@@ -1674,6 +1674,17 @@ log() {
     printf '[ygg-intel-arc-sriov] %s\n' "\$*"
 }
 
+dump_pf_diagnostics() {
+    local short_pf="\${1#0000:}"
+    log "expected BIOS/platform prerequisites: Above 4G Decoding, Re-Size BAR, SR-IOV, and IOMMU"
+    if command -v lspci >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            [[ -n "\$line" ]] || continue
+            log "\$line"
+        done < <(lspci -s "\$short_pf" -vv 2>/dev/null | sed -n '/LnkSta:/p;/Physical Resizable BAR/p;/Single Root I\\/O Virtualization/p;/BAR 2:/p')
+    fi
+}
+
 find_pf() {
     local dev class vendor device sriov_total
     for dev in /sys/bus/pci/devices/*; do
@@ -1739,6 +1750,8 @@ if [[ -e "\$pf_dev/sriov_numvfs" ]]; then
     echo "\$INTEL_ARC_SRIOV_VF_COUNT" > "\$pf_dev/sriov_numvfs"
 else
     log "PF \$pf does not expose sriov_numvfs"
+    dump_pf_diagnostics "\$pf"
+    log "if Resizable BAR is active but no SR-IOV capability appears, this GPU/slot/platform path is still not exposing SR-IOV to Linux"
     exit 1
 fi
 
