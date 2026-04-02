@@ -698,7 +698,10 @@ chmod +777 config/hooks/normal/9107-sshd-permitrootlogin.hook.chroot
 DEFAULT_SSH_KEY_DIR="./assets/ssh"
 LEGACY_SSH_KEY_DIR="./ssh"
 
-if [[ -d "$DEFAULT_SSH_KEY_DIR" ]]; then
+if [[ -n "${YGG_SSH_HOST_KEYS_DIR:-}" ]]; then
+    ssh_host_keys_dir="$YGG_SSH_HOST_KEYS_DIR"
+    mkdir -p "$ssh_host_keys_dir"
+elif [[ -d "$DEFAULT_SSH_KEY_DIR" ]]; then
     ssh_host_keys_dir="$DEFAULT_SSH_KEY_DIR"
 elif [[ -d "$LEGACY_SSH_KEY_DIR" ]]; then
     ssh_host_keys_dir="$LEGACY_SSH_KEY_DIR"
