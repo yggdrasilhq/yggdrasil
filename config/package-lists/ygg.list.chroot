@@ -1,0 +1,61 @@
+# Security and certificates
+ca-certificates
+ssl-cert
+
+# Core networking
+network-manager
+wpasupplicant
+wireless-regdb
+iw
+rfkill
+iputils-ping
+
+# Essential utilities
+coreutils
+bash
+gpg
+gpg-agent
+gpm
+ripgrep
+openssh-server
+squashfs-tools
+gdisk
+zstd
+dmsetup
+libdevmapper1.02.1
+exfat-fuse
+exfatprogs
+fuse3
+lxc
+distrobuilder
+apcupsd
+apparmor
+apparmor-utils
+# unattended-upgrades # has a lot of dependencies including python
+
+# Intel media stack for Arc/VAAPI
+intel-media-va-driver
+libigdgmm12
+libva2
+vainfo
+
+# System monitoring
+htop
+ipmitool
+lm-sensors
+nvtop
+
+# zfs
+zfsutils-linux
+zfs-dkms
+
+# minimal userland
+# cockpit
+curl
+less
+git
+vim
+sudo
+bash-completion
+mokutil
+

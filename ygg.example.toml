@@ -8,6 +8,8 @@ with_lts = false
 
 setup_mode = "recommended"        # recommended
 apt_proxy_mode = "off"            # off | explicit | host
+infisical_boot_mode = "disabled"  # disabled | container
+infisical_container_name = "infisical"
 embed_ssh_keys = true
 ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
 

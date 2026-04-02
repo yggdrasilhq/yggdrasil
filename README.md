@@ -176,10 +176,12 @@ For a first Yggdrasil server, the recommended path is conservative:
 
 1. set the host basics first
 2. keep `apt_proxy_mode = "off"`
-3. build and boot the host
-4. validate ZFS import, LXC defaults, and container behavior
-5. add an apt-proxy container later if you actually need faster rebuilds
-6. switch later builds to explicit proxy mode
+3. keep `infisical_boot_mode = "disabled"` unless you already run Infisical in an LXC
+4. build and boot the host
+5. validate ZFS import, LXC defaults, and container behavior
+6. add an apt-proxy container later if you actually need faster rebuilds
+7. switch later builds to explicit proxy mode
+8. switch later builds to `infisical_boot_mode = "container"` only after you intentionally adopt that pattern
 
 That sequence is deliberate.
 The first success should be legible.
@@ -201,6 +203,16 @@ cp ygg.example.toml ygg.local.toml
 ```
 
 Use this when you want to produce the first ISO before tuning every dial.
+
+The public default deliberately does not assume a secrets-management container on day one.
+When you later want the boot path to ensure an Infisical LXC is up before dependent services, set:
+
+```toml
+infisical_boot_mode = "container"
+infisical_container_name = "infisical"
+```
+
+Keep private hostnames, container names, proxy addresses, and SSH paths in your local untracked config only.
 
 ### 2. Automated server build with explicit overrides
 

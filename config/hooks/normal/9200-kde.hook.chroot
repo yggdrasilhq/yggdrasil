@@ -1,9 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Install-Recommends=true install \
-  task-kde-desktop \
-  sddm \
-  plasma-discover \
-  konsole \
-  systemsettings

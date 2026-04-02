@@ -1,11 +1,1 @@
-#!/bin/sh
-
-set -e
-
-# Reset generated file
-
-cat > /etc/adjtime << EOF
-0.0 0 0.0
-0
-UTC
-EOF
+/usr/share/live/build/hooks/normal/8000-remove-adjtime-configuration.hook.chroot

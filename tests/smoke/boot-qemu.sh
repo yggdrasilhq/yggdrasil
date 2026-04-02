@@ -327,6 +327,16 @@ require_service_healthy() {
   }
 }
 
+require_service_timeout_finite() {
+  local svc="$1"
+  local timeout
+  timeout="$(systemctl show -p TimeoutStartUSec --value "$svc" || true)"
+  [[ -n "$timeout" && "$timeout" != "infinity" ]] || {
+    echo "Service has infinite startup timeout: $svc" >&2
+    exit 1
+  }
+}
+
 need_cmd systemctl
 need_cmd grep
 need_cmd awk
@@ -344,6 +354,8 @@ need_cmd codex-session-tui
 require_service_healthy ygg-import-zpool-at-boot.service
 require_service_healthy ygg-lxc-autostart.service
 require_service_healthy ygg-infisical-ensure.service
+require_service_timeout_finite ygg-lxc-autostart.service
+require_service_timeout_finite ygg-infisical-ensure.service
 
 failed_ygg_units="$(systemctl --failed --no-legend 2>/dev/null | awk '{print $1}' | grep '^ygg-' || true)"
 [[ -z "$failed_ygg_units" ]] || {
@@ -354,6 +366,10 @@ failed_ygg_units="$(systemctl --failed --no-legend 2>/dev/null | awk '{print $1}
 
 [[ -s /etc/lxc/lxc.conf ]] || { echo "/etc/lxc/lxc.conf missing/empty" >&2; exit 1; }
 [[ -s /etc/lxc/default.conf ]] || { echo "/etc/lxc/default.conf missing/empty" >&2; exit 1; }
+[[ -s /etc/default/ygg-infisical-ensure ]] || { echo "/etc/default/ygg-infisical-ensure missing/empty" >&2; exit 1; }
+grep -q 'YGG_INFISICAL_BOOT_MODE=' /etc/default/ygg-infisical-ensure
+grep -q 'YGG_POST_BOOT_HOOK' /usr/local/sbin/ygg-ensure-infisical
+! grep -q 'update-stack.sh' /usr/local/sbin/ygg-ensure-infisical
 grep -q '^lxc.net.0.type = macvlan' /etc/lxc/default.conf
 grep -q '^lxc.net.0.macvlan.mode = bridge' /etc/lxc/default.conf
 grep -q '^lxc.apparmor.profile = generated' /etc/lxc/default.conf
