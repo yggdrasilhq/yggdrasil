@@ -1124,6 +1124,8 @@ exec /usr/bin/systemd-run \
     --no-block \
     --collect \
     --property=Type=exec \
+    --property=IOSchedulingClass=idle \
+    --property=Nice=19 \
     /usr/local/sbin/ygg-lxc-autostart-worker
 EOL
 chmod +x /usr/local/sbin/ygg-lxc-autostart
@@ -1132,7 +1134,11 @@ tee <<'EOL' /usr/local/sbin/ygg-lxc-autostart-worker
 #!/bin/bash
 set -euo pipefail
 
-exec /usr/bin/lxc-autostart
+if command -v ionice >/dev/null 2>&1; then
+    exec /usr/bin/ionice -c3 /usr/bin/nice -n 19 /usr/bin/lxc-autostart
+fi
+
+exec /usr/bin/nice -n 19 /usr/bin/lxc-autostart
 EOL
 chmod +x /usr/local/sbin/ygg-lxc-autostart-worker
 
