@@ -96,6 +96,12 @@ YGG_APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-$YGG_APT_HTTP_PROXY}"
 YGG_APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
 YGG_WITH_NVIDIA="$(bool_or_default "${YGG_WITH_NVIDIA:-${YGG_ENABLE_NVIDIA:-}}" "true")"
 YGG_WITH_LTS="$(bool_or_default "${YGG_WITH_LTS:-}" "false")"
+YGG_ENABLE_INTEL_ARC_SRIOV="$(bool_or_default "${YGG_ENABLE_INTEL_ARC_SRIOV:-}" "false")"
+YGG_INTEL_ARC_SRIOV_RELEASE="${YGG_INTEL_ARC_SRIOV_RELEASE:-2026.03.05}"
+YGG_INTEL_ARC_SRIOV_VF_COUNT="${YGG_INTEL_ARC_SRIOV_VF_COUNT:-7}"
+YGG_INTEL_ARC_SRIOV_PF_PCI="${YGG_INTEL_ARC_SRIOV_PF_PCI:-}"
+YGG_INTEL_ARC_SRIOV_DEVICE_ID="${YGG_INTEL_ARC_SRIOV_DEVICE_ID:-0x56a0}"
+YGG_INTEL_ARC_SRIOV_BIND_VFS="${YGG_INTEL_ARC_SRIOV_BIND_VFS:-vfio-pci}"
 
 if [[ "$YGG_SETUP_MODE" != "recommended" ]]; then
   echo "Invalid YGG_SETUP_MODE: $YGG_SETUP_MODE" >&2
@@ -109,6 +115,16 @@ fi
 
 if [[ "$YGG_NET_MODE" == "static" && -z "$YGG_STATIC_IP" ]]; then
   echo "YGG_STATIC_IP is required when YGG_NET_MODE=static" >&2
+  exit 1
+fi
+
+if ! [[ "$YGG_INTEL_ARC_SRIOV_VF_COUNT" =~ ^[0-9]+$ ]]; then
+  echo "YGG_INTEL_ARC_SRIOV_VF_COUNT must be an integer" >&2
+  exit 1
+fi
+
+if [[ "$YGG_INTEL_ARC_SRIOV_BIND_VFS" != "vfio-pci" && "$YGG_INTEL_ARC_SRIOV_BIND_VFS" != "none" ]]; then
+  echo "YGG_INTEL_ARC_SRIOV_BIND_VFS must be vfio-pci or none" >&2
   exit 1
 fi
 
@@ -129,7 +145,13 @@ export \
   YGG_APT_HTTP_PROXY \
   YGG_APT_HTTPS_PROXY \
   YGG_APT_PROXY_BYPASS_HOST \
-  YGG_WITH_LTS
+  YGG_WITH_LTS \
+  YGG_ENABLE_INTEL_ARC_SRIOV \
+  YGG_INTEL_ARC_SRIOV_RELEASE \
+  YGG_INTEL_ARC_SRIOV_VF_COUNT \
+  YGG_INTEL_ARC_SRIOV_PF_PCI \
+  YGG_INTEL_ARC_SRIOV_DEVICE_ID \
+  YGG_INTEL_ARC_SRIOV_BIND_VFS
 
 cmd=("./scripts/mkconfig-core.sh")
 if [[ "$PROFILE" == "kde" ]]; then

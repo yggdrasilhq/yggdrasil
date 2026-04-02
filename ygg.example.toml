@@ -28,3 +28,10 @@ static_dns = "1.1.1.1 8.8.8.8"
 apt_http_proxy = ""
 apt_https_proxy = ""
 apt_proxy_bypass_host = ""
+
+enable_intel_arc_sriov = false
+intel_arc_sriov_release = "2026.03.05"
+intel_arc_sriov_vf_count = 7
+intel_arc_sriov_pf_pci = ""
+intel_arc_sriov_device_id = "0x56a0"
+intel_arc_sriov_bind_vfs = "vfio-pci"

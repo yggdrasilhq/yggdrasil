@@ -98,6 +98,9 @@ echo "  → NVIDIA Integration: $WITH_NVIDIA"
 echo "  → LTS Kernel Path: $WITH_LTS"
 echo "  → KDE Integration: $WITH_KDE"
 echo "  → KDE Profile: $KDE_PROFILE"
+echo "  → Intel Arc SR-IOV: ${YGG_ENABLE_INTEL_ARC_SRIOV:-false}"
+echo "  → Intel Arc SR-IOV VF Count: ${YGG_INTEL_ARC_SRIOV_VF_COUNT:-7}"
+echo "  → Intel Arc SR-IOV Bind Mode: ${YGG_INTEL_ARC_SRIOV_BIND_VFS:-vfio-pci}"
 
 # =============================================================================
 # Initial Cleanup
@@ -219,6 +222,12 @@ APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
 APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
 INFISICAL_BOOT_MODE="${YGG_INFISICAL_BOOT_MODE:-disabled}"
 INFISICAL_CONTAINER_NAME="${YGG_INFISICAL_CONTAINER_NAME:-infisical}"
+ENABLE_INTEL_ARC_SRIOV="${YGG_ENABLE_INTEL_ARC_SRIOV:-false}"
+INTEL_ARC_SRIOV_RELEASE="${YGG_INTEL_ARC_SRIOV_RELEASE:-2026.03.05}"
+INTEL_ARC_SRIOV_VF_COUNT="${YGG_INTEL_ARC_SRIOV_VF_COUNT:-7}"
+INTEL_ARC_SRIOV_PF_PCI="${YGG_INTEL_ARC_SRIOV_PF_PCI:-}"
+INTEL_ARC_SRIOV_DEVICE_ID="${YGG_INTEL_ARC_SRIOV_DEVICE_ID:-0x56a0}"
+INTEL_ARC_SRIOV_BIND_VFS="${YGG_INTEL_ARC_SRIOV_BIND_VFS:-vfio-pci}"
 
 if [[ "$APT_PROXY_MODE" != "host" && -f "$APT_PROXY_CONF" ]]; then
     HOST_APT_PROXY_BACKUP="$(mktemp /tmp/ygg-host-apt-proxy-XXXXXX.conf)"
@@ -235,6 +244,16 @@ if [[ -z "$APT_HTTPS_PROXY" ]]; then
     APT_HTTPS_PROXY="$APT_HTTP_PROXY"
 fi
 
+if ! [[ "$INTEL_ARC_SRIOV_VF_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "YGG_INTEL_ARC_SRIOV_VF_COUNT must be an integer" >&2
+    exit 1
+fi
+
+if [[ "$INTEL_ARC_SRIOV_BIND_VFS" != "vfio-pci" && "$INTEL_ARC_SRIOV_BIND_VFS" != "none" ]]; then
+    echo "YGG_INTEL_ARC_SRIOV_BIND_VFS must be vfio-pci or none" >&2
+    exit 1
+fi
+
 LB_APT_PROXY_FLAGS=()
 if [[ -n "$APT_HTTP_PROXY" ]]; then
     LB_APT_PROXY_FLAGS+=(--apt-http-proxy "$APT_HTTP_PROXY")
@@ -248,6 +267,11 @@ if [[ -n "${YGG_HOSTNAME:-}" ]]; then
     LIVE_HOSTNAME="$YGG_HOSTNAME"
 fi
 
+BOOTAPPEND_LIVE="boot=live edd=off noautologin components locales=en_US.UTF-8 keyboard-layouts=us hostname=${LIVE_HOSTNAME} timezone=Asia/Kolkata i915.enable_guc=3"
+if [[ "$ENABLE_INTEL_ARC_SRIOV" == "true" ]]; then
+    BOOTAPPEND_LIVE+=" intel_iommu=on iommu=pt i915.max_vfs=${INTEL_ARC_SRIOV_VF_COUNT} module_blacklist=xe"
+fi
+
 lb config \
   --apt apt \
   --apt-recommends false \
@@ -258,7 +282,7 @@ lb config \
   --backports false \
   --binary-filesystem fat32 \
   --binary-image iso-hybrid \
-  --bootappend-live "boot=live edd=off noautologin components locales=en_US.UTF-8 keyboard-layouts=us hostname=${LIVE_HOSTNAME} timezone=Asia/Kolkata i915.enable_guc=3" \
+  --bootappend-live "$BOOTAPPEND_LIVE" \
   --bootloaders "grub-efi grub-pc" \
   --build-with-chroot true \
   --cache true \
@@ -443,6 +467,15 @@ bridge-utils
 cpu-checker
 libvirt-daemon-system
 libvirt-clients
+EOF
+fi
+
+if [[ "$ENABLE_INTEL_ARC_SRIOV" == "true" ]]; then
+   cat <<'EOF' >> config/package-lists/ygg.list.chroot
+# Intel Arc SR-IOV host support
+build-essential
+pciutils
+sysfsutils
 EOF
 fi
 
@@ -1619,6 +1652,164 @@ EOF
 
     chmod +777 config/hooks/normal/9151-nvidia-setup.hook.chroot
 
+fi
+
+# --- Intel Arc SR-IOV support ---
+if [[ "$ENABLE_INTEL_ARC_SRIOV" == "true" ]]; then
+tee config/hooks/normal/9190-install-intel-arc-sriov-dkms.hook.chroot <<EOF
+#!/bin/bash
+set -euo pipefail
+
+tmpdir=\$(mktemp -d)
+trap 'rm -rf "\$tmpdir"' EXIT
+
+deb_url="https://github.com/strongtz/i915-sriov-dkms/releases/download/${INTEL_ARC_SRIOV_RELEASE}/i915-sriov-dkms_${INTEL_ARC_SRIOV_RELEASE}_amd64.deb"
+deb_path="\$tmpdir/i915-sriov-dkms.deb"
+
+curl -fsSL "\$deb_url" -o "\$deb_path"
+dpkg -i "\$deb_path" || apt-get -f install -y
+update-initramfs -u
+EOF
+chmod +777 config/hooks/normal/9190-install-intel-arc-sriov-dkms.hook.chroot
+
+tee config/hooks/normal/9191-configure-intel-arc-sriov.hook.chroot <<EOF
+#!/bin/bash
+set -euo pipefail
+
+install -d -m 0755 /etc/default /usr/local/sbin /etc/systemd/system
+cat > /etc/default/ygg-intel-arc-sriov <<'EOCFG'
+ENABLE_INTEL_ARC_SRIOV=true
+INTEL_ARC_SRIOV_PF_PCI="${INTEL_ARC_SRIOV_PF_PCI}"
+INTEL_ARC_SRIOV_DEVICE_ID="${INTEL_ARC_SRIOV_DEVICE_ID}"
+INTEL_ARC_SRIOV_VF_COUNT="${INTEL_ARC_SRIOV_VF_COUNT}"
+INTEL_ARC_SRIOV_BIND_VFS="${INTEL_ARC_SRIOV_BIND_VFS}"
+EOCFG
+
+cat > /usr/local/sbin/ygg-intel-arc-sriov <<'EOSCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_FILE="/etc/default/ygg-intel-arc-sriov"
+if [[ -f "\$CONFIG_FILE" ]]; then
+    # shellcheck disable=SC1091
+    source "\$CONFIG_FILE"
+fi
+
+ENABLE_INTEL_ARC_SRIOV="\${ENABLE_INTEL_ARC_SRIOV:-false}"
+INTEL_ARC_SRIOV_PF_PCI="\${INTEL_ARC_SRIOV_PF_PCI:-}"
+INTEL_ARC_SRIOV_DEVICE_ID="\${INTEL_ARC_SRIOV_DEVICE_ID:-0x56a0}"
+INTEL_ARC_SRIOV_VF_COUNT="\${INTEL_ARC_SRIOV_VF_COUNT:-7}"
+INTEL_ARC_SRIOV_BIND_VFS="\${INTEL_ARC_SRIOV_BIND_VFS:-vfio-pci}"
+
+if [[ "\$ENABLE_INTEL_ARC_SRIOV" != "true" ]]; then
+    exit 0
+fi
+
+log() {
+    printf '[ygg-intel-arc-sriov] %s\n' "\$*"
+}
+
+find_pf() {
+    local dev class vendor device sriov_total
+    for dev in /sys/bus/pci/devices/*; do
+        [[ -e "\$dev/vendor" ]] || continue
+        [[ -e "\$dev/device" ]] || continue
+        [[ -e "\$dev/class" ]] || continue
+        [[ -e "\$dev/sriov_totalvfs" ]] || continue
+        vendor=\$(<"\$dev/vendor")
+        device=\$(<"\$dev/device")
+        class=\$(<"\$dev/class")
+        sriov_total=\$(<"\$dev/sriov_totalvfs")
+        [[ "\$vendor" == "0x8086" ]] || continue
+        [[ "\$device" == "\$INTEL_ARC_SRIOV_DEVICE_ID" ]] || continue
+        [[ "\$class" == "0x030000" || "\$class" == "0x038000" ]] || continue
+        [[ "\$sriov_total" =~ ^[1-9][0-9]*$ ]] || continue
+        basename "\$dev"
+        return 0
+    done
+    return 1
+}
+
+bind_vfs_to_vfio() {
+    local pf_dev="\$1"
+    local vf symlink vf_pci
+    modprobe vfio-pci
+    for vf in "\$pf_dev"/virtfn*; do
+        [[ -L "\$vf" ]] || continue
+        vf_pci=\$(basename "\$(readlink -f "\$vf")")
+        echo vfio-pci > "/sys/bus/pci/devices/\$vf_pci/driver_override"
+        if [[ -L "/sys/bus/pci/devices/\$vf_pci/driver" ]]; then
+            echo "\$vf_pci" > "/sys/bus/pci/devices/\$vf_pci/driver/unbind"
+        fi
+        echo "\$vf_pci" > /sys/bus/pci/drivers_probe
+        log "bound VF \$vf_pci to vfio-pci"
+    done
+}
+
+if ! [[ "\$INTEL_ARC_SRIOV_VF_COUNT" =~ ^[0-9]+$ ]]; then
+    log "invalid VF count: \$INTEL_ARC_SRIOV_VF_COUNT"
+    exit 1
+fi
+
+pf="\$INTEL_ARC_SRIOV_PF_PCI"
+if [[ -n "\$pf" && ! -d "/sys/bus/pci/devices/\$pf" ]]; then
+    log "configured PF \$pf not found; falling back to autodiscovery"
+    pf=""
+fi
+if [[ -z "\$pf" ]]; then
+    pf=\$(find_pf) || {
+        log "no matching Intel SR-IOV PF found"
+        exit 1
+    }
+fi
+
+pf_dev="/sys/bus/pci/devices/\$pf"
+log "using PF \$pf"
+
+if [[ -e "\$pf_dev/sriov_numvfs" ]]; then
+    current=\$(<"\$pf_dev/sriov_numvfs")
+    if [[ "\$current" != "0" ]]; then
+        echo 0 > "\$pf_dev/sriov_numvfs"
+    fi
+    echo "\$INTEL_ARC_SRIOV_VF_COUNT" > "\$pf_dev/sriov_numvfs"
+else
+    log "PF \$pf does not expose sriov_numvfs"
+    exit 1
+fi
+
+if [[ "\$INTEL_ARC_SRIOV_BIND_VFS" == "vfio-pci" ]]; then
+    bind_vfs_to_vfio "\$pf_dev"
+fi
+EOSCRIPT
+chmod 0755 /usr/local/sbin/ygg-intel-arc-sriov
+
+cat > /etc/systemd/system/ygg-intel-arc-sriov.service <<'EOUNIT'
+[Unit]
+Description=Configure Intel Arc SR-IOV VFs for virtualization
+After=systemd-modules-load.service local-fs.target
+Before=libvirtd.service lxc.service graphical.target multi-user.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/ygg-intel-arc-sriov
+ExecStart=/usr/local/sbin/ygg-intel-arc-sriov
+TimeoutSec=2min
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOUNIT
+
+if [[ "${INTEL_ARC_SRIOV_BIND_VFS}" == "vfio-pci" ]]; then
+    install -d -m 0755 /etc/modules-load.d
+    cat > /etc/modules-load.d/vfio.conf <<'EOFMOD'
+vfio-pci
+EOFMOD
+fi
+
+systemctl enable ygg-intel-arc-sriov.service
+EOF
+chmod +777 config/hooks/normal/9191-configure-intel-arc-sriov.hook.chroot
 fi
 
 # --- Secure Boot: sign DKMS modules with local MOK ---

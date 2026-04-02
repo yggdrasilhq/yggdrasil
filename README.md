@@ -214,6 +214,14 @@ infisical_container_name = "infisical"
 
 Keep private hostnames, container names, proxy addresses, and SSH paths in your local untracked config only.
 
+## Intel Arc SR-IOV Live Host
+
+If you want the live host to expose Intel Arc virtual functions for KVM guests, use the opt-in SR-IOV path documented in:
+
+- `docs/intel-arc-sriov-live-host.md`
+
+This path is intended for experimental graphics virtualization hosts. It bakes the out-of-tree `i915-sriov-dkms` driver into the ISO, adds the required kernel arguments, provisions VFs at boot, and can bind those VFs to `vfio-pci` for guest assignment.
+
 ### 2. Automated server build with explicit overrides
 
 ```bash
