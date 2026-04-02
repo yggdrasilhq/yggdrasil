@@ -5,6 +5,9 @@ This document describes the opt-in `yggdrasil` path for building a live host tha
 This is a host-side workflow.
 It does not guarantee that a particular guest OS will load a graphics driver for the VF.
 
+`yggdrasil` defaults to the stock in-kernel `i915` driver.
+Only enable this document's path if you are deliberately testing the out-of-tree `i915-sriov-dkms` branch for Intel GPU virtualization experiments.
+
 ## What this build does
 
 When enabled, the build pipeline:
