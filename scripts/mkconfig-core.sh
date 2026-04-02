@@ -1124,7 +1124,20 @@ if [[ ! -d /zroot/lxc ]]; then
     exit 0
 fi
 
-exec /usr/bin/lxc-autostart -s -a -t 30
+mapfile -t names < <(/usr/bin/lxc-autostart -L 2>/dev/null | awk 'NF { print $1 }')
+
+if [[ ${#names[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+/usr/bin/lxc-autostart -s -a -t 8 || true
+
+for name in "${names[@]}"; do
+    state="$(/usr/bin/lxc-info -sH -n "$name" 2>/dev/null || true)"
+    if [[ "$state" == "RUNNING" ]]; then
+        /usr/bin/lxc-stop -n "$name" -k || true
+    fi
+done
 EOL
 chmod +x /usr/local/sbin/ygg-lxc-autostop
 
@@ -1158,7 +1171,7 @@ ExecStop=/usr/local/sbin/ygg-lxc-autostop
 
 # CAVEAT 3: Keep a generous but finite timeout so broken autostarts do not
 # stall boot forever.
-TimeoutSec=10min
+TimeoutSec=2min
 
 [Install]
 WantedBy=multi-user.target
