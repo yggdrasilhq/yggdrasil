@@ -83,6 +83,7 @@ pub enum BuildErrorCode {
     BuildConfigInvalid,
     InputBundleWriteFailed,
     ContainerLaunchFailed,
+    BuildProcessFailed,
     EventStreamInvalid,
     ArtifactMissing,
     OutputPermissionDenied,
@@ -183,7 +184,7 @@ fn docker_command(
             .context("repo-local mode requires repo_root")?;
         args.push("--mount".to_owned());
         args.push(format!(
-            "type=bind,src={},dst=/workspace/repo,readonly",
+            "type=bind,src={},dst=/workspace/repo",
             repo_root.display()
         ));
     }
@@ -381,5 +382,37 @@ mod tests {
         let plan = build_plan_for_request(&request).expect("build plan");
         let emitted = fs::read_to_string(&plan.host_config_path).expect("read config");
         assert!(emitted.contains(CONTAINER_SSH_AUTHORIZED_KEYS_PATH));
+    }
+
+    #[test]
+    fn repo_local_mode_mounts_repo_writable() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let ssh_path = tempdir.path().join("authorized_keys");
+        fs::write(&ssh_path, "ssh-ed25519 AAAA test\n").expect("write authorized_keys");
+        let repo_root = tempdir.path().join("repo");
+        fs::create_dir_all(&repo_root).expect("repo dir");
+        let artifacts_dir = tempdir.path().join("artifacts");
+
+        let mut setup_document = SetupDocument::new("NAS".to_owned(), PresetId::Nas);
+        setup_document.setup.ssh.authorized_keys_file =
+            SensitiveField::ephemeral(ssh_path.display().to_string());
+
+        let request = AppBuildRequest {
+            app_version: "0.1.0".to_owned(),
+            setup_document,
+            artifacts_dir,
+            source_mode: SourceMode::RepoLocal,
+            repo_root: Some(repo_root.clone()),
+            skip_smoke: false,
+        };
+
+        let plan = build_plan_for_request(&request).expect("build plan");
+        let repo_mount = plan
+            .docker_command
+            .iter()
+            .find(|value| value.contains("/workspace/repo"))
+            .expect("repo mount present");
+        assert!(!repo_mount.contains("readonly"));
+        assert!(repo_mount.contains(&repo_root.display().to_string()));
     }
 }

@@ -1,10 +1,12 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use maker_build::{AppBuildRequest, BuildMode, SourceMode, build_plan_for_request};
+use maker_build::{BuildErrorCode, BuildEvent};
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, PresetId, SetupDocument};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
 
 #[derive(Parser, Debug)]
 #[command(name = "yggdrasil-maker")]
@@ -79,10 +81,11 @@ struct EmitConfigArgs {
 #[derive(Subcommand, Debug)]
 enum BuildCommand {
     Plan(PlanBuildArgs),
+    Run(RunBuildArgs),
 }
 
 #[derive(Args, Debug)]
-struct PlanBuildArgs {
+struct BuildInputArgs {
     #[arg(long)]
     setup: PathBuf,
     #[arg(long, default_value = "./artifacts")]
@@ -93,6 +96,20 @@ struct PlanBuildArgs {
     host_keys_dir: Option<PathBuf>,
     #[arg(long)]
     repo_root: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+struct PlanBuildArgs {
+    #[command(flatten)]
+    input: BuildInputArgs,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct RunBuildArgs {
+    #[command(flatten)]
+    input: BuildInputArgs,
     #[arg(long)]
     json: bool,
 }
@@ -168,19 +185,19 @@ fn run_config(command: ConfigCommand) -> Result<()> {
 fn run_build(command: BuildCommand) -> Result<()> {
     match command {
         BuildCommand::Plan(args) => {
-            let mut document = read_setup(&args.setup)?;
-            apply_runtime_sensitive_overrides(&mut document, &args);
+            let mut document = read_setup(&args.input.setup)?;
+            apply_runtime_sensitive_overrides(&mut document, &args.input);
             require_runtime_sensitive_inputs(&document)?;
             let request = AppBuildRequest {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
                 setup_document: document,
-                artifacts_dir: args.artifacts_dir,
-                source_mode: if args.repo_root.is_some() {
+                artifacts_dir: args.input.artifacts_dir,
+                source_mode: if args.input.repo_root.is_some() {
                     SourceMode::RepoLocal
                 } else {
                     SourceMode::ReleaseContainer
                 },
-                repo_root: args.repo_root,
+                repo_root: args.input.repo_root,
                 skip_smoke: false,
             };
             let plan = build_plan_for_request(&request)?;
@@ -200,11 +217,66 @@ fn run_build(command: BuildCommand) -> Result<()> {
                 println!("  {}", shell_join(&plan.docker_command));
             }
         }
+        BuildCommand::Run(args) => {
+            let mut document = match read_setup(&args.input.setup) {
+                Ok(document) => document,
+                Err(error) => {
+                    emit_local_event(
+                        &BuildEvent::Failure {
+                            code: BuildErrorCode::BuildConfigInvalid,
+                            message_key: "setup_read_failed".to_owned(),
+                            detail: error.to_string(),
+                        },
+                        args.json,
+                    )?;
+                    exit_with_failure();
+                }
+            };
+            apply_runtime_sensitive_overrides(&mut document, &args.input);
+            if let Err(error) = require_runtime_sensitive_inputs(&document) {
+                emit_local_event(
+                    &BuildEvent::Failure {
+                        code: BuildErrorCode::BuildConfigInvalid,
+                        message_key: "sensitive_input_missing".to_owned(),
+                        detail: error.to_string(),
+                    },
+                    args.json,
+                )?;
+                exit_with_failure();
+            }
+            let request = AppBuildRequest {
+                app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                setup_document: document,
+                artifacts_dir: args.input.artifacts_dir,
+                source_mode: if args.input.repo_root.is_some() {
+                    SourceMode::RepoLocal
+                } else {
+                    SourceMode::ReleaseContainer
+                },
+                repo_root: args.input.repo_root,
+                skip_smoke: false,
+            };
+            let plan = match build_plan_for_request(&request) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    emit_local_event(
+                        &BuildEvent::Failure {
+                            code: BuildErrorCode::InputBundleWriteFailed,
+                            message_key: "build_plan_failed".to_owned(),
+                            detail: error.to_string(),
+                        },
+                        args.json,
+                    )?;
+                    exit_with_failure();
+                }
+            };
+            run_build_plan(plan, args.json)?;
+        }
     }
     Ok(())
 }
 
-fn apply_runtime_sensitive_overrides(document: &mut SetupDocument, args: &PlanBuildArgs) {
+fn apply_runtime_sensitive_overrides(document: &mut SetupDocument, args: &BuildInputArgs) {
     if let Some(path) = args.authorized_keys_file.as_ref() {
         document.setup.ssh.authorized_keys_file.value = Some(path.display().to_string());
     }
@@ -279,4 +351,113 @@ fn display_mode(mode: BuildMode) -> &'static str {
         BuildMode::LocalDocker => "local-docker",
         BuildMode::ExportOnly => "export-only",
     }
+}
+
+fn run_build_plan(plan: maker_build::BuildPlan, as_json: bool) -> Result<()> {
+    match plan.mode {
+        BuildMode::ExportOnly => {
+            emit_local_event(
+                &BuildEvent::Failure {
+                    code: BuildErrorCode::UnsupportedPlatform,
+                    message_key: "export_only_mode".to_owned(),
+                    detail: format!(
+                        "local builds are not supported on this platform; inspect the bundle at {}",
+                        plan.input_bundle_dir.display()
+                    ),
+                },
+                as_json,
+            )?;
+            exit_with_failure();
+        }
+        BuildMode::LocalDocker => {}
+    }
+
+    emit_local_event(
+        &BuildEvent::StageStarted {
+            stage: maker_build::BuildStage::Preflight,
+        },
+        as_json,
+    )?;
+
+    let docker = plan
+        .docker_command
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "docker".to_owned());
+    let docker_check = ProcessCommand::new(&docker)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    match docker_check {
+        Ok(status) if status.success() => {}
+        _ => {
+            emit_local_event(
+                &BuildEvent::Failure {
+                    code: BuildErrorCode::DockerMissing,
+                    message_key: "docker_missing".to_owned(),
+                    detail: "docker is required for local Linux builds".to_owned(),
+                },
+                as_json,
+            )?;
+            exit_with_failure();
+        }
+    }
+
+    emit_local_event(
+        &BuildEvent::StageFinished {
+            stage: maker_build::BuildStage::Preflight,
+        },
+        as_json,
+    )?;
+
+    let mut command = ProcessCommand::new(&docker);
+    command.args(plan.docker_command.iter().skip(1));
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    let status = command.status().context("failed to launch docker")?;
+    if !status.success() {
+        emit_local_event(
+            &BuildEvent::Failure {
+                code: BuildErrorCode::ContainerLaunchFailed,
+                message_key: "container_launch_failed".to_owned(),
+                detail: format!("docker exited with status {}", status),
+            },
+            as_json,
+        )?;
+        exit_with_failure();
+    }
+
+    Ok(())
+}
+
+fn emit_local_event(event: &BuildEvent, as_json: bool) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string(event)?);
+        return Ok(());
+    }
+
+    match event {
+        BuildEvent::StageStarted { stage } => println!("stage started: {:?}", stage),
+        BuildEvent::StageFinished { stage } => println!("stage finished: {:?}", stage),
+        BuildEvent::ArtifactReady { profile, path } => {
+            println!("artifact ready: {} -> {}", profile, path)
+        }
+        BuildEvent::Failure {
+            code,
+            message_key,
+            detail,
+        } => {
+            eprintln!("failure: {:?} ({}) {}", code, message_key, detail);
+        }
+        BuildEvent::LogLine { stream, line } => {
+            println!("[{}] {}", stream, line);
+        }
+    }
+    Ok(())
+}
+
+fn exit_with_failure() -> ! {
+    std::process::exit(1)
 }
