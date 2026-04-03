@@ -13,9 +13,32 @@ if ! find /zroot/lxc -mindepth 2 -maxdepth 2 -type f -name config | grep -q .; t
     exit 0
 fi
 
-exec /usr/bin/lxc-autostart
+if /usr/bin/systemctl is-active --quiet ygg-lxc-autostart-worker.service; then
+    exit 0
+fi
+
+exec /usr/bin/systemd-run \
+    --unit=ygg-lxc-autostart-worker.service \
+    --no-block \
+    --collect \
+    --property=Type=exec \
+    --property=IOSchedulingClass=idle \
+    --property=Nice=19 \
+    /usr/local/sbin/ygg-lxc-autostart-worker
 EOL
 chmod +x /usr/local/sbin/ygg-lxc-autostart
+
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostart-worker
+#!/bin/bash
+set -euo pipefail
+
+if command -v ionice >/dev/null 2>&1; then
+    exec /usr/bin/ionice -c3 /usr/bin/nice -n 19 /usr/bin/lxc-autostart
+fi
+
+exec /usr/bin/nice -n 19 /usr/bin/lxc-autostart
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostart-worker
 
 tee <<'EOL' /usr/local/sbin/ygg-lxc-autostop
 #!/bin/bash
@@ -25,7 +48,20 @@ if [[ ! -d /zroot/lxc ]]; then
     exit 0
 fi
 
-exec /usr/bin/lxc-autostart -s -a -t 30
+mapfile -t names < <(/usr/bin/lxc-autostart -L 2>/dev/null | awk 'NF { print $1 }')
+
+if [[ ${#names[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+/usr/bin/lxc-autostart -s -a -t 8 || true
+
+for name in "${names[@]}"; do
+    state="$(/usr/bin/lxc-info -sH -n "$name" 2>/dev/null || true)"
+    if [[ "$state" == "RUNNING" ]]; then
+        /usr/bin/lxc-stop -n "$name" -k || true
+    fi
+done
 EOL
 chmod +x /usr/local/sbin/ygg-lxc-autostop
 
@@ -47,7 +83,8 @@ After=ygg-import-zpool-at-boot.service zfs-mount.service lxc.service network.tar
 Type=oneshot
 RemainAfterExit=yes
 
-# The main command to start all containers with lxc.start.auto = 1
+# Dispatch autostart into a transient worker so boot does not block on every
+# container reaching its runtime state before graphical and remote services.
 ExecStart=/usr/local/sbin/ygg-lxc-autostart
 
 # CAVEAT 2: Define a clean shutdown command.
@@ -59,7 +96,7 @@ ExecStop=/usr/local/sbin/ygg-lxc-autostop
 
 # CAVEAT 3: Keep a generous but finite timeout so broken autostarts do not
 # stall boot forever.
-TimeoutSec=10min
+TimeoutSec=2min
 
 [Install]
 WantedBy=multi-user.target

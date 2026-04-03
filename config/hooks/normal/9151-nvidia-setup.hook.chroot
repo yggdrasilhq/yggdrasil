@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Install NVIDIA drivers from Debian repositories.
+# Avoid adding CUDA repositories here because their signing/key rotation
+# can break unattended image builds.
+apt-get update
+apt-get install -y nvidia-driver
+
+# Install keylase NVENC patch
+mkdir -p /opt/ygg
+cd /tmp
+git clone https://github.com/keylase/nvidia-patch.git
+cd nvidia-patch
+# Store patch for first boot application
+cp ./patch.sh /opt/ygg/
+cp ./patch-fbc.sh /opt/ygg/
+
+# LXC GPU Access Configuration
+mkdir -p /etc/lxc/lxc.conf.d
+tee /etc/lxc/lxc.conf.d/nvidia.conf <<'EOL'
+# GPU device access
+lxc.cgroup2.devices.allow = c 195:* rwm
+lxc.cgroup2.devices.allow = c 196:* rwm
+lxc.cgroup2.devices.allow = c 236:* rwm
+lxc.cgroup2.devices.allow = c 238:* rwm
+lxc.cgroup2.devices.allow = c 239:* rwm
+
+# Mount NVIDIA driver components
+lxc.mount.entry = /dev/nvidia0 dev/nvidia0 none bind,optional,create=file
+lxc.mount.entry = /dev/nvidiactl dev/nvidiactl none bind,optional,create=file
+lxc.mount.entry = /dev/nvidia-modeset dev/nvidia-modeset none bind,optional,create=file
+lxc.mount.entry = /dev/nvidia-uvm dev/nvidia-uvm none bind,optional,create=file
+lxc.mount.entry = /dev/nvidia-uvm-tools dev/nvidia-uvm-tools none bind,optional,create=file
+EOL
+
+# Create first-boot NVIDIA service
+tee /etc/systemd/system/nvidia-firstboot.service <<'EOL'
+[Unit]
+Description=First boot NVIDIA setup
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ygg/nvidia-firstboot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+# Create first-boot script
+tee /opt/ygg/nvidia-firstboot.sh <<'EOL'
+#!/bin/bash
+
+# Apply NVENC patch
+cd /opt/ygg
+./patch.sh || echo "Warning: NVENC patch application failed but continuing..."
+./patch-fbc.sh || echo "Warning: FBC patch application failed but continuing..."
+
+# Update NVIDIA container configuration
+nvidia-ctk runtime configure --runtime=runc || echo "Warning: NVIDIA runtime configuration failed but continuing..."
+
+# Remove self
+systemctl disable nvidia-firstboot
+exit 0
+EOL
+chmod +x /opt/ygg/nvidia-firstboot.sh
+
+# Enable first-boot service
+systemctl enable nvidia-firstboot
+
