@@ -13,6 +13,7 @@ config/source
 *.log
 .build/
 artifacts/
+dist/
 
 # Editor/system
 .DS_Store
@@ -21,6 +22,7 @@ artifacts/
 
 # Local user config
 ygg.local.toml
+ygg.*.local.toml
 .graveyard/
 assets/ssh/*
 !assets/ssh/README.md
@@ -31,6 +33,9 @@ assets/ssh/*
 runtime-cache/
 runtime-target/
 .staging/
+target/
+.codex
+wget-log*
 binary.modified_timestamps
 *.iso.sha256
 
@@ -49,3 +54,4 @@ config/includes.chroot/usr/local/bin/codex-session-tui
 config/includes.chroot/usr/local/bin/edit
 chroot.packages.*
 config/includes.chroot/root/.ssh/
+.gstack/
