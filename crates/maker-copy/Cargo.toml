@@ -1,0 +1,10 @@
+[package]
+name = "maker-copy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+maker-model = { path = "../maker-model" }
+serde.workspace = true

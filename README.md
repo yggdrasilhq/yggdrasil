@@ -4,19 +4,27 @@
 
 It produces a Debian sid live ISO for the machine that becomes your storage spine, your LXC host, your recovery anchor, and often the quiet box in the corner that the rest of your setup eventually depends on.
 
-This repository is for the server build pipeline itself.
-It is not the only way into the ecosystem, and it is not meant to trap you inside a wrapper.
-If you want a guided experience, use `yggcli`.
-If you prefer direct control, stay here and drive `mkconfig.sh` yourself.
+This repository now carries both halves of that story:
+
+- `yggdrasil-maker` is the guided front door for people who want a premium app and a native config they can keep
+- `mkconfig.sh` remains the direct operator path for people who want to stay close to the shell truth
+
+The public contract is simple:
+
+- GUI first
+- native config stays real
+- Docker is an execution substrate, not the product
+- the app's job ends when your custom ISO is ready and you know how to boot it
+- long-form docs still belong in `yggdocs`
 
 ## The Ecosystem In One View
 
 A simple mental model:
 
-- `yggdrasil` builds the server ISO
+- `yggdrasil-maker` personalizes and builds the ISO
+- `yggdrasil` contains the native build truth and host runtime wiring
 - `yggclient` configures the machines you use every day
 - `yggsync` moves data between them
-- `yggcli` is the optional front door that writes the native config files for all of the above
 - `yggdocs` is the manual, field guide, and operational memory
 
 ```text
@@ -39,9 +47,9 @@ A simple mental model:
            +-------------------------+----------------------+
                                      ^
                                      |
-                               +-----+-----+
-                               |  yggcli   |
-                               | guided UX |
+                               +-----------+
+                               | maker app |
+                               | GUI first |
                                +-----------+
 ```
 
@@ -50,7 +58,7 @@ Mermaid version:
 ```mermaid
 flowchart TD
   D[yggdocs<br/>quickstart, wiki, dev]
-  C[yggcli<br/>guided config UX]
+  C[yggdrasil-maker<br/>guided ISO studio]
   S[yggdrasil<br/>server ISO + host runtime]
   Y[yggsync<br/>sync engine]
   L[yggclient laptop]
@@ -99,26 +107,26 @@ Use this repository directly if:
 
 - you are comfortable editing config files
 - you want full control over build inputs
-- you want to script builds without a TUI
+- you want to script builds without waiting for the GUI
 - you want to understand the host composition plainly
 
-Use `yggcli` if:
+Use `yggdrasil-maker` if:
 
 - you want sensible defaults first
-- you want a guided configuration flow
+- you want a guided personalization flow
 - you are new to the ecosystem
-- you want to generate config files before touching the raw build knobs
+- you want a premium ISO studio that still emits the native config file
 
 The important design rule is this:
 
-- `yggcli` is optional
+- `yggdrasil-maker` is the canonical guided path
 - the native config files stay real and editable
 - the path from beginner to operator stays open
 
 ## Repository Boundaries
 
 - `yggdrasil`: ISO composition, hooks, package lists, host runtime wiring
-- `yggcli`: guided configuration and automation entrypoint
+- `yggdrasil-maker`: guided GUI plus a stable secondary automation CLI
 - `yggclient`: endpoint automation for laptops, desktops, and Android/Termux
 - `yggsync`: sync engine and job runner
 - `yggdocs`: quickstart, wiki, recipes, and developer references
@@ -136,18 +144,60 @@ Use a local untracked config file.
 - TOML (`*.toml`)
 - env files containing `YGG_*` key/value pairs
 
-That means a power user can stay here permanently without `yggcli`, while a new user can begin with `yggcli` and later continue by hand.
+That means a power user can stay here permanently without `yggdrasil-maker`, while a new user can begin with the app and later continue by hand.
 
 ## Quick Start
 
-### Guided path with `yggcli`
+### Guided path with `yggdrasil-maker`
 
-If you want the smoother path, let `yggcli` write the local config and then build from this repo:
+Download the latest native build from GitHub Releases:
+
+- Linux and macOS: `yggdrasil-maker-<platform>.tar.gz`
+- Windows: `yggdrasil-maker-<platform>.zip`
+- automation metadata: checksums plus `yggdrasil-maker-release-manifest.json`
+
+The public rule is simple:
+
+- native downloads are the main path
+- the GUI is the canonical product
+- `curl | sh` and `irm ... | iex` exist for automation and direct installs
+
+Direct install for automation and power users:
 
 ```bash
-yggcli --bootstrap --write-defaults
-yggcli --workspace ~/gh --build-iso --profile server
+curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/yggdrasil/main/scripts/install.sh | sh
 ```
+
+On Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/yggdrasilhq/yggdrasil/main/scripts/install.ps1 | iex
+```
+
+The packaging scripts that generate the native release assets live in:
+
+- [scripts/package-maker-platform-release.sh](/home/pi/gh/yggdrasil/scripts/package-maker-platform-release.sh)
+- [scripts/package-maker-release-manifest.sh](/home/pi/gh/yggdrasil/scripts/package-maker-release-manifest.sh)
+- [docs/yggdrasil-maker-distribution.md](/home/pi/gh/yggdrasil/docs/yggdrasil-maker-distribution.md)
+
+The first foundation release exposes a stable automation-facing CLI while the GUI shell is being built. The build contract is already the intended one:
+
+- `yggdrasil-maker` owns named setups, preset mapping, native config materialization, and Docker invocation planning
+- the version-matched build container runs the existing shell truth
+- non-Linux users stay on the honest export/handoff path until local-build support is proven
+
+Example in-repo foundation flow:
+
+```bash
+cargo run --bin yggdrasil-maker -- setup new --name "Lab NAS" --preset nas --output ./lab-nas.maker.json
+cargo run --bin yggdrasil-maker -- build plan --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --json
+./scripts/build-maker-image.sh
+cargo run --bin yggdrasil-maker -- build run --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --repo-root "$(pwd)"
+./scripts/package-maker-platform-release.sh linux-x86_64
+./scripts/package-maker-release-manifest.sh
+```
+
+Sensitive paths are permission-gated by design, so the automation CLI accepts runtime flags such as `--authorized-keys-file` instead of silently persisting those values unless the user explicitly opts in later.
 
 ### Direct path with `mkconfig.sh`
 

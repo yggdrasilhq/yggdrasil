@@ -13,6 +13,7 @@ iputils-ping
 # Essential utilities
 coreutils
 bash
+cpio
 gpg
 gpg-agent
 gpm
@@ -59,3 +60,11 @@ sudo
 bash-completion
 mokutil
 
+# KVM packages for Android Studio development
+qemu-system-x86
+qemu-utils
+ovmf
+bridge-utils
+cpu-checker
+libvirt-daemon-system
+libvirt-clients
