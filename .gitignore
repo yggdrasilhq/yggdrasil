@@ -13,6 +13,7 @@ config/source
 *.log
 .build/
 artifacts/
+dist/
 
 # Editor/system
 .DS_Store

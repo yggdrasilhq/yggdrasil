@@ -150,11 +150,22 @@ That means a power user can stay here permanently without `yggdrasil-maker`, whi
 
 ### Guided path with `yggdrasil-maker`
 
-The release path follows the `yggterm` model:
+Download the latest native build from GitHub Releases:
+
+- Linux and macOS: `yggdrasil-maker-<platform>.tar.gz`
+- Windows: `yggdrasil-maker-<platform>.zip`
+- automation metadata: checksums plus `yggdrasil-maker-release-manifest.json`
+
+The public rule is simple:
+
+- native downloads are the main path
+- the GUI is the canonical product
+- `curl | sh` and `irm ... | iex` exist for automation and direct installs
+
+Direct install for automation and power users:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/yggdrasil/main/scripts/install.sh | sh
-yggdrasil-maker preset --json
 ```
 
 On Windows:
@@ -162,6 +173,12 @@ On Windows:
 ```powershell
 irm https://raw.githubusercontent.com/yggdrasilhq/yggdrasil/main/scripts/install.ps1 | iex
 ```
+
+The packaging scripts that generate the native release assets live in:
+
+- [scripts/package-maker-platform-release.sh](/home/pi/gh/yggdrasil/scripts/package-maker-platform-release.sh)
+- [scripts/package-maker-release-manifest.sh](/home/pi/gh/yggdrasil/scripts/package-maker-release-manifest.sh)
+- [docs/yggdrasil-maker-distribution.md](/home/pi/gh/yggdrasil/docs/yggdrasil-maker-distribution.md)
 
 The first foundation release exposes a stable automation-facing CLI while the GUI shell is being built. The build contract is already the intended one:
 
@@ -176,6 +193,8 @@ cargo run --bin yggdrasil-maker -- setup new --name "Lab NAS" --preset nas --out
 cargo run --bin yggdrasil-maker -- build plan --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --json
 ./scripts/build-maker-image.sh
 cargo run --bin yggdrasil-maker -- build run --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --repo-root "$(pwd)"
+./scripts/package-maker-platform-release.sh linux-x86_64
+./scripts/package-maker-release-manifest.sh
 ```
 
 Sensitive paths are permission-gated by design, so the automation CLI accepts runtime flags such as `--authorized-keys-file` instead of silently persisting those values unless the user explicitly opts in later.
