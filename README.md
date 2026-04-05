@@ -186,6 +186,14 @@ The first foundation release exposes a stable automation-facing CLI while the GU
 - the version-matched build container runs the existing shell truth
 - non-Linux users stay on the honest export/handoff path until local-build support is proven
 
+The current app shape is now:
+
+- packaged native builds enable the first desktop shell by default
+- the CLI remains available as the stable automation surface
+- saved setups live in the app data directory and strip sensitive fields unless the user explicitly chooses to remember them
+- Linux `build run` performs real Docker-backed local builds
+- non-Linux `build run` produces an export bundle plus handoff manifest instead of pretending a local build happened
+
 Example in-repo foundation flow:
 
 ```bash
@@ -198,6 +206,8 @@ cargo run --bin yggdrasil-maker -- build run --setup ./lab-nas.maker.json --auth
 ```
 
 Sensitive paths are permission-gated by design, so the automation CLI accepts runtime flags such as `--authorized-keys-file` instead of silently persisting those values unless the user explicitly opts in later.
+
+For GUI builds, packaging now compiles with the `desktop-ui` feature so the shipped `yggdrasil-maker` binary opens the native shell when launched without subcommands.
 
 ### Direct path with `mkconfig.sh`
 
