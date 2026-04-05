@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = []
+desktop-ui = ["dep:eframe"]
+
 [[bin]]
 name = "yggdrasil-maker"
 path = "src/main.rs"
@@ -12,6 +16,8 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+eframe = { version = "0.34.1", optional = true }
+maker-app = { path = "../../crates/maker-app" }
 maker-build = { path = "../../crates/maker-build" }
 maker-copy = { path = "../../crates/maker-copy" }
 maker-model = { path = "../../crates/maker-model" }

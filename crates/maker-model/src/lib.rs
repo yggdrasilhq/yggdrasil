@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 pub const SETUP_SCHEMA_VERSION: u32 = 1;
+static SETUP_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -130,6 +133,11 @@ impl<T: Clone> SensitiveField<T> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetupDocument {
+    #[serde(default = "default_setup_id")]
+    pub setup_id: String,
+    #[serde(default = "default_journey_stage")]
+    pub journey_stage: JourneyStage,
+    #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     pub setup: Setup,
 }
@@ -137,9 +145,30 @@ pub struct SetupDocument {
 impl SetupDocument {
     pub fn new(name: String, preset: PresetId) -> Self {
         Self {
+            setup_id: default_setup_id(),
+            journey_stage: JourneyStage::Outcome,
             schema_version: SETUP_SCHEMA_VERSION,
             setup: Setup::new(name, preset),
         }
+    }
+
+    pub fn storage_filename(&self) -> String {
+        format!("{}--{}.maker.json", self.setup.slug(), self.setup_id)
+    }
+
+    pub fn migrate_to_current(mut self) -> Result<Self, ValidationError> {
+        if self.schema_version > SETUP_SCHEMA_VERSION {
+            return Err(ValidationError::UnsupportedSchemaVersion {
+                found: self.schema_version,
+                expected: SETUP_SCHEMA_VERSION,
+            });
+        }
+
+        self.schema_version = SETUP_SCHEMA_VERSION;
+        if self.setup_id.trim().is_empty() {
+            self.setup_id = default_setup_id();
+        }
+        Ok(self)
     }
 
     pub fn sanitized_for_persistence(&self) -> Self {
@@ -219,6 +248,31 @@ impl SetupDocument {
             intel_arc_sriov_device_id: self.setup.hardware.intel_arc_sriov_device_id.clone(),
             intel_arc_sriov_bind_vfs: self.setup.hardware.intel_arc_sriov_bind_vfs.clone(),
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum JourneyStage {
+    #[default]
+    Outcome,
+    Profile,
+    Personalize,
+    Review,
+    Build,
+    Boot,
+}
+
+impl JourneyStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Outcome => "Outcome",
+            Self::Profile => "Profile",
+            Self::Personalize => "Personalize",
+            Self::Review => "Review",
+            Self::Build => "Build",
+            Self::Boot => "Boot",
+        }
     }
 }
 
@@ -523,6 +577,23 @@ impl ParseEnumError {
     }
 }
 
+fn default_schema_version() -> u32 {
+    SETUP_SCHEMA_VERSION
+}
+
+fn default_journey_stage() -> JourneyStage {
+    JourneyStage::Outcome
+}
+
+fn default_setup_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    let suffix = SETUP_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("setup-{millis}-{suffix}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,5 +647,16 @@ mod tests {
             parsed.get("hostname").and_then(|value| value.as_str()),
             Some("devbox")
         );
+    }
+
+    #[test]
+    fn migration_updates_legacy_documents() {
+        let mut document = SetupDocument::new("Legacy".to_owned(), PresetId::Nas);
+        document.schema_version = 0;
+        document.setup_id.clear();
+
+        let migrated = document.migrate_to_current().expect("migrate legacy document");
+        assert_eq!(migrated.schema_version, SETUP_SCHEMA_VERSION);
+        assert!(!migrated.setup_id.is_empty());
     }
 }

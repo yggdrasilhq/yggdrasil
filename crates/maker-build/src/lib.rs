@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use maker_model::{BuildProfile, SetupDocument, ValidatedBuildConfig};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -15,6 +16,8 @@ const BUNDLE_CONFIG_NAME: &str = "ygg.local.toml";
 const BUNDLE_SETUP_NAME: &str = "setup.runtime.json";
 const BUNDLE_SETUP_PERSISTED_NAME: &str = "setup.persisted.json";
 const BUNDLE_INVOCATION_NAME: &str = "invocation.json";
+pub const ARTIFACT_MANIFEST_NAME: &str = "artifact-manifest.json";
+pub const EXPORT_README_NAME: &str = "README.txt";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -59,6 +62,8 @@ pub struct BuildPlan {
     pub input_bundle_dir: PathBuf,
     pub host_config_path: PathBuf,
     pub host_invocation_path: PathBuf,
+    pub host_persisted_setup_path: PathBuf,
+    pub host_artifact_manifest_path: PathBuf,
     pub artifacts_dir: PathBuf,
     pub docker_command: Vec<String>,
 }
@@ -70,6 +75,7 @@ pub enum BuildStage {
     Bundle,
     DockerRun,
     Build,
+    Smoke,
     ArtifactCopy,
     Complete,
 }
@@ -88,6 +94,7 @@ pub enum BuildErrorCode {
     ArtifactMissing,
     OutputPermissionDenied,
     UnsupportedPlatform,
+    SmokeTestFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +121,34 @@ pub enum BuildEvent {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArtifactKind {
+    Iso,
+    NativeConfig,
+    SetupDocument,
+    HandoffReadme,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactRecord {
+    pub kind: ArtifactKind,
+    pub profile: Option<BuildProfile>,
+    pub path: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactManifest {
+    pub app_version: String,
+    pub setup_name: String,
+    pub build_profile: BuildProfile,
+    pub mode: BuildMode,
+    pub source_mode: SourceMode,
+    pub artifacts: Vec<ArtifactRecord>,
+}
+
 pub fn build_plan_for_request(request: &AppBuildRequest) -> Result<BuildPlan> {
     let prepared = PreparedBundle::new(request)?;
     let image_ref = image_ref(&request.app_version);
@@ -127,6 +162,8 @@ pub fn build_plan_for_request(request: &AppBuildRequest) -> Result<BuildPlan> {
         input_bundle_dir: prepared.tempdir.keep(),
         host_config_path: prepared.config_path,
         host_invocation_path: prepared.invocation_path,
+        host_persisted_setup_path: prepared.persisted_setup_path,
+        host_artifact_manifest_path: request.artifacts_dir.join(ARTIFACT_MANIFEST_NAME),
         artifacts_dir: request.artifacts_dir.clone(),
         docker_command,
     })
@@ -151,10 +188,7 @@ fn docker_command(
     mode: BuildMode,
 ) -> Result<Vec<String>> {
     if mode == BuildMode::ExportOnly {
-        return Ok(vec![
-            "export-only".to_owned(),
-            prepared.config_path.display().to_string(),
-        ]);
+        return Ok(Vec::new());
     }
 
     let mut args = vec![
@@ -201,6 +235,7 @@ struct PreparedBundle {
     tempdir: TempDir,
     config_path: PathBuf,
     invocation_path: PathBuf,
+    persisted_setup_path: PathBuf,
 }
 
 impl PreparedBundle {
@@ -267,8 +302,35 @@ impl PreparedBundle {
             tempdir,
             config_path,
             invocation_path,
+            persisted_setup_path,
         })
     }
+}
+
+pub fn parse_build_event_line(line: &str) -> Result<BuildEvent> {
+    serde_json::from_str(line).with_context(|| format!("invalid build event line: {line}"))
+}
+
+pub fn parse_build_event_stream<R, F>(reader: R, mut on_event: F) -> Result<()>
+where
+    R: BufRead,
+    F: FnMut(BuildEvent),
+{
+    for line in reader.lines() {
+        let line = line.context("failed reading build event stream")?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        on_event(parse_build_event_line(&line)?);
+    }
+    Ok(())
+}
+
+pub fn read_artifact_manifest(path: &Path) -> Result<ArtifactManifest> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read artifact manifest {}", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("invalid artifact manifest {}", path.display()))
 }
 
 fn prepare_sensitive_mounts(
@@ -414,5 +476,48 @@ mod tests {
             .expect("repo mount present");
         assert!(!repo_mount.contains("readonly"));
         assert!(repo_mount.contains(&repo_root.display().to_string()));
+    }
+
+    #[test]
+    fn parse_build_event_line_decodes_json() {
+        let event = parse_build_event_line(r#"{"type":"stage-started","stage":"preflight"}"#)
+            .expect("parse build event");
+        assert_eq!(
+            event,
+            BuildEvent::StageStarted {
+                stage: BuildStage::Preflight
+            }
+        );
+    }
+
+    #[test]
+    fn read_artifact_manifest_decodes_records() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join(ARTIFACT_MANIFEST_NAME);
+        fs::write(
+            &path,
+            r#"{
+  "app_version": "0.1.0",
+  "setup_name": "Lab NAS",
+  "build_profile": "server",
+  "mode": "export-only",
+  "source_mode": "release-container",
+  "artifacts": [
+    {
+      "kind": "native-config",
+      "profile": null,
+      "path": "/tmp/ygg.local.toml",
+      "sha256": "abc123",
+      "size_bytes": 42
+    }
+  ]
+}"#,
+        )
+        .expect("write manifest");
+
+        let manifest = read_artifact_manifest(&path).expect("read manifest");
+        assert_eq!(manifest.mode, BuildMode::ExportOnly);
+        assert_eq!(manifest.artifacts[0].kind, ArtifactKind::NativeConfig);
+        assert_eq!(manifest.artifacts[0].size_bytes, 42);
     }
 }

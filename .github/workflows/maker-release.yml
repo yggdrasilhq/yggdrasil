@@ -1,0 +1,144 @@
+name: maker-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            label: linux-aarch64
+            target: aarch64-unknown-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+          - os: macos-latest
+            label: macos-x86_64
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            label: macos-aarch64
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            label: windows-x86_64
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            label: windows-aarch64
+            target: aarch64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            libgtk-3-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+
+      - name: Install Rust target
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+
+      - name: Package native release asset
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+          YGGDRASIL_MAKER_CARGO_FEATURES: desktop-ui
+        run: |
+          ./scripts/package-maker-platform-release.sh "${{ matrix.label }}" "${{ matrix.target }}"
+
+      - name: Upload packaged target
+        uses: actions/upload-artifact@v4
+        with:
+          name: maker-${{ matrix.label }}
+          path: |
+            dist/yggdrasil-maker-${{ matrix.label }}*
+
+  build-container:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push version-matched build container
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/yggdrasil-maker-build:${{ github.ref_name }}"
+          docker build -f docker/yggdrasil-maker-build.Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - build-native
+      - build-container
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: maker-*
+          merge-multiple: true
+
+      - name: Generate release manifest
+        run: ./scripts/package-maker-release-manifest.sh
+
+      - name: Extract curated release notes
+        id: notes
+        run: |
+          python3 - <<'PY' > release-notes.txt
+          import pathlib
+          import re
+          import sys
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          tag = "${{ github.ref_name }}".lstrip("v")
+          pattern = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+          matches = list(pattern.finditer(changelog))
+          sections = {}
+          for idx, match in enumerate(matches):
+              start = match.end()
+              end = matches[idx + 1].start() if idx + 1 < len(matches) else len(changelog)
+              sections[match.group(1).strip()] = changelog[start:end].strip()
+
+          body = sections.get(tag) or sections.get("Unreleased")
+          if not body:
+              body = f"- release {tag}"
+          print(body.strip() + "\n")
+          PY
+
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "yggdrasil-maker ${{ github.ref_name }}" \
+            --notes-file release-notes.txt

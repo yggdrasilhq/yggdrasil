@@ -1,16 +1,17 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
-use maker_build::{AppBuildRequest, BuildMode, SourceMode, build_plan_for_request};
-use maker_build::{BuildErrorCode, BuildEvent};
+use maker_app::{BuildInputs, MakerApp};
+use maker_build::{BuildErrorCode, BuildEvent, BuildMode};
 use maker_copy::preset_cards;
-use maker_model::{BuildProfile, PresetId, SetupDocument};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command as ProcessCommand, Stdio};
+use maker_model::{BuildProfile, PresetId};
+use std::path::PathBuf;
+
+#[cfg(feature = "desktop-ui")]
+mod gui;
 
 #[derive(Parser, Debug)]
 #[command(name = "yggdrasil-maker")]
-#[command(about = "Foundation CLI for the yggdrasil-maker build flow")]
+#[command(about = "GUI-first maker app with a stable automation CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -84,7 +85,7 @@ enum BuildCommand {
     Run(RunBuildArgs),
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 struct BuildInputArgs {
     #[arg(long)]
     setup: PathBuf,
@@ -96,6 +97,8 @@ struct BuildInputArgs {
     host_keys_dir: Option<PathBuf>,
     #[arg(long)]
     repo_root: Option<PathBuf>,
+    #[arg(long)]
+    skip_smoke: bool,
 }
 
 #[derive(Args, Debug)]
@@ -115,14 +118,26 @@ struct RunBuildArgs {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let args = std::env::args_os().collect::<Vec<_>>();
+    #[cfg(feature = "desktop-ui")]
+    if should_launch_gui(&args) {
+        return gui::launch();
+    }
+
+    let cli = Cli::parse_from(args);
+    let app = MakerApp::new_for_current_platform()?;
     match cli.command {
         Command::Preset(args) => run_preset(args)?,
-        Command::Setup { command } => run_setup(command)?,
-        Command::Config { command } => run_config(command)?,
-        Command::Build { command } => run_build(command)?,
+        Command::Setup { command } => run_setup(&app, command)?,
+        Command::Config { command } => run_config(&app, command)?,
+        Command::Build { command } => run_build(&app, command)?,
     }
     Ok(())
+}
+
+#[cfg(feature = "desktop-ui")]
+fn should_launch_gui(args: &[std::ffi::OsString]) -> bool {
+    args.len() == 1 || args.get(1).and_then(|arg| arg.to_str()) == Some("gui")
 }
 
 fn run_preset(args: PresetCommand) -> Result<()> {
@@ -141,37 +156,31 @@ fn run_preset(args: PresetCommand) -> Result<()> {
     Ok(())
 }
 
-fn run_setup(command: SetupCommand) -> Result<()> {
+fn run_setup(app: &MakerApp, command: SetupCommand) -> Result<()> {
     match command {
         SetupCommand::New(args) => {
-            let mut document = SetupDocument::new(args.name, args.preset);
-            document.setup.profile_override = args.profile;
-            if let Some(hostname) = args.hostname {
-                document.setup.personalization.hostname = hostname;
-            }
-
+            let document = app.create_setup_document(args.name, args.preset, args.profile, args.hostname);
             let output_path = args
                 .output
-                .unwrap_or_else(|| PathBuf::from(format!("{}.maker.json", document.setup.slug())));
-            write_json(&output_path, &document)?;
+                .unwrap_or_else(|| PathBuf::from(document.storage_filename()));
+            app.save_setup_path(&output_path, &document)?;
             println!("{}", output_path.display());
         }
         SetupCommand::Show(args) => {
-            let document = read_setup(&args.input)?;
+            let document = app.load_setup_path(&args.input)?;
             println!("{}", serde_json::to_string_pretty(&document)?);
         }
     }
     Ok(())
 }
 
-fn run_config(command: ConfigCommand) -> Result<()> {
+fn run_config(app: &MakerApp, command: ConfigCommand) -> Result<()> {
     match command {
         ConfigCommand::Emit(args) => {
-            let document = read_setup(&args.setup)?;
-            let config = document.validate()?;
-            let toml = config.to_native_toml()?;
+            let document = app.load_setup_path(&args.setup)?;
+            let toml = app.emit_config_toml(&document)?;
             if let Some(output) = args.output {
-                fs::write(&output, toml.as_bytes())
+                std::fs::write(&output, toml.as_bytes())
                     .with_context(|| format!("failed to write {}", output.display()))?;
                 println!("{}", output.display());
             } else {
@@ -182,25 +191,10 @@ fn run_config(command: ConfigCommand) -> Result<()> {
     Ok(())
 }
 
-fn run_build(command: BuildCommand) -> Result<()> {
+fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
     match command {
         BuildCommand::Plan(args) => {
-            let mut document = read_setup(&args.input.setup)?;
-            apply_runtime_sensitive_overrides(&mut document, &args.input);
-            require_runtime_sensitive_inputs(&document)?;
-            let request = AppBuildRequest {
-                app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                setup_document: document,
-                artifacts_dir: args.input.artifacts_dir,
-                source_mode: if args.input.repo_root.is_some() {
-                    SourceMode::RepoLocal
-                } else {
-                    SourceMode::ReleaseContainer
-                },
-                repo_root: args.input.repo_root,
-                skip_smoke: false,
-            };
-            let plan = build_plan_for_request(&request)?;
+            let plan = app.plan_build(load_build_inputs(app, args.input)?)?;
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
             } else {
@@ -211,122 +205,60 @@ fn run_build(command: BuildCommand) -> Result<()> {
                 }
                 println!("input bundle: {}", plan.input_bundle_dir.display());
                 println!("config: {}", plan.host_config_path.display());
+                println!("persisted setup: {}", plan.host_persisted_setup_path.display());
                 println!("invocation: {}", plan.host_invocation_path.display());
+                println!("artifact manifest: {}", plan.host_artifact_manifest_path.display());
                 println!("artifacts: {}", plan.artifacts_dir.display());
-                println!("docker command:");
-                println!("  {}", shell_join(&plan.docker_command));
+                if !plan.docker_command.is_empty() {
+                    println!("docker command:");
+                    println!("  {}", shell_join(&plan.docker_command));
+                }
             }
         }
         BuildCommand::Run(args) => {
-            let mut document = match read_setup(&args.input.setup) {
-                Ok(document) => document,
+            let as_json = args.json;
+            match app.run_build(load_build_inputs(app, args.input)?, |event| {
+                let _ = emit_local_event(&event, as_json);
+            }) {
+                Ok(result) => {
+                    if as_json {
+                        println!("{}", serde_json::to_string_pretty(&result.manifest)?);
+                    } else {
+                        println!(
+                            "artifact manifest: {}",
+                            result.plan.host_artifact_manifest_path.display()
+                        );
+                    }
+                }
                 Err(error) => {
+                    if error.to_string().starts_with("Failure { code:") {
+                        std::process::exit(1);
+                    }
                     emit_local_event(
                         &BuildEvent::Failure {
-                            code: BuildErrorCode::BuildConfigInvalid,
-                            message_key: "setup_read_failed".to_owned(),
+                            code: BuildErrorCode::BuildProcessFailed,
+                            message_key: "build_failed".to_owned(),
                             detail: error.to_string(),
                         },
-                        args.json,
+                        as_json,
                     )?;
-                    exit_with_failure();
+                    std::process::exit(1);
                 }
-            };
-            apply_runtime_sensitive_overrides(&mut document, &args.input);
-            if let Err(error) = require_runtime_sensitive_inputs(&document) {
-                emit_local_event(
-                    &BuildEvent::Failure {
-                        code: BuildErrorCode::BuildConfigInvalid,
-                        message_key: "sensitive_input_missing".to_owned(),
-                        detail: error.to_string(),
-                    },
-                    args.json,
-                )?;
-                exit_with_failure();
             }
-            let request = AppBuildRequest {
-                app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                setup_document: document,
-                artifacts_dir: args.input.artifacts_dir,
-                source_mode: if args.input.repo_root.is_some() {
-                    SourceMode::RepoLocal
-                } else {
-                    SourceMode::ReleaseContainer
-                },
-                repo_root: args.input.repo_root,
-                skip_smoke: false,
-            };
-            let plan = match build_plan_for_request(&request) {
-                Ok(plan) => plan,
-                Err(error) => {
-                    emit_local_event(
-                        &BuildEvent::Failure {
-                            code: BuildErrorCode::InputBundleWriteFailed,
-                            message_key: "build_plan_failed".to_owned(),
-                            detail: error.to_string(),
-                        },
-                        args.json,
-                    )?;
-                    exit_with_failure();
-                }
-            };
-            run_build_plan(plan, args.json)?;
         }
     }
     Ok(())
 }
 
-fn apply_runtime_sensitive_overrides(document: &mut SetupDocument, args: &BuildInputArgs) {
-    if let Some(path) = args.authorized_keys_file.as_ref() {
-        document.setup.ssh.authorized_keys_file.value = Some(path.display().to_string());
-    }
-    if let Some(path) = args.host_keys_dir.as_ref() {
-        document.setup.ssh.host_keys_dir.value = Some(path.display().to_string());
-    }
-}
-
-fn require_runtime_sensitive_inputs(document: &SetupDocument) -> Result<()> {
-    if !document.setup.ssh.embed_ssh_keys {
-        return Ok(());
-    }
-
-    let has_authorized_keys = document
-        .setup
-        .ssh
-        .authorized_keys_file
-        .build_value()
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-
-    if !has_authorized_keys {
-        bail!(
-            "build planning requires --authorized-keys-file or a remembered ssh authorized_keys path"
-        );
-    }
-
-    Ok(())
-}
-
-fn read_setup(path: &Path) -> Result<SetupDocument> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let document = serde_json::from_str(&raw)
-        .with_context(|| format!("invalid setup JSON in {}", path.display()))?;
-    Ok(document)
-}
-
-fn write_json(path: &Path, document: &SetupDocument) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-    }
-    let sanitized = document.sanitized_for_persistence();
-    let payload = serde_json::to_string_pretty(&sanitized)?;
-    fs::write(path, payload.as_bytes())
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
+fn load_build_inputs(app: &MakerApp, args: BuildInputArgs) -> Result<BuildInputs> {
+    Ok(BuildInputs {
+        setup_document: app.load_setup_path(&args.setup)?,
+        artifacts_dir: args.artifacts_dir,
+        authorized_keys_file: args.authorized_keys_file,
+        host_keys_dir: args.host_keys_dir,
+        repo_root: args.repo_root,
+        skip_smoke: args.skip_smoke,
+    })
 }
 
 fn shell_join(parts: &[String]) -> String {
@@ -353,85 +285,6 @@ fn display_mode(mode: BuildMode) -> &'static str {
     }
 }
 
-fn run_build_plan(plan: maker_build::BuildPlan, as_json: bool) -> Result<()> {
-    match plan.mode {
-        BuildMode::ExportOnly => {
-            emit_local_event(
-                &BuildEvent::Failure {
-                    code: BuildErrorCode::UnsupportedPlatform,
-                    message_key: "export_only_mode".to_owned(),
-                    detail: format!(
-                        "local builds are not supported on this platform; inspect the bundle at {}",
-                        plan.input_bundle_dir.display()
-                    ),
-                },
-                as_json,
-            )?;
-            exit_with_failure();
-        }
-        BuildMode::LocalDocker => {}
-    }
-
-    emit_local_event(
-        &BuildEvent::StageStarted {
-            stage: maker_build::BuildStage::Preflight,
-        },
-        as_json,
-    )?;
-
-    let docker = plan
-        .docker_command
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "docker".to_owned());
-    let docker_check = ProcessCommand::new(&docker)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-
-    match docker_check {
-        Ok(status) if status.success() => {}
-        _ => {
-            emit_local_event(
-                &BuildEvent::Failure {
-                    code: BuildErrorCode::DockerMissing,
-                    message_key: "docker_missing".to_owned(),
-                    detail: "docker is required for local Linux builds".to_owned(),
-                },
-                as_json,
-            )?;
-            exit_with_failure();
-        }
-    }
-
-    emit_local_event(
-        &BuildEvent::StageFinished {
-            stage: maker_build::BuildStage::Preflight,
-        },
-        as_json,
-    )?;
-
-    let mut command = ProcessCommand::new(&docker);
-    command.args(plan.docker_command.iter().skip(1));
-    command.stdout(Stdio::inherit());
-    command.stderr(Stdio::inherit());
-    let status = command.status().context("failed to launch docker")?;
-    if !status.success() {
-        emit_local_event(
-            &BuildEvent::Failure {
-                code: BuildErrorCode::ContainerLaunchFailed,
-                message_key: "container_launch_failed".to_owned(),
-                detail: format!("docker exited with status {}", status),
-            },
-            as_json,
-        )?;
-        exit_with_failure();
-    }
-
-    Ok(())
-}
-
 fn emit_local_event(event: &BuildEvent, as_json: bool) -> Result<()> {
     if as_json {
         println!("{}", serde_json::to_string(event)?);
@@ -456,8 +309,4 @@ fn emit_local_event(event: &BuildEvent, as_json: bool) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn exit_with_failure() -> ! {
-    std::process::exit(1)
 }

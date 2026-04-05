@@ -1,0 +1,15 @@
+[package]
+name = "maker-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+maker-build = { path = "../maker-build" }
+maker-model = { path = "../maker-model" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true

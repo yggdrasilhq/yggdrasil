@@ -36,6 +36,7 @@ mkdir -p "$DIST_DIR"
 
 BIN_NAME="yggdrasil-maker"
 ARCHIVE_EXT="tar.gz"
+CARGO_FEATURES="${YGGDRASIL_MAKER_CARGO_FEATURES:-desktop-ui}"
 case "$TARGET_LABEL" in
   windows-*)
     BIN_NAME="yggdrasil-maker.exe"
@@ -44,7 +45,7 @@ case "$TARGET_LABEL" in
 esac
 
 BIN_PATH="${ROOT_DIR}/target/release/${BIN_NAME}"
-BUILD_CMD=(cargo build --release -p yggdrasil-maker --bin yggdrasil-maker)
+BUILD_CMD=(cargo build --release -p yggdrasil-maker --bin yggdrasil-maker --features "$CARGO_FEATURES")
 if [[ -n "$TARGET_TRIPLE" ]]; then
   BUILD_CMD+=(--target "$TARGET_TRIPLE")
   BIN_PATH="${ROOT_DIR}/target/${TARGET_TRIPLE}/release/${BIN_NAME}"
@@ -143,4 +144,3 @@ PY
 echo "Release binary: ${DIST_DIR}/${OUT_BASENAME}"
 echo "Release archive: ${ARCHIVE_PATH}"
 echo "Target metadata: ${DIST_DIR}/yggdrasil-maker-${TARGET_LABEL}.json"
-
