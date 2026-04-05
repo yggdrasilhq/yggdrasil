@@ -1,5 +1,5 @@
 use anyhow::Result;
-use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, TextEdit};
+use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, TextEdit, Vec2};
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, JourneyStage, SetupDocument};
@@ -7,11 +7,19 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
 pub fn launch() -> Result<()> {
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1360.0, 900.0])
+            .with_min_inner_size([1100.0, 760.0]),
+        ..Default::default()
+    };
     eframe::run_native(
         "yggdrasil-maker",
         options,
-        Box::new(|_cc| Ok(Box::new(MakerGui::bootstrap()?))),
+        Box::new(|cc| {
+            configure_visuals(&cc.egui_ctx);
+            Ok(Box::new(MakerGui::bootstrap()?))
+        }),
     )
     .map_err(|error| anyhow::anyhow!(error))
 }
@@ -47,6 +55,17 @@ impl MakerGui {
             app.create_setup_document("Lab NAS".to_owned(), maker_model::PresetId::Nas, None, None)
         };
         let config_preview = app.emit_config_toml(&current_setup)?;
+        let plan_preview = app
+            .plan_build(BuildInputs {
+                setup_document: current_setup.clone(),
+                artifacts_dir: "./artifacts".into(),
+                authorized_keys_file: None,
+                host_keys_dir: None,
+                repo_root: None,
+                skip_smoke: false,
+            })
+            .and_then(|plan| serde_json::to_string_pretty(&plan).map_err(|error| error.into()))
+            .unwrap_or_else(|error| format!("Build plan unavailable:\n{error}"));
         saved_setups.sort_by(|left, right| right.modified_unix_secs.cmp(&left.modified_unix_secs));
         Ok(Self {
             app,
@@ -54,7 +73,7 @@ impl MakerGui {
             current_setup,
             artifacts_dir: "./artifacts".to_owned(),
             repo_root: String::new(),
-            plan_preview: String::new(),
+            plan_preview,
             config_preview,
             build_log: Vec::new(),
             build_status: "Ready".to_owned(),
@@ -364,4 +383,36 @@ impl eframe::App for MakerGui {
         let ctx = ui.ctx().clone();
         self.render_root(&ctx, frame);
     }
+}
+
+fn configure_visuals(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.override_text_color = Some(Color32::from_rgb(224, 217, 204));
+    visuals.panel_fill = Color32::from_rgb(19, 19, 18);
+    visuals.window_fill = Color32::from_rgb(16, 16, 15);
+    visuals.extreme_bg_color = Color32::from_rgb(11, 11, 11);
+    visuals.code_bg_color = Color32::from_rgb(10, 10, 10);
+    visuals.faint_bg_color = Color32::from_rgb(25, 24, 22);
+    visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(25, 24, 22);
+    visuals.widgets.noninteractive.bg_stroke.color = Color32::from_rgb(58, 54, 49);
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(33, 31, 28);
+    visuals.widgets.inactive.bg_stroke.color = Color32::from_rgb(73, 67, 58);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(56, 46, 35);
+    visuals.widgets.hovered.bg_stroke.color = Color32::from_rgb(201, 169, 118);
+    visuals.widgets.active.bg_fill = Color32::from_rgb(96, 73, 41);
+    visuals.widgets.active.bg_stroke.color = Color32::from_rgb(235, 198, 138);
+    visuals.selection.bg_fill = Color32::from_rgb(122, 93, 47);
+    visuals.selection.stroke.color = Color32::from_rgb(246, 227, 192);
+    visuals.widgets.inactive.corner_radius = 8.0.into();
+    visuals.widgets.hovered.corner_radius = 8.0.into();
+    visuals.widgets.active.corner_radius = 8.0.into();
+    visuals.widgets.noninteractive.corner_radius = 10.0.into();
+    ctx.set_visuals(visuals);
+
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
+    style.spacing.button_padding = Vec2::new(12.0, 8.0);
+    style.spacing.interact_size = Vec2::new(44.0, 32.0);
+    style.spacing.text_edit_width = 260.0;
+    ctx.set_style(style);
 }
