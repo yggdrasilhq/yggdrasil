@@ -1,10 +1,17 @@
 use anyhow::Result;
 use eframe::egui::{
-    self, Align, Align2, Color32, FontId, Frame, Layout, Margin, RichText, Stroke, TextEdit, Vec2,
+    self, Align, Align2, Color32, FontId, Frame, Key, Layout, Margin, Modifiers, RichText, Stroke,
+    TextEdit, Vec2,
 };
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
+use maker_build::{
+    ARTIFACT_MANIFEST_NAME, ArtifactKind, ArtifactManifest, ArtifactRecord, BuildMode,
+    read_artifact_manifest,
+};
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -51,12 +58,37 @@ struct MakerGui {
     utility_tab: UtilityTab,
     utility_pane_open: bool,
     was_compact_shell: bool,
+    recent_artifacts: Vec<RecentArtifactSummary>,
+    recent_artifacts_expanded: bool,
+    success_state: Option<BuildSuccessState>,
+    focus_setup_name: bool,
 }
 
 enum GuiBuildMessage {
     Event(String),
-    Finished(String),
+    Finished {
+        manifest: ArtifactManifest,
+        payload: String,
+    },
     Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecentArtifactSummary {
+    title: String,
+    subtitle: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BuildSuccessState {
+    setup_id: String,
+    title: String,
+    proof: String,
+    artifact_name: String,
+    artifact_path: String,
+    profile_label: String,
+    output_path: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -116,6 +148,14 @@ impl MakerGui {
             utility_tab: UtilityTab::Config,
             utility_pane_open: true,
             was_compact_shell: false,
+            recent_artifacts: Vec::new(),
+            recent_artifacts_expanded: false,
+            success_state: None,
+            focus_setup_name: false,
+        })
+        .map(|mut gui| {
+            gui.refresh_recent_artifacts();
+            gui
         })
     }
 
@@ -136,6 +176,7 @@ impl MakerGui {
             .plan_build(self.build_inputs())
             .and_then(|plan| serde_json::to_string_pretty(&plan).map_err(|error| error.into()))
             .unwrap_or_else(|error| format!("Build plan unavailable:\n{error}"));
+        self.refresh_recent_artifacts();
     }
 
     fn save_current_setup(&mut self) {
@@ -178,6 +219,8 @@ impl MakerGui {
         self.build_log.clear();
         self.build_result.clear();
         self.build_status = "Building...".to_owned();
+        self.success_state = None;
+        self.current_setup.journey_stage = JourneyStage::Build;
         self.utility_tab = UtilityTab::Stream;
         self.utility_pane_open = true;
 
@@ -203,7 +246,10 @@ impl MakerGui {
                 Ok(outcome) => {
                     let payload = serde_json::to_string_pretty(&outcome.manifest)
                         .unwrap_or_else(|error| error.to_string());
-                    let _ = tx.send(GuiBuildMessage::Finished(payload));
+                    let _ = tx.send(GuiBuildMessage::Finished {
+                        manifest: outcome.manifest,
+                        payload,
+                    });
                 }
                 Err(error) => {
                     let _ = tx.send(GuiBuildMessage::Failed(error.to_string()));
@@ -212,34 +258,139 @@ impl MakerGui {
         });
     }
 
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::N)) {
+            self.start_another_setup();
+        }
+
+        if ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::B)) {
+            self.start_build();
+        }
+
+        if ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::T)) {
+            self.utility_pane_open = !self.utility_pane_open;
+        }
+
+        if ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::S)) {
+            self.utility_pane_open = false;
+            self.focus_setup_name = true;
+        }
+    }
+
     fn poll_build_channel(&mut self) {
         let mut finished = false;
+        let mut pending = Vec::new();
         if let Some(rx) = self.build_rx.as_ref() {
             while let Ok(message) = rx.try_recv() {
-                match message {
-                    GuiBuildMessage::Event(line) => self.build_log.push(line),
-                    GuiBuildMessage::Finished(payload) => {
-                        self.build_running = false;
-                        self.build_status = "Build finished".to_owned();
-                        self.build_result = payload;
-                        finished = true;
-                    }
-                    GuiBuildMessage::Failed(error) => {
-                        self.build_running = false;
-                        self.build_status = format!("Build failed: {error}");
-                        finished = true;
-                    }
+                pending.push(message);
+            }
+        }
+
+        for message in pending {
+            match message {
+                GuiBuildMessage::Event(line) => self.build_log.push(line),
+                GuiBuildMessage::Finished { manifest, payload } => {
+                    self.build_running = false;
+                    self.build_status = "Build finished".to_owned();
+                    self.build_result = payload;
+                    self.current_setup.journey_stage = JourneyStage::Boot;
+                    self.activate_success_state(&manifest);
+                    self.refresh_recent_artifacts();
+                    finished = true;
+                }
+                GuiBuildMessage::Failed(error) => {
+                    self.build_running = false;
+                    self.build_status = format!("Build failed: {error}");
+                    finished = true;
                 }
             }
         }
+
         if finished {
             self.build_rx = None;
         }
     }
 
+    fn refresh_recent_artifacts(&mut self) {
+        self.recent_artifacts = self
+            .latest_manifest()
+            .map(|manifest| recent_artifact_summaries(&manifest))
+            .unwrap_or_default();
+    }
+
+    fn latest_manifest(&self) -> Option<ArtifactManifest> {
+        let path = Path::new(&self.artifacts_dir).join(ARTIFACT_MANIFEST_NAME);
+        if !path.is_file() {
+            return None;
+        }
+        read_artifact_manifest(&path).ok()
+    }
+
+    fn activate_success_state(&mut self, manifest: &ArtifactManifest) {
+        let primary = primary_artifact(manifest)
+            .or_else(|| manifest.artifacts.first())
+            .cloned();
+        let artifact_name = primary
+            .as_ref()
+            .and_then(|artifact| Path::new(&artifact.path).file_name())
+            .and_then(|value| value.to_str())
+            .unwrap_or("Artifact")
+            .to_owned();
+        let artifact_path = primary
+            .as_ref()
+            .map(|artifact| artifact.path.clone())
+            .unwrap_or_default();
+        let proof = match manifest.mode {
+            BuildMode::LocalDocker => {
+                "Verified the output manifest after a local Docker build and copied the resulting artifacts."
+            }
+            BuildMode::ExportOnly => {
+                "Prepared a truthful export bundle for a Linux builder, including config, setup document, and handoff instructions."
+            }
+        }
+        .to_owned();
+        self.success_state = Some(BuildSuccessState {
+            setup_id: self.current_setup.setup_id.clone(),
+            title: if manifest.mode == BuildMode::ExportOnly {
+                "Export bundle ready".to_owned()
+            } else {
+                "Artifact ready".to_owned()
+            },
+            proof,
+            artifact_name,
+            artifact_path: artifact_path.clone(),
+            profile_label: manifest.build_profile.slug().to_owned(),
+            output_path: if artifact_path.is_empty() {
+                self.artifacts_dir.clone()
+            } else {
+                artifact_path
+            },
+        });
+        self.recent_artifacts_expanded = true;
+    }
+
+    fn start_another_setup(&mut self) {
+        self.current_setup =
+            self.app
+                .create_setup_document("New Yggdrasil".to_owned(), PresetId::Nas, None, None);
+        self.build_status = "Ready".to_owned();
+        self.build_result.clear();
+        self.build_log.clear();
+        self.success_state = None;
+        self.utility_tab = UtilityTab::Config;
+        self.utility_pane_open = true;
+        self.refresh_previews();
+    }
+
+    fn open_build_details(&mut self) {
+        self.utility_tab = UtilityTab::Stream;
+        self.utility_pane_open = true;
+    }
+
     #[allow(deprecated)]
     fn render_root(&mut self, ctx: &egui::Context) {
         let viewport_width = ctx.content_rect().width();
+        let show_meta_hints = ctx.input(|input| input.modifiers.alt);
         let compact_shell = viewport_width < 1080.0;
         if compact_shell && !self.was_compact_shell {
             self.utility_pane_open = false;
@@ -311,10 +462,19 @@ impl MakerGui {
                                         [118.0, 36.0],
                                         if self.utility_pane_open {
                                             egui::Button::new(
-                                                RichText::new("Hide Truth").color(SHELL_TEXT),
+                                                RichText::new(if show_meta_hints {
+                                                    "Hide Truth  Alt+T"
+                                                } else {
+                                                    "Hide Truth"
+                                                })
+                                                .color(SHELL_TEXT),
                                             )
                                         } else {
-                                            primary_button("Shell Truth")
+                                            primary_button(if show_meta_hints {
+                                                "Shell Truth  Alt+T"
+                                            } else {
+                                                "Shell Truth"
+                                            })
                                         },
                                     )
                                     .clicked()
@@ -330,6 +490,11 @@ impl MakerGui {
                                 );
                             });
                         });
+
+                        if show_meta_hints {
+                            ui.add_space(10.0);
+                            render_meta_hint_row(ui);
+                        }
                     });
             });
 
@@ -348,18 +513,17 @@ impl MakerGui {
                 ui.add_space(10.0);
 
                 if ui
-                    .add_sized([left_width - 12.0, 40.0], primary_button("New Setup"))
+                    .add_sized(
+                        [left_width - 12.0, 40.0],
+                        primary_button(if show_meta_hints {
+                            "New Setup  Alt+N"
+                        } else {
+                            "New Setup"
+                        }),
+                    )
                     .clicked()
                 {
-                    self.current_setup = self.app.create_setup_document(
-                        "New Yggdrasil".to_owned(),
-                        PresetId::Nas,
-                        None,
-                        None,
-                    );
-                    self.refresh_previews();
-                    self.utility_tab = UtilityTab::Config;
-                    self.utility_pane_open = true;
+                    self.start_another_setup();
                 }
 
                 ui.add_space(12.0);
@@ -384,7 +548,42 @@ impl MakerGui {
                     if response.clicked() {
                         if let Ok(document) = self.app.setup_store().load(&summary.setup_id) {
                             self.current_setup = document;
+                            self.success_state = None;
                             self.refresh_previews();
+                        }
+                    }
+                }
+
+                ui.add_space(8.0);
+                rail_section_header(
+                    ui,
+                    "Recent Artifacts",
+                    self.recent_artifacts_expanded,
+                    self.recent_artifacts.is_empty(),
+                )
+                .clicked()
+                .then(|| {
+                    if !self.recent_artifacts.is_empty() {
+                        self.recent_artifacts_expanded = !self.recent_artifacts_expanded;
+                    }
+                });
+
+                if self.recent_artifacts_expanded {
+                    ui.add_space(8.0);
+                    if self.recent_artifacts.is_empty() {
+                        ui.label(RichText::new("No artifacts yet.").color(SHELL_MUTED));
+                    } else {
+                        for artifact in self.recent_artifacts.clone() {
+                            let response = rail_meta_button(
+                                ui,
+                                &artifact.title,
+                                &artifact.subtitle,
+                                left_width - 12.0,
+                            );
+                            if response.clicked() {
+                                let _ = reveal_path(&artifact.path);
+                            }
+                            ui.add_space(6.0);
                         }
                     }
                 }
@@ -421,6 +620,18 @@ impl MakerGui {
                 let leading_space = ((ui.available_width() - content_width) * 0.5).max(0.0);
                 ui.horizontal(|ui| {
                     ui.add_space(leading_space);
+                    if self
+                        .success_state
+                        .as_ref()
+                        .is_some_and(|success| success.setup_id == self.current_setup.setup_id)
+                    {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(content_width, 0.0),
+                            Layout::top_down(Align::Min),
+                            |ui| self.render_success_canvas(ui),
+                        );
+                        return;
+                    }
                     ui.allocate_ui_with_layout(
                         Vec2::new(content_width, 0.0),
                         Layout::top_down(Align::Min),
@@ -502,6 +713,7 @@ impl MakerGui {
                                             .clicked()
                                             {
                                                 self.current_setup.setup.preset = card.id;
+                                                self.success_state = None;
                                                 self.refresh_previews();
                                             }
                                         }
@@ -523,11 +735,23 @@ impl MakerGui {
                                             if ui
                                                 .add_sized(
                                                     [300.0, 34.0],
-                                                    TextEdit::singleline(&mut self.current_setup.setup.name),
+                                                    TextEdit::singleline(
+                                                        &mut self.current_setup.setup.name,
+                                                    )
+                                                    .id_source("setup_name_field"),
                                                 )
                                                 .changed()
                                             {
+                                                self.success_state = None;
                                                 self.refresh_previews();
+                                            }
+                                            if self.focus_setup_name {
+                                                ui.memory_mut(|memory| {
+                                                    memory.request_focus(
+                                                        ui.make_persistent_id("setup_name_field"),
+                                                    );
+                                                });
+                                                self.focus_setup_name = false;
                                             }
                                             ui.end_row();
 
@@ -541,6 +765,7 @@ impl MakerGui {
                                                 )
                                                 .changed()
                                             {
+                                                self.success_state = None;
                                                 self.refresh_previews();
                                             }
                                             ui.end_row();
@@ -567,6 +792,7 @@ impl MakerGui {
                                             if segmented_chip(ui, profile.slug(), selected, [104.0, 38.0]).clicked()
                                             {
                                                 self.current_setup.setup.profile_override = Some(profile);
+                                                self.success_state = None;
                                                 self.refresh_previews();
                                             }
                                         }
@@ -583,6 +809,7 @@ impl MakerGui {
                                             "LTS kernel",
                                         );
                                         if ui.button("Refresh preview").clicked() {
+                                            self.success_state = None;
                                             self.refresh_previews();
                                         }
                                     });
@@ -593,17 +820,28 @@ impl MakerGui {
                                         .spacing([16.0, 12.0])
                                         .show(ui, |ui| {
                                             ui.label("Artifacts");
-                                            ui.add_sized(
-                                                [300.0, 34.0],
-                                                TextEdit::singleline(&mut self.artifacts_dir),
-                                            );
+                                            if ui
+                                                .add_sized(
+                                                    [300.0, 34.0],
+                                                    TextEdit::singleline(&mut self.artifacts_dir),
+                                                )
+                                                .changed()
+                                            {
+                                                self.refresh_recent_artifacts();
+                                            }
                                             ui.end_row();
 
                                             ui.label("Repo override");
-                                            ui.add_sized(
-                                                [300.0, 34.0],
-                                                TextEdit::singleline(&mut self.repo_root),
-                                            );
+                                            if ui
+                                                .add_sized(
+                                                    [300.0, 34.0],
+                                                    TextEdit::singleline(&mut self.repo_root),
+                                                )
+                                                .changed()
+                                            {
+                                                self.success_state = None;
+                                                self.refresh_previews();
+                                            }
                                             ui.end_row();
                                         });
                                 },
@@ -625,8 +863,12 @@ impl MakerGui {
                                         if ui
                                             .add_enabled(
                                                 !self.build_running,
-                                                primary_button("Build / export")
-                                                    .min_size(Vec2::new(160.0, 42.0)),
+                                                primary_button(if show_meta_hints {
+                                                    "Build / export  Alt+B"
+                                                } else {
+                                                    "Build / export"
+                                                })
+                                                .min_size(Vec2::new(160.0, 42.0)),
                                             )
                                             .clicked()
                                         {
@@ -657,6 +899,81 @@ impl MakerGui {
 }
 
 impl MakerGui {
+    fn render_success_canvas(&mut self, ui: &mut egui::Ui) {
+        let Some(success) = self.success_state.clone() else {
+            return;
+        };
+        Frame::new()
+            .fill(SHELL_PANEL)
+            .stroke(Stroke::new(1.0, SHELL_LINE))
+            .corner_radius(26.0)
+            .inner_margin(Margin::same(28))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new("ARTIFACT READY")
+                        .font(FontId::proportional(14.0))
+                        .color(SHELL_BLUE),
+                );
+                ui.add_space(6.0);
+                ui.heading(
+                    RichText::new(&success.title)
+                        .font(FontId::proportional(42.0))
+                        .color(SHELL_TEXT),
+                );
+                ui.label(RichText::new(&success.proof).color(SHELL_MUTED));
+                ui.add_space(18.0);
+
+                studio_section(
+                    ui,
+                    "Ready Output",
+                    "This is the real thing you can act on next.",
+                    |ui| {
+                        ui.label(
+                            RichText::new(&success.artifact_name)
+                                .font(FontId::proportional(26.0))
+                                .color(SHELL_TEXT),
+                        );
+                        ui.label(
+                            RichText::new(format!("Profile: {}", success.profile_label))
+                                .color(SHELL_MUTED),
+                        );
+                        ui.label(
+                            RichText::new(format!("Output path: {}", success.output_path))
+                                .color(SHELL_MUTED),
+                        );
+                    },
+                );
+
+                studio_section(
+                    ui,
+                    "Next Move",
+                    "Keep the success moment actionable, not log-shaped.",
+                    |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add_sized([156.0, 42.0], primary_button("Reveal Artifact"))
+                                .clicked()
+                            {
+                                let _ = reveal_path(&success.artifact_path);
+                            }
+                            if ui
+                                .add_sized([168.0, 42.0], egui::Button::new("Open Build Details"))
+                                .clicked()
+                            {
+                                self.open_build_details();
+                            }
+                            if ui
+                                .add_sized([168.0, 42.0], egui::Button::new("Start Another Setup"))
+                                .clicked()
+                            {
+                                self.start_another_setup();
+                            }
+                        });
+                    },
+                );
+            });
+    }
+
     fn render_utility_surface(&mut self, ui: &mut egui::Ui, utility_tab_width: f32) {
         Frame::new()
             .fill(SHELL_RAIL)
@@ -769,6 +1086,7 @@ impl eframe::App for MakerGui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_build_channel();
         let ctx = ui.ctx().clone();
+        self.handle_shortcuts(&ctx);
         self.render_root(&ctx);
     }
 }
@@ -866,6 +1184,44 @@ fn rail_card_button(ui: &mut egui::Ui, title: &str, selected: bool, width: f32) 
         .inner
 }
 
+fn rail_meta_button(ui: &mut egui::Ui, title: &str, subtitle: &str, width: f32) -> egui::Response {
+    Frame::new()
+        .fill(SHELL_PANEL_ALT)
+        .stroke(Stroke::new(1.0, SHELL_LINE))
+        .corner_radius(12.0)
+        .inner_margin(Margin::same(10))
+        .show(ui, |ui| {
+            ui.add_sized(
+                [width, 50.0],
+                egui::Button::new(
+                    RichText::new(format!("{title}\n{subtitle}"))
+                        .font(FontId::proportional(15.0))
+                        .color(SHELL_TEXT),
+                ),
+            )
+        })
+        .inner
+}
+
+fn rail_section_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    expanded: bool,
+    disabled: bool,
+) -> egui::Response {
+    let prefix = if expanded { "▾" } else { "▸" };
+    ui.add_enabled(
+        !disabled,
+        egui::Button::new(
+            RichText::new(format!("{prefix} {title}")).color(if disabled {
+                SHELL_MUTED
+            } else {
+                SHELL_TEXT
+            }),
+        ),
+    )
+}
+
 fn preset_card(
     ui: &mut egui::Ui,
     title: &str,
@@ -925,4 +1281,100 @@ fn studio_section(
     ui.add_space(18.0);
     ui.separator();
     ui.add_space(8.0);
+}
+
+fn render_meta_hint_row(ui: &mut egui::Ui) {
+    ui.horizontal_wrapped(|ui| {
+        for (key, label) in [
+            ("Alt+N", "New Setup"),
+            ("Alt+B", "Build / Export"),
+            ("Alt+T", "Shell Truth"),
+            ("Alt+S", "Focus Studio"),
+        ] {
+            Frame::new()
+                .fill(SHELL_PANEL)
+                .stroke(Stroke::new(1.0, SHELL_LINE))
+                .corner_radius(12.0)
+                .inner_margin(Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(format!("{key}  {label}"))
+                            .font(FontId::proportional(14.0))
+                            .color(SHELL_MUTED),
+                    );
+                });
+        }
+    });
+}
+
+fn recent_artifact_summaries(manifest: &ArtifactManifest) -> Vec<RecentArtifactSummary> {
+    manifest
+        .artifacts
+        .iter()
+        .map(|artifact| RecentArtifactSummary {
+            title: artifact_title(artifact),
+            subtitle: format!(
+                "{} • {}",
+                artifact_kind_label(artifact.kind),
+                manifest.build_profile.slug()
+            ),
+            path: artifact.path.clone(),
+        })
+        .collect()
+}
+
+fn artifact_title(artifact: &ArtifactRecord) -> String {
+    Path::new(&artifact.path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(match artifact.kind {
+            ArtifactKind::Iso => "ISO artifact",
+            ArtifactKind::NativeConfig => "Native config",
+            ArtifactKind::SetupDocument => "Setup document",
+            ArtifactKind::HandoffReadme => "Handoff README",
+        })
+        .to_owned()
+}
+
+fn artifact_kind_label(kind: ArtifactKind) -> &'static str {
+    match kind {
+        ArtifactKind::Iso => "ISO",
+        ArtifactKind::NativeConfig => "Config",
+        ArtifactKind::SetupDocument => "Setup",
+        ArtifactKind::HandoffReadme => "Handoff",
+    }
+}
+
+fn primary_artifact(manifest: &ArtifactManifest) -> Option<&ArtifactRecord> {
+    manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.kind == ArtifactKind::Iso)
+        .or_else(|| manifest.artifacts.first())
+}
+
+fn reveal_path(path: &str) -> Result<()> {
+    let target = PathBuf::from(path);
+    let reveal_target = if target.is_file() {
+        target.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        target
+    };
+
+    let status = match std::env::consts::OS {
+        "linux" => Command::new("xdg-open").arg(&reveal_target).status(),
+        "macos" => Command::new("open").arg("-R").arg(path).status(),
+        "windows" => Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .status(),
+        other => {
+            return Err(anyhow::anyhow!("unsupported platform for reveal: {other}"));
+        }
+    }?;
+
+    if !status.success() {
+        anyhow::bail!("failed to reveal {}", reveal_target.display());
+    }
+
+    Ok(())
 }
