@@ -21,4 +21,5 @@ maker-app = { path = "../../crates/maker-app" }
 maker-build = { path = "../../crates/maker-build" }
 maker-copy = { path = "../../crates/maker-copy" }
 maker-model = { path = "../../crates/maker-model" }
+serde.workspace = true
 serde_json.workspace = true

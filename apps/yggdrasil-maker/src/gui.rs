@@ -1,7 +1,7 @@
 use anyhow::Result;
 use eframe::egui::{
-    self, Align, Align2, Color32, FontId, Frame, Key, Layout, Margin, Modifiers, RichText, Stroke,
-    TextEdit, Vec2,
+    self, Align, Align2, Color32, CursorIcon, FontId, Frame, Key, Layout, Margin, Modifiers, Order,
+    Pos2, Rect, RichText, Sense, Stroke, TextEdit, Vec2, ViewportCommand,
 };
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
 use maker_build::{
@@ -10,6 +10,8 @@ use maker_build::{
 };
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
@@ -20,7 +22,6 @@ const SHELL_MUTED: Color32 = Color32::from_rgb(108, 123, 141);
 const SHELL_LINE: Color32 = Color32::from_rgb(219, 228, 236);
 const SHELL_BLUE: Color32 = Color32::from_rgb(77, 122, 232);
 const SHELL_BLUE_SOFT: Color32 = Color32::from_rgb(231, 239, 252);
-const SHELL_RAIL: Color32 = Color32::from_rgb(237, 243, 247);
 const SHELL_PANEL: Color32 = Color32::from_rgb(251, 253, 254);
 const SHELL_PANEL_ALT: Color32 = Color32::from_rgb(245, 249, 252);
 
@@ -28,7 +29,13 @@ pub fn launch() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1360.0, 900.0])
-            .with_min_inner_size([960.0, 720.0]),
+            .with_min_inner_size([960.0, 720.0])
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_titlebar_buttons_shown(false)
+            .with_title_shown(false),
         ..Default::default()
     };
     eframe::run_native(
@@ -62,6 +69,7 @@ struct MakerGui {
     recent_artifacts_expanded: bool,
     success_state: Option<BuildSuccessState>,
     focus_setup_name: bool,
+    shell_settings: MakerShellSettings,
 }
 
 enum GuiBuildMessage {
@@ -91,6 +99,77 @@ struct BuildSuccessState {
     output_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct MakerShellSettings {
+    backdrop: ShellBackdropPreset,
+    finish: ShellFinish,
+}
+
+impl Default for MakerShellSettings {
+    fn default() -> Self {
+        Self {
+            backdrop: ShellBackdropPreset::ArcFrost,
+            finish: ShellFinish::Sleek,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ShellBackdropPreset {
+    ArcFrost,
+    ArcMint,
+    ArcSlate,
+}
+
+impl ShellBackdropPreset {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ArcFrost => "Arc Frost",
+            Self::ArcMint => "Arc Mint",
+            Self::ArcSlate => "Arc Slate",
+        }
+    }
+
+    fn all() -> [Self; 3] {
+        [Self::ArcFrost, Self::ArcMint, Self::ArcSlate]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ShellFinish {
+    Sleek,
+    Crisp,
+}
+
+impl ShellFinish {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Sleek => "Sleek",
+            Self::Crisp => "Crisp",
+        }
+    }
+
+    fn all() -> [Self; 2] {
+        [Self::Sleek, Self::Crisp]
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ShellVisuals {
+    window_fill: Color32,
+    chrome_fill: Color32,
+    rail_fill: Color32,
+    utility_fill: Color32,
+    canvas_fill: Color32,
+    outline: Color32,
+    glow_one: Color32,
+    glow_two: Color32,
+    glow_three: Color32,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum UtilityTab {
     Config,
@@ -111,6 +190,7 @@ impl UtilityTab {
 impl MakerGui {
     fn bootstrap() -> Result<Self> {
         let app = MakerApp::new_for_current_platform()?;
+        let shell_settings = load_shell_settings().unwrap_or_default();
         let mut saved_setups = app.setup_store().list()?;
         let current_setup = if let Some(first) = saved_setups.first() {
             app.setup_store().load(&first.setup_id)?
@@ -152,6 +232,7 @@ impl MakerGui {
             recent_artifacts_expanded: false,
             success_state: None,
             focus_setup_name: false,
+            shell_settings,
         })
         .map(|mut gui| {
             gui.refresh_recent_artifacts();
@@ -387,11 +468,27 @@ impl MakerGui {
         self.utility_pane_open = true;
     }
 
+    fn update_shell_settings(&mut self, mutate: impl FnOnce(&mut MakerShellSettings)) {
+        let previous = self.shell_settings.clone();
+        mutate(&mut self.shell_settings);
+        if self.shell_settings != previous
+            && let Err(error) = save_shell_settings(&self.shell_settings)
+        {
+            self.build_status = format!("Shell settings save failed: {error}");
+        }
+    }
+
     #[allow(deprecated)]
     fn render_root(&mut self, ctx: &egui::Context) {
-        let viewport_width = ctx.content_rect().width();
+        let viewport_rect = ctx.content_rect();
+        let viewport_width = viewport_rect.width();
         let show_meta_hints = ctx.input(|input| input.modifiers.alt);
+        let shell = shell_visuals(&self.shell_settings);
+        apply_shell_visuals(ctx, &shell);
+        paint_shell_backdrop(ctx, &shell);
+        render_resize_handles(ctx);
         let compact_shell = viewport_width < 1080.0;
+        let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
         if compact_shell && !self.was_compact_shell {
             self.utility_pane_open = false;
         }
@@ -426,40 +523,69 @@ impl MakerGui {
             .show_separator_line(false)
             .frame(
                 Frame::new()
-                    .fill(Color32::from_rgb(224, 233, 238))
+                    .fill(Color32::TRANSPARENT)
                     .inner_margin(Margin::symmetric(8, 10)),
             )
             .show(ctx, |ui| {
+                let drag_rect = ui.max_rect();
+                let drag_response = ui.interact(
+                    drag_rect,
+                    ui.make_persistent_id("shell_chrome_drag"),
+                    Sense::click_and_drag(),
+                );
+                if drag_response.drag_started() {
+                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                }
+                if drag_response.double_clicked() {
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+                }
+
                 Frame::new()
-                    .fill(SHELL_RAIL)
-                    .stroke(Stroke::new(1.0, SHELL_LINE))
+                    .fill(shell.chrome_fill)
+                    .stroke(Stroke::new(1.0, shell.outline))
                     .corner_radius(20.0)
                     .inner_margin(Margin::symmetric(18, 12))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("YGGDRASIL MAKER")
-                                    .font(FontId::proportional(13.0))
-                                    .color(SHELL_BLUE),
-                            );
-                            ui.add_space(10.0);
-                            ui.label(
-                                RichText::new(&self.current_setup.setup.name)
-                                    .font(FontId::proportional(20.0))
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new("YGGDRASIL MAKER")
+                                        .font(FontId::proportional(13.0))
+                                        .color(SHELL_BLUE),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} • {}",
+                                        self.current_setup.setup.name,
+                                        self.current_setup.journey_stage.label()
+                                    ))
+                                    .font(FontId::proportional(19.0))
                                     .color(SHELL_TEXT),
-                            );
-                            ui.label(
-                                RichText::new(format!(
-                                    "• {}",
-                                    self.current_setup.journey_stage.label()
-                                ))
-                                .color(SHELL_MUTED),
+                                );
+                            });
+
+                            ui.with_layout(
+                                Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        render_backdrop_selector(
+                                            ui,
+                                            &mut self.shell_settings.backdrop,
+                                        )
+                                        .then(|| {
+                                            let _ = save_shell_settings(&self.shell_settings);
+                                        });
+                                    });
+                                },
                             );
 
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                render_window_controls(ui, ctx, maximized);
+                                ui.add_space(8.0);
+
                                 if ui
                                     .add_sized(
-                                        [118.0, 36.0],
+                                        [124.0, 36.0],
                                         if self.utility_pane_open {
                                             egui::Button::new(
                                                 RichText::new(if show_meta_hints {
@@ -482,7 +608,7 @@ impl MakerGui {
                                     self.utility_pane_open = !self.utility_pane_open;
                                 }
 
-                                ui.add_space(8.0);
+                                ui.add_space(10.0);
                                 ui.label(
                                     RichText::new(&self.build_status)
                                         .font(FontId::proportional(16.0))
@@ -502,91 +628,100 @@ impl MakerGui {
             .resizable(false)
             .min_width(left_width)
             .max_width(left_width)
+            .frame(Frame::new().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new("Your Yggdrasils")
-                        .font(FontId::proportional(28.0))
-                        .color(SHELL_TEXT),
-                );
-                ui.label(RichText::new("Saved setups and journey progress.").color(SHELL_MUTED));
-                ui.add_space(10.0);
-
-                if ui
-                    .add_sized(
-                        [left_width - 12.0, 40.0],
-                        primary_button(if show_meta_hints {
-                            "New Setup  Alt+N"
-                        } else {
-                            "New Setup"
-                        }),
-                    )
-                    .clicked()
-                {
-                    self.start_another_setup();
-                }
-
-                ui.add_space(12.0);
-                for summary in self.saved_setups.clone() {
-                    let selected = summary.setup_id == self.current_setup.setup_id;
-                    let response = rail_card_button(ui, &summary.name, selected, left_width - 12.0);
-                    ui.horizontal(|ui| {
+                Frame::new()
+                    .fill(shell.rail_fill)
+                    .stroke(Stroke::new(1.0, shell.outline))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.add_space(4.0);
                         ui.label(
-                            RichText::new(summary.journey_stage.label()).color(if selected {
-                                SHELL_BLUE
-                            } else {
-                                SHELL_MUTED
-                            }),
+                            RichText::new("Your Yggdrasils")
+                                .font(FontId::proportional(28.0))
+                                .color(SHELL_TEXT),
                         );
                         ui.label(
-                            RichText::new(format!("• {}", summary.slug))
-                                .color(Color32::from_rgb(128, 139, 152)),
+                            RichText::new("Saved setups and journey progress.").color(SHELL_MUTED),
                         );
-                    });
-                    ui.add_space(8.0);
+                        ui.add_space(10.0);
 
-                    if response.clicked() {
-                        if let Ok(document) = self.app.setup_store().load(&summary.setup_id) {
-                            self.current_setup = document;
-                            self.success_state = None;
-                            self.refresh_previews();
+                        if ui
+                            .add_sized(
+                                [left_width - 28.0, 40.0],
+                                primary_button(if show_meta_hints {
+                                    "New Setup  Alt+N"
+                                } else {
+                                    "New Setup"
+                                }),
+                            )
+                            .clicked()
+                        {
+                            self.start_another_setup();
                         }
-                    }
-                }
 
-                ui.add_space(8.0);
-                rail_section_header(
-                    ui,
-                    "Recent Artifacts",
-                    self.recent_artifacts_expanded,
-                    self.recent_artifacts.is_empty(),
-                )
-                .clicked()
-                .then(|| {
-                    if !self.recent_artifacts.is_empty() {
-                        self.recent_artifacts_expanded = !self.recent_artifacts_expanded;
-                    }
-                });
+                        ui.add_space(12.0);
+                        for summary in self.saved_setups.clone() {
+                            let selected = summary.setup_id == self.current_setup.setup_id;
+                            let response =
+                                rail_card_button(ui, &summary.name, selected, left_width - 28.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(summary.journey_stage.label())
+                                        .color(if selected { SHELL_BLUE } else { SHELL_MUTED }),
+                                );
+                                ui.label(
+                                    RichText::new(format!("• {}", summary.slug))
+                                        .color(Color32::from_rgb(128, 139, 152)),
+                                );
+                            });
+                            ui.add_space(8.0);
 
-                if self.recent_artifacts_expanded {
-                    ui.add_space(8.0);
-                    if self.recent_artifacts.is_empty() {
-                        ui.label(RichText::new("No artifacts yet.").color(SHELL_MUTED));
-                    } else {
-                        for artifact in self.recent_artifacts.clone() {
-                            let response = rail_meta_button(
-                                ui,
-                                &artifact.title,
-                                &artifact.subtitle,
-                                left_width - 12.0,
-                            );
                             if response.clicked() {
-                                let _ = reveal_path(&artifact.path);
+                                if let Ok(document) = self.app.setup_store().load(&summary.setup_id)
+                                {
+                                    self.current_setup = document;
+                                    self.success_state = None;
+                                    self.refresh_previews();
+                                }
                             }
-                            ui.add_space(6.0);
                         }
-                    }
-                }
+
+                        ui.add_space(8.0);
+                        rail_section_header(
+                            ui,
+                            "Recent Artifacts",
+                            self.recent_artifacts_expanded,
+                            self.recent_artifacts.is_empty(),
+                        )
+                        .clicked()
+                        .then(|| {
+                            if !self.recent_artifacts.is_empty() {
+                                self.recent_artifacts_expanded = !self.recent_artifacts_expanded;
+                            }
+                        });
+
+                        if self.recent_artifacts_expanded {
+                            ui.add_space(8.0);
+                            if self.recent_artifacts.is_empty() {
+                                ui.label(RichText::new("No artifacts yet.").color(SHELL_MUTED));
+                            } else {
+                                for artifact in self.recent_artifacts.clone() {
+                                    let response = rail_meta_button(
+                                        ui,
+                                        &artifact.title,
+                                        &artifact.subtitle,
+                                        left_width - 28.0,
+                                    );
+                                    if response.clicked() {
+                                        let _ = reveal_path(&artifact.path);
+                                    }
+                                    ui.add_space(6.0);
+                                }
+                            }
+                        }
+                    });
             });
 
         if self.utility_pane_open && !compact_shell {
@@ -594,8 +729,9 @@ impl MakerGui {
                 .resizable(false)
                 .min_width(right_width)
                 .max_width(right_width)
+                .frame(Frame::new().fill(Color32::TRANSPARENT))
                 .show(ctx, |ui| {
-                    self.render_utility_surface(ui, utility_tab_width);
+                    self.render_utility_surface(ui, utility_tab_width, &shell);
                 });
         }
 
@@ -606,14 +742,21 @@ impl MakerGui {
                 .collapsible(false)
                 .anchor(Align2::RIGHT_TOP, [-18.0, 76.0])
                 .fixed_size(Vec2::new(360.0, 520.0))
+                .frame(
+                    Frame::new()
+                        .fill(shell.utility_fill)
+                        .stroke(Stroke::new(1.0, shell.outline)),
+                )
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        self.render_utility_surface(ui, 72.0);
+                        self.render_utility_surface(ui, 72.0, &shell);
                     });
                 });
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default()
+            .frame(Frame::new().fill(Color32::TRANSPARENT))
+            .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.add_space(8.0);
                 let content_width = ui.available_width().min(canvas_max_width);
@@ -628,7 +771,7 @@ impl MakerGui {
                         ui.allocate_ui_with_layout(
                             Vec2::new(content_width, 0.0),
                             Layout::top_down(Align::Min),
-                            |ui| self.render_success_canvas(ui),
+                            |ui| self.render_success_canvas(ui, &shell),
                         );
                         return;
                     }
@@ -638,8 +781,8 @@ impl MakerGui {
                         |ui| {
                             let canvas_inner_width = (content_width - 56.0).max(420.0);
                             Frame::new()
-                                .fill(SHELL_PANEL)
-                                .stroke(Stroke::new(1.0, SHELL_LINE))
+                                .fill(shell.canvas_fill)
+                                .stroke(Stroke::new(1.0, shell.outline))
                                 .corner_radius(26.0)
                                 .inner_margin(Margin::same(28))
                                 .show(ui, |ui| {
@@ -899,13 +1042,13 @@ impl MakerGui {
 }
 
 impl MakerGui {
-    fn render_success_canvas(&mut self, ui: &mut egui::Ui) {
+    fn render_success_canvas(&mut self, ui: &mut egui::Ui, shell: &ShellVisuals) {
         let Some(success) = self.success_state.clone() else {
             return;
         };
         Frame::new()
-            .fill(SHELL_PANEL)
-            .stroke(Stroke::new(1.0, SHELL_LINE))
+            .fill(shell.canvas_fill)
+            .stroke(Stroke::new(1.0, shell.outline))
             .corner_radius(26.0)
             .inner_margin(Margin::same(28))
             .show(ui, |ui| {
@@ -974,10 +1117,15 @@ impl MakerGui {
             });
     }
 
-    fn render_utility_surface(&mut self, ui: &mut egui::Ui, utility_tab_width: f32) {
+    fn render_utility_surface(
+        &mut self,
+        ui: &mut egui::Ui,
+        utility_tab_width: f32,
+        shell: &ShellVisuals,
+    ) {
         Frame::new()
-            .fill(SHELL_RAIL)
-            .stroke(Stroke::new(1.0, SHELL_LINE))
+            .fill(shell.utility_fill)
+            .stroke(Stroke::new(1.0, shell.outline))
             .corner_radius(18.0)
             .inner_margin(Margin::same(16))
             .show(ui, |ui| {
@@ -993,6 +1141,32 @@ impl MakerGui {
                     .color(SHELL_MUTED),
                 );
                 ui.add_space(8.0);
+
+                studio_section(
+                    ui,
+                    "Shell Surface",
+                    "Shared Ygg shell backdrop and finish settings.",
+                    |ui| {
+                        if render_backdrop_selector(ui, &mut self.shell_settings.backdrop) {
+                            let _ = save_shell_settings(&self.shell_settings);
+                        }
+                        ui.add_space(10.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for finish in ShellFinish::all() {
+                                if segmented_chip(
+                                    ui,
+                                    finish.label(),
+                                    self.shell_settings.finish == finish,
+                                    [96.0, 34.0],
+                                )
+                                .clicked()
+                                {
+                                    self.update_shell_settings(|settings| settings.finish = finish);
+                                }
+                            }
+                        });
+                    },
+                );
 
                 ui.horizontal_wrapped(|ui| {
                     for tab in [UtilityTab::Config, UtilityTab::Plan, UtilityTab::Stream] {
@@ -1089,16 +1263,31 @@ impl eframe::App for MakerGui {
         self.handle_shortcuts(&ctx);
         self.render_root(&ctx);
     }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        Color32::TRANSPARENT.to_normalized_gamma_f32()
+    }
 }
 
 fn configure_visuals(ctx: &egui::Context) {
+    apply_shell_visuals(ctx, &shell_visuals(&MakerShellSettings::default()));
+
+    let mut style = (*ctx.global_style()).clone();
+    style.spacing.item_spacing = Vec2::new(12.0, 12.0);
+    style.spacing.button_padding = Vec2::new(12.0, 9.0);
+    style.spacing.interact_size = Vec2::new(44.0, 32.0);
+    style.spacing.text_edit_width = 260.0;
+    ctx.set_global_style(style);
+}
+
+fn apply_shell_visuals(ctx: &egui::Context, shell: &ShellVisuals) {
     let mut visuals = egui::Visuals::light();
     visuals.override_text_color = Some(SHELL_TEXT);
-    visuals.panel_fill = Color32::from_rgb(228, 236, 241);
-    visuals.window_fill = Color32::from_rgb(224, 233, 238);
-    visuals.extreme_bg_color = SHELL_PANEL;
+    visuals.panel_fill = Color32::TRANSPARENT;
+    visuals.window_fill = Color32::TRANSPARENT;
+    visuals.extreme_bg_color = shell.canvas_fill;
     visuals.code_bg_color = SHELL_PANEL_ALT;
-    visuals.faint_bg_color = SHELL_RAIL;
+    visuals.faint_bg_color = shell.rail_fill;
     visuals.widgets.noninteractive.bg_fill = SHELL_PANEL_ALT;
     visuals.widgets.noninteractive.bg_stroke.color = SHELL_LINE;
     visuals.widgets.inactive.bg_fill = SHELL_PANEL;
@@ -1114,13 +1303,6 @@ fn configure_visuals(ctx: &egui::Context) {
     visuals.widgets.active.corner_radius = 10.0.into();
     visuals.widgets.noninteractive.corner_radius = 12.0.into();
     ctx.set_visuals(visuals);
-
-    let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = Vec2::new(12.0, 12.0);
-    style.spacing.button_padding = Vec2::new(12.0, 9.0);
-    style.spacing.interact_size = Vec2::new(44.0, 32.0);
-    style.spacing.text_edit_width = 260.0;
-    ctx.set_global_style(style);
 }
 
 fn segmented_chip(
@@ -1305,6 +1487,285 @@ fn render_meta_hint_row(ui: &mut egui::Ui) {
                 });
         }
     });
+}
+
+fn render_backdrop_selector(ui: &mut egui::Ui, selected: &mut ShellBackdropPreset) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for preset in ShellBackdropPreset::all() {
+            if segmented_chip(ui, preset.label(), *selected == preset, [104.0, 34.0]).clicked() {
+                *selected = preset;
+                changed = true;
+            }
+        }
+    });
+    changed
+}
+
+fn render_window_controls(ui: &mut egui::Ui, ctx: &egui::Context, maximized: bool) {
+    if chrome_button(ui, if maximized { "Restore" } else { "Max" }, false).clicked() {
+        ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+    }
+    ui.add_space(4.0);
+    if chrome_button(ui, "Min", false).clicked() {
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+    }
+    ui.add_space(4.0);
+    if chrome_button(ui, "Close", true).clicked() {
+        ctx.send_viewport_cmd(ViewportCommand::Close);
+    }
+}
+
+fn chrome_button<'a>(ui: &mut egui::Ui, label: &'a str, destructive: bool) -> egui::Response {
+    ui.add_sized(
+        [64.0, 32.0],
+        egui::Button::new(RichText::new(label).color(if destructive {
+            Color32::WHITE
+        } else {
+            SHELL_TEXT
+        }))
+        .fill(if destructive {
+            Color32::from_rgb(205, 91, 107)
+        } else {
+            Color32::from_rgba_unmultiplied(255, 255, 255, 176)
+        })
+        .stroke(Stroke::new(
+            1.0,
+            if destructive {
+                Color32::from_rgb(205, 91, 107)
+            } else {
+                SHELL_LINE
+            },
+        )),
+    )
+}
+
+fn shell_visuals(settings: &MakerShellSettings) -> ShellVisuals {
+    let (window_fill, glow_one, glow_two, glow_three) = match settings.backdrop {
+        ShellBackdropPreset::ArcFrost => (
+            Color32::from_rgba_unmultiplied(235, 242, 247, 228),
+            Color32::from_rgba_unmultiplied(124, 200, 255, 120),
+            Color32::from_rgba_unmultiplied(103, 215, 163, 92),
+            Color32::from_rgba_unmultiplied(248, 248, 248, 118),
+        ),
+        ShellBackdropPreset::ArcMint => (
+            Color32::from_rgba_unmultiplied(232, 244, 240, 228),
+            Color32::from_rgba_unmultiplied(103, 215, 163, 122),
+            Color32::from_rgba_unmultiplied(124, 200, 255, 88),
+            Color32::from_rgba_unmultiplied(240, 244, 212, 110),
+        ),
+        ShellBackdropPreset::ArcSlate => (
+            Color32::from_rgba_unmultiplied(229, 235, 244, 228),
+            Color32::from_rgba_unmultiplied(143, 167, 212, 126),
+            Color32::from_rgba_unmultiplied(124, 200, 255, 88),
+            Color32::from_rgba_unmultiplied(214, 227, 238, 118),
+        ),
+    };
+
+    let (chrome_alpha, rail_alpha, utility_alpha, canvas_alpha, outline_alpha) =
+        match settings.finish {
+            ShellFinish::Sleek => (196, 180, 188, 232, 176),
+            ShellFinish::Crisp => (236, 226, 232, 246, 198),
+        };
+
+    ShellVisuals {
+        window_fill,
+        chrome_fill: Color32::from_rgba_unmultiplied(252, 254, 255, chrome_alpha),
+        rail_fill: Color32::from_rgba_unmultiplied(247, 250, 252, rail_alpha),
+        utility_fill: Color32::from_rgba_unmultiplied(247, 250, 252, utility_alpha),
+        canvas_fill: Color32::from_rgba_unmultiplied(252, 254, 255, canvas_alpha),
+        outline: Color32::from_rgba_unmultiplied(208, 220, 230, outline_alpha),
+        glow_one,
+        glow_two,
+        glow_three,
+    }
+}
+
+fn paint_shell_backdrop(ctx: &egui::Context, shell: &ShellVisuals) {
+    let rect = ctx.content_rect().shrink(6.0);
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    painter.rect_filled(rect, 28.0, shell.window_fill);
+    painter.circle_filled(
+        Pos2::new(
+            rect.left() + rect.width() * 0.18,
+            rect.top() + rect.height() * 0.20,
+        ),
+        rect.width().min(rect.height()) * 0.20,
+        shell.glow_one,
+    );
+    painter.circle_filled(
+        Pos2::new(
+            rect.left() + rect.width() * 0.70,
+            rect.top() + rect.height() * 0.28,
+        ),
+        rect.width().min(rect.height()) * 0.18,
+        shell.glow_two,
+    );
+    painter.circle_filled(
+        Pos2::new(
+            rect.left() + rect.width() * 0.78,
+            rect.top() + rect.height() * 0.82,
+        ),
+        rect.width().min(rect.height()) * 0.22,
+        shell.glow_three,
+    );
+    painter.rect_stroke(
+        rect,
+        28.0,
+        Stroke::new(1.0, shell.outline),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn render_resize_handles(ctx: &egui::Context) {
+    let rect = ctx.content_rect();
+    let handle = 6.0;
+    let corner = 12.0;
+
+    egui::Area::new("maker_resize_handles".into())
+        .order(Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(ctx, |ui| {
+            ui.set_min_size(rect.size());
+            let size = rect.size();
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(size.x, handle)),
+                "resize_n",
+                egui::ResizeDirection::North,
+                CursorIcon::ResizeNorth,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(0.0, size.y - handle), Vec2::new(size.x, handle)),
+                "resize_s",
+                egui::ResizeDirection::South,
+                CursorIcon::ResizeSouth,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(handle, size.y)),
+                "resize_w",
+                egui::ResizeDirection::West,
+                CursorIcon::ResizeWest,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(size.x - handle, 0.0), Vec2::new(handle, size.y)),
+                "resize_e",
+                egui::ResizeDirection::East,
+                CursorIcon::ResizeEast,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(corner, corner)),
+                "resize_nw",
+                egui::ResizeDirection::NorthWest,
+                CursorIcon::ResizeNorthWest,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(size.x - corner, 0.0), Vec2::new(corner, corner)),
+                "resize_ne",
+                egui::ResizeDirection::NorthEast,
+                CursorIcon::ResizeNorthEast,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(Pos2::new(0.0, size.y - corner), Vec2::new(corner, corner)),
+                "resize_sw",
+                egui::ResizeDirection::SouthWest,
+                CursorIcon::ResizeSouthWest,
+            );
+            viewport_resize_handle(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(size.x - corner, size.y - corner),
+                    Vec2::new(corner, corner),
+                ),
+                "resize_se",
+                egui::ResizeDirection::SouthEast,
+                CursorIcon::ResizeSouthEast,
+            );
+        });
+}
+
+fn viewport_resize_handle(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    id_source: &str,
+    direction: egui::ResizeDirection,
+    cursor: CursorIcon,
+) {
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(id_source),
+        Sense::click_and_drag(),
+    );
+    if response.hovered() {
+        ui.output_mut(|output| output.cursor_icon = cursor);
+    }
+    if response.drag_started() {
+        ui.ctx()
+            .send_viewport_cmd(ViewportCommand::BeginResize(direction));
+    }
+}
+
+fn load_shell_settings() -> Result<MakerShellSettings> {
+    let path = shell_settings_path()?;
+    if !path.is_file() {
+        return Ok(MakerShellSettings::default());
+    }
+    let payload = fs::read(&path)?;
+    Ok(serde_json::from_slice(&payload)?)
+}
+
+fn save_shell_settings(settings: &MakerShellSettings) -> Result<()> {
+    let path = shell_settings_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let payload = serde_json::to_vec_pretty(settings)?;
+    let temp_path = path.with_extension("json.tmp");
+    fs::write(&temp_path, payload)?;
+    fs::rename(&temp_path, &path)?;
+    Ok(())
+}
+
+fn shell_settings_path() -> Result<PathBuf> {
+    Ok(maker_data_root()?.join("shell-settings.json"))
+}
+
+fn maker_data_root() -> Result<PathBuf> {
+    if let Ok(path) = std::env::var("YGGDRASIL_MAKER_SETUP_ROOT") {
+        let root = PathBuf::from(path);
+        return Ok(root
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| root.clone()));
+    }
+
+    match std::env::consts::OS {
+        "linux" => {
+            let base = std::env::var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .or_else(|_| {
+                    std::env::var("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+                })?;
+            Ok(base.join("yggdrasil-maker"))
+        }
+        "macos" => {
+            let home = std::env::var("HOME")?;
+            Ok(PathBuf::from(home)
+                .join("Library/Application Support")
+                .join("yggdrasil-maker"))
+        }
+        "windows" => {
+            let appdata = std::env::var("APPDATA")?;
+            Ok(PathBuf::from(appdata).join("yggdrasil-maker"))
+        }
+        other => anyhow::bail!("unsupported platform for shell settings: {other}"),
+    }
 }
 
 fn recent_artifact_summaries(manifest: &ArtifactManifest) -> Vec<RecentArtifactSummary> {
