@@ -468,16 +468,6 @@ impl MakerGui {
         self.utility_pane_open = true;
     }
 
-    fn update_shell_settings(&mut self, mutate: impl FnOnce(&mut MakerShellSettings)) {
-        let previous = self.shell_settings.clone();
-        mutate(&mut self.shell_settings);
-        if self.shell_settings != previous
-            && let Err(error) = save_shell_settings(&self.shell_settings)
-        {
-            self.build_status = format!("Shell settings save failed: {error}");
-        }
-    }
-
     #[allow(deprecated)]
     fn render_root(&mut self, ctx: &egui::Context) {
         let viewport_rect = ctx.content_rect();
@@ -579,6 +569,11 @@ impl MakerGui {
                                             .then(|| {
                                                 let _ = save_shell_settings(&self.shell_settings);
                                             });
+                                            ui.add_space(8.0);
+                                            render_finish_selector(ui, &mut self.shell_settings)
+                                                .then(|| {
+                                                    let _ = save_shell_settings(&self.shell_settings);
+                                                });
                                         });
                                     }
                                 },
@@ -1163,32 +1158,6 @@ impl MakerGui {
                 );
                 ui.add_space(8.0);
 
-                studio_section(
-                    ui,
-                    "Shell Surface",
-                    "Shared Ygg shell backdrop and finish settings.",
-                    |ui| {
-                        if render_backdrop_selector(ui, &mut self.shell_settings.backdrop) {
-                            let _ = save_shell_settings(&self.shell_settings);
-                        }
-                        ui.add_space(10.0);
-                        ui.horizontal_wrapped(|ui| {
-                            for finish in ShellFinish::all() {
-                                if segmented_chip(
-                                    ui,
-                                    finish.label(),
-                                    self.shell_settings.finish == finish,
-                                    [96.0, 34.0],
-                                )
-                                .clicked()
-                                {
-                                    self.update_shell_settings(|settings| settings.finish = finish);
-                                }
-                            }
-                        });
-                    },
-                );
-
                 ui.horizontal_wrapped(|ui| {
                     for tab in [UtilityTab::Config, UtilityTab::Plan, UtilityTab::Stream] {
                         if segmented_chip(
@@ -1516,6 +1485,21 @@ fn render_backdrop_selector(ui: &mut egui::Ui, selected: &mut ShellBackdropPrese
         for preset in ShellBackdropPreset::all() {
             if segmented_chip(ui, preset.label(), *selected == preset, [104.0, 34.0]).clicked() {
                 *selected = preset;
+                changed = true;
+            }
+        }
+    });
+    changed
+}
+
+fn render_finish_selector(ui: &mut egui::Ui, settings: &mut MakerShellSettings) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for finish in ShellFinish::all() {
+            if segmented_chip(ui, finish.label(), settings.finish == finish, [76.0, 34.0])
+                .clicked()
+            {
+                settings.finish = finish;
                 changed = true;
             }
         }
