@@ -1,6 +1,6 @@
 use anyhow::Result;
 use eframe::egui::{
-    self, Align, Color32, FontId, Frame, Layout, Margin, RichText, Stroke, TextEdit, Vec2,
+    self, Align, Align2, Color32, FontId, Frame, Layout, Margin, RichText, Stroke, TextEdit, Vec2,
 };
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
 use maker_copy::preset_cards;
@@ -49,6 +49,8 @@ struct MakerGui {
     build_rx: Option<Receiver<GuiBuildMessage>>,
     build_running: bool,
     utility_tab: UtilityTab,
+    utility_pane_open: bool,
+    was_compact_shell: bool,
 }
 
 enum GuiBuildMessage {
@@ -112,6 +114,8 @@ impl MakerGui {
             build_rx: None,
             build_running: false,
             utility_tab: UtilityTab::Config,
+            utility_pane_open: true,
+            was_compact_shell: false,
         })
     }
 
@@ -139,11 +143,13 @@ impl MakerGui {
             Ok(path) => {
                 self.build_status = format!("Saved {}", path.display());
                 self.utility_tab = UtilityTab::Plan;
+                self.utility_pane_open = true;
                 self.refresh_saved_setups();
             }
             Err(error) => {
                 self.build_status = format!("Save failed: {error}");
                 self.utility_tab = UtilityTab::Stream;
+                self.utility_pane_open = true;
             }
         }
     }
@@ -173,6 +179,7 @@ impl MakerGui {
         self.build_result.clear();
         self.build_status = "Building...".to_owned();
         self.utility_tab = UtilityTab::Stream;
+        self.utility_pane_open = true;
 
         let inputs = self.build_inputs();
         let (tx, rx) = mpsc::channel();
@@ -234,6 +241,10 @@ impl MakerGui {
     fn render_root(&mut self, ctx: &egui::Context) {
         let viewport_width = ctx.content_rect().width();
         let compact_shell = viewport_width < 1080.0;
+        if compact_shell && !self.was_compact_shell {
+            self.utility_pane_open = false;
+        }
+        self.was_compact_shell = compact_shell;
         let left_width = if compact_shell {
             180.0
         } else if viewport_width < 1180.0 {
@@ -249,13 +260,78 @@ impl MakerGui {
             280.0
         };
         let utility_tab_width = if compact_shell { 60.0 } else { 78.0 };
-        let canvas_max_width = if compact_shell {
+        let canvas_max_width = if !compact_shell && !self.utility_pane_open {
+            920.0
+        } else if compact_shell {
             560.0
         } else if viewport_width < 1180.0 {
             600.0
         } else {
             760.0
         };
+
+        egui::TopBottomPanel::top("shell_chrome")
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_rgb(224, 233, 238))
+                    .inner_margin(Margin::symmetric(8, 10)),
+            )
+            .show(ctx, |ui| {
+                Frame::new()
+                    .fill(SHELL_RAIL)
+                    .stroke(Stroke::new(1.0, SHELL_LINE))
+                    .corner_radius(20.0)
+                    .inner_margin(Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("YGGDRASIL MAKER")
+                                    .font(FontId::proportional(13.0))
+                                    .color(SHELL_BLUE),
+                            );
+                            ui.add_space(10.0);
+                            ui.label(
+                                RichText::new(&self.current_setup.setup.name)
+                                    .font(FontId::proportional(20.0))
+                                    .color(SHELL_TEXT),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "• {}",
+                                    self.current_setup.journey_stage.label()
+                                ))
+                                .color(SHELL_MUTED),
+                            );
+
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add_sized(
+                                        [118.0, 36.0],
+                                        if self.utility_pane_open {
+                                            egui::Button::new(
+                                                RichText::new("Hide Truth").color(SHELL_TEXT),
+                                            )
+                                        } else {
+                                            primary_button("Shell Truth")
+                                        },
+                                    )
+                                    .clicked()
+                                {
+                                    self.utility_pane_open = !self.utility_pane_open;
+                                }
+
+                                ui.add_space(8.0);
+                                ui.label(
+                                    RichText::new(&self.build_status)
+                                        .font(FontId::proportional(16.0))
+                                        .color(SHELL_BLUE),
+                                );
+                            });
+                        });
+                    });
+            });
 
         egui::SidePanel::left("saved_setups")
             .resizable(false)
@@ -283,6 +359,7 @@ impl MakerGui {
                     );
                     self.refresh_previews();
                     self.utility_tab = UtilityTab::Config;
+                    self.utility_pane_open = true;
                 }
 
                 ui.add_space(12.0);
@@ -313,120 +390,29 @@ impl MakerGui {
                 }
             });
 
-        egui::SidePanel::right("utility_pane")
-            .resizable(false)
-            .min_width(right_width)
-            .max_width(right_width)
-            .show(ctx, |ui| {
-                Frame::new()
-                    .fill(SHELL_RAIL)
-                    .stroke(Stroke::new(1.0, SHELL_LINE))
-                    .corner_radius(18.0)
-                    .inner_margin(Margin::same(16))
-                    .show(ui, |ui| {
-                        ui.label(
-                            RichText::new("Shell Truth")
-                                .font(FontId::proportional(22.0))
-                                .color(SHELL_TEXT),
-                        );
-                        ui.label(
-                            RichText::new(
-                                "Keep one honest surface open: config, plan, or live build output.",
-                            )
-                            .color(SHELL_MUTED),
-                        );
-                        ui.add_space(8.0);
+        if self.utility_pane_open && !compact_shell {
+            egui::SidePanel::right("utility_pane")
+                .resizable(false)
+                .min_width(right_width)
+                .max_width(right_width)
+                .show(ctx, |ui| {
+                    self.render_utility_surface(ui, utility_tab_width);
+                });
+        }
 
-                        ui.horizontal_wrapped(|ui| {
-                            for tab in [UtilityTab::Config, UtilityTab::Plan, UtilityTab::Stream] {
-                                if segmented_chip(
-                                    ui,
-                                    tab.label(),
-                                    self.utility_tab == tab,
-                                    [utility_tab_width, 34.0],
-                                )
-                                .clicked()
-                                {
-                                    self.utility_tab = tab;
-                                }
-                            }
-                        });
-
-                        ui.add_space(10.0);
-                        match self.utility_tab {
-                            UtilityTab::Config => {
-                                ui.label(
-                                    RichText::new("Native config preview.").color(SHELL_MUTED),
-                                );
-                                ui.add_space(6.0);
-                                ui.add(
-                                    TextEdit::multiline(&mut self.config_preview)
-                                        .font(FontId::monospace(13.0))
-                                        .desired_rows(24),
-                                );
-                            }
-                            UtilityTab::Plan => {
-                                ui.label(
-                                    RichText::new("Exact invocation and output contract.")
-                                        .color(SHELL_MUTED),
-                                );
-                                ui.add_space(6.0);
-                                ui.add(
-                                    TextEdit::multiline(&mut self.plan_preview)
-                                        .font(FontId::monospace(13.0))
-                                        .desired_rows(24),
-                                );
-                            }
-                            UtilityTab::Stream => {
-                                ui.label(
-                                    RichText::new(
-                                        "Live build status and resulting artifact manifest.",
-                                    )
-                                    .color(SHELL_MUTED),
-                                );
-                                ui.add_space(6.0);
-                                ui.label(
-                                    RichText::new(&self.build_status)
-                                        .font(FontId::proportional(18.0))
-                                        .color(SHELL_BLUE),
-                                );
-                                ui.add_space(10.0);
-
-                                if !self.build_result.is_empty() {
-                                    ui.label(
-                                        RichText::new("Artifact Manifest")
-                                            .font(FontId::proportional(18.0))
-                                            .color(SHELL_TEXT),
-                                    );
-                                    ui.add_space(6.0);
-                                    ui.add(
-                                        TextEdit::multiline(&mut self.build_result)
-                                            .font(FontId::monospace(13.0))
-                                            .desired_rows(10),
-                                    );
-                                    ui.add_space(10.0);
-                                }
-
-                                ui.label(
-                                    RichText::new("Build stream")
-                                        .font(FontId::proportional(18.0))
-                                        .color(SHELL_TEXT),
-                                );
-                                ui.add_space(6.0);
-                                let mut stream = if self.build_log.is_empty() {
-                                    "No build activity yet.".to_owned()
-                                } else {
-                                    self.build_log.join("\n")
-                                };
-                                ui.add(
-                                    TextEdit::multiline(&mut stream)
-                                        .font(FontId::monospace(13.0))
-                                        .desired_rows(16),
-                                );
-                            }
-                        }
+        if self.utility_pane_open && compact_shell {
+            egui::Window::new("shell_truth_overlay")
+                .title_bar(false)
+                .resizable(false)
+                .collapsible(false)
+                .anchor(Align2::RIGHT_TOP, [-18.0, 76.0])
+                .fixed_size(Vec2::new(360.0, 520.0))
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        self.render_utility_surface(ui, 72.0);
                     });
-            });
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -670,6 +656,115 @@ impl MakerGui {
     }
 }
 
+impl MakerGui {
+    fn render_utility_surface(&mut self, ui: &mut egui::Ui, utility_tab_width: f32) {
+        Frame::new()
+            .fill(SHELL_RAIL)
+            .stroke(Stroke::new(1.0, SHELL_LINE))
+            .corner_radius(18.0)
+            .inner_margin(Margin::same(16))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new("Shell Truth")
+                        .font(FontId::proportional(22.0))
+                        .color(SHELL_TEXT),
+                );
+                ui.label(
+                    RichText::new(
+                        "Keep one honest surface open: config, plan, or live build output.",
+                    )
+                    .color(SHELL_MUTED),
+                );
+                ui.add_space(8.0);
+
+                ui.horizontal_wrapped(|ui| {
+                    for tab in [UtilityTab::Config, UtilityTab::Plan, UtilityTab::Stream] {
+                        if segmented_chip(
+                            ui,
+                            tab.label(),
+                            self.utility_tab == tab,
+                            [utility_tab_width, 34.0],
+                        )
+                        .clicked()
+                        {
+                            self.utility_tab = tab;
+                        }
+                    }
+                });
+
+                ui.add_space(10.0);
+                match self.utility_tab {
+                    UtilityTab::Config => {
+                        ui.label(RichText::new("Native config preview.").color(SHELL_MUTED));
+                        ui.add_space(6.0);
+                        ui.add(
+                            TextEdit::multiline(&mut self.config_preview)
+                                .font(FontId::monospace(13.0))
+                                .desired_rows(24),
+                        );
+                    }
+                    UtilityTab::Plan => {
+                        ui.label(
+                            RichText::new("Exact invocation and output contract.")
+                                .color(SHELL_MUTED),
+                        );
+                        ui.add_space(6.0);
+                        ui.add(
+                            TextEdit::multiline(&mut self.plan_preview)
+                                .font(FontId::monospace(13.0))
+                                .desired_rows(24),
+                        );
+                    }
+                    UtilityTab::Stream => {
+                        ui.label(
+                            RichText::new("Live build status and resulting artifact manifest.")
+                                .color(SHELL_MUTED),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(&self.build_status)
+                                .font(FontId::proportional(18.0))
+                                .color(SHELL_BLUE),
+                        );
+                        ui.add_space(10.0);
+
+                        if !self.build_result.is_empty() {
+                            ui.label(
+                                RichText::new("Artifact Manifest")
+                                    .font(FontId::proportional(18.0))
+                                    .color(SHELL_TEXT),
+                            );
+                            ui.add_space(6.0);
+                            ui.add(
+                                TextEdit::multiline(&mut self.build_result)
+                                    .font(FontId::monospace(13.0))
+                                    .desired_rows(10),
+                            );
+                            ui.add_space(10.0);
+                        }
+
+                        ui.label(
+                            RichText::new("Build stream")
+                                .font(FontId::proportional(18.0))
+                                .color(SHELL_TEXT),
+                        );
+                        ui.add_space(6.0);
+                        let mut stream = if self.build_log.is_empty() {
+                            "No build activity yet.".to_owned()
+                        } else {
+                            self.build_log.join("\n")
+                        };
+                        ui.add(
+                            TextEdit::multiline(&mut stream)
+                                .font(FontId::monospace(13.0))
+                                .desired_rows(16),
+                        );
+                    }
+                }
+            });
+    }
+}
+
 impl eframe::App for MakerGui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_build_channel();
@@ -809,6 +904,8 @@ fn preset_card(
 
 fn primary_button(label: &str) -> egui::Button<'_> {
     egui::Button::new(RichText::new(label).color(Color32::WHITE))
+        .fill(SHELL_BLUE)
+        .stroke(Stroke::new(1.0, SHELL_BLUE))
 }
 
 fn studio_section(
