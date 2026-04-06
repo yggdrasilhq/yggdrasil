@@ -488,6 +488,7 @@ impl MakerGui {
         paint_shell_backdrop(ctx, &shell);
         render_resize_handles(ctx);
         let compact_shell = viewport_width < 1080.0;
+        let compact_chrome = viewport_width < 1180.0;
         let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
         if compact_shell && !self.was_compact_shell {
             self.utility_pane_open = false;
@@ -567,39 +568,59 @@ impl MakerGui {
                             ui.with_layout(
                                 Layout::centered_and_justified(egui::Direction::LeftToRight),
                                 |ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        render_backdrop_selector(
-                                            ui,
-                                            &mut self.shell_settings.backdrop,
-                                        )
-                                        .then(|| {
-                                            let _ = save_shell_settings(&self.shell_settings);
+                                    if compact_chrome {
+                                        theme_summary_chip(ui, &self.shell_settings);
+                                    } else {
+                                        ui.horizontal_wrapped(|ui| {
+                                            render_backdrop_selector(
+                                                ui,
+                                                &mut self.shell_settings.backdrop,
+                                            )
+                                            .then(|| {
+                                                let _ = save_shell_settings(&self.shell_settings);
+                                            });
                                         });
-                                    });
+                                    }
                                 },
                             );
 
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                render_window_controls(ui, ctx, maximized);
+                                render_window_controls(ui, ctx, maximized, compact_chrome);
                                 ui.add_space(8.0);
 
                                 if ui
                                     .add_sized(
-                                        [124.0, 36.0],
+                                        [if compact_chrome { 88.0 } else { 124.0 }, 36.0],
                                         if self.utility_pane_open {
                                             egui::Button::new(
                                                 RichText::new(if show_meta_hints {
-                                                    "Hide Truth  Alt+T"
+                                                    if compact_chrome {
+                                                        "Hide  Alt+T"
+                                                    } else {
+                                                        "Hide Truth  Alt+T"
+                                                    }
                                                 } else {
-                                                    "Hide Truth"
+                                                    if compact_chrome {
+                                                        "Hide"
+                                                    } else {
+                                                        "Hide Truth"
+                                                    }
                                                 })
                                                 .color(SHELL_TEXT),
                                             )
                                         } else {
                                             primary_button(if show_meta_hints {
-                                                "Shell Truth  Alt+T"
+                                                if compact_chrome {
+                                                    "Truth  Alt+T"
+                                                } else {
+                                                    "Shell Truth  Alt+T"
+                                                }
                                             } else {
-                                                "Shell Truth"
+                                                if compact_chrome {
+                                                    "Truth"
+                                                } else {
+                                                    "Shell Truth"
+                                                }
                                             })
                                         },
                                     )
@@ -1502,23 +1523,46 @@ fn render_backdrop_selector(ui: &mut egui::Ui, selected: &mut ShellBackdropPrese
     changed
 }
 
-fn render_window_controls(ui: &mut egui::Ui, ctx: &egui::Context, maximized: bool) {
-    if chrome_button(ui, if maximized { "Restore" } else { "Max" }, false).clicked() {
+fn render_window_controls(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    maximized: bool,
+    compact: bool,
+) {
+    if chrome_button(
+        ui,
+        if compact {
+            if maximized { "▣" } else { "□" }
+        } else if maximized {
+            "Restore"
+        } else {
+            "Max"
+        },
+        false,
+        compact,
+    )
+    .clicked()
+    {
         ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
     }
     ui.add_space(4.0);
-    if chrome_button(ui, "Min", false).clicked() {
+    if chrome_button(ui, if compact { "−" } else { "Min" }, false, compact).clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
     }
     ui.add_space(4.0);
-    if chrome_button(ui, "Close", true).clicked() {
+    if chrome_button(ui, if compact { "×" } else { "Close" }, true, compact).clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 }
 
-fn chrome_button<'a>(ui: &mut egui::Ui, label: &'a str, destructive: bool) -> egui::Response {
+fn chrome_button<'a>(
+    ui: &mut egui::Ui,
+    label: &'a str,
+    destructive: bool,
+    compact: bool,
+) -> egui::Response {
     ui.add_sized(
-        [64.0, 32.0],
+        [if compact { 34.0 } else { 64.0 }, 32.0],
         egui::Button::new(RichText::new(label).color(if destructive {
             Color32::WHITE
         } else {
@@ -1538,6 +1582,25 @@ fn chrome_button<'a>(ui: &mut egui::Ui, label: &'a str, destructive: bool) -> eg
             },
         )),
     )
+}
+
+fn theme_summary_chip(ui: &mut egui::Ui, settings: &MakerShellSettings) {
+    Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 186))
+        .stroke(Stroke::new(1.0, SHELL_LINE))
+        .corner_radius(12.0)
+        .inner_margin(Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} • {}",
+                    settings.backdrop.label(),
+                    settings.finish.label()
+                ))
+                .font(FontId::proportional(14.0))
+                .color(SHELL_MUTED),
+            );
+        });
 }
 
 fn shell_visuals(settings: &MakerShellSettings) -> ShellVisuals {
