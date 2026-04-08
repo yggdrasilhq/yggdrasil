@@ -38,8 +38,8 @@ use crate::window_icon;
 
 static BOOTSTRAP: OnceCell<MakerBootstrap> = OnceCell::new();
 
-const LEFT_RAIL_WIDTH: usize = 296;
-const RIGHT_RAIL_WIDTH: usize = 328;
+const LEFT_RAIL_WIDTH: usize = 272;
+const RIGHT_RAIL_WIDTH: usize = 292;
 const EDGE_RESIZE_HANDLE: usize = 5;
 const CORNER_RESIZE_HANDLE: usize = 10;
 const UI_FONT_FAMILY: &str = "\"Inter Variable\", \"Inter\", system-ui, sans-serif";
@@ -168,6 +168,7 @@ struct MakerUiState {
     notifications: Vec<ToastItem>,
     next_notification_id: u64,
     alt_overlay_active: bool,
+    appearance_panel_open: bool,
     hovered_control: Option<HoveredChromeControl>,
     maximized: bool,
     always_on_top: bool,
@@ -197,6 +198,7 @@ impl MakerUiState {
             notifications: Vec::new(),
             next_notification_id: 1,
             alt_overlay_active: false,
+            appearance_panel_open: false,
             hovered_control: None,
             maximized: false,
             always_on_top: false,
@@ -571,28 +573,19 @@ fn app() -> Element {
     let titlebar_left = rsx! {
         div {
             style: "display:flex; align-items:center; gap:10px; min-width:0;",
-            button {
-                style: utility_button_style(false),
-                onclick: move |_| {
-                    state.with_mut(|ui| {
-                        ui.push_notification(
-                            ToastTone::Info,
-                            "Saved Setups",
-                            "The left rail is fixed in v1. Compact collapse comes later.",
-                        );
-                    });
-                },
-                "☰"
-            }
             div {
                 style: "display:flex; flex-direction:column; min-width:0;",
                 div {
-                    style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                    style: format!("font-size:10px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
                     "YGGDRASIL MAKER"
                 }
                 div {
-                    style: "font-size:15px; font-weight:700; color:#2e4157; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                    style: "font-size:14px; font-weight:700; color:#2e4157; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
                     "{snapshot.current_setup.setup.name}"
+                }
+                div {
+                    style: "font-size:11px; color:#73869a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                    "{snapshot.current_setup.journey_stage.label()} • {snapshot.current_setup.setup.preset.slug()}"
                 }
             }
         }
@@ -600,81 +593,27 @@ fn app() -> Element {
 
     let titlebar_center = rsx! {
         div {
-            style: "display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; min-width:0;",
-            for stage in [
-                JourneyStage::Outcome,
-                JourneyStage::Profile,
-                JourneyStage::Personalize,
-                JourneyStage::Review,
-                JourneyStage::Build,
-                JourneyStage::Boot,
-            ] {
-                button {
-                    style: stage_chip_style(snapshot.current_setup.journey_stage == stage, &accent),
-                    onclick: move |_| {
-                        state.with_mut(|ui| ui.current_setup.journey_stage = stage);
-                    },
-                    "{stage.label()}"
-                }
+            style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0;",
+            div {
+                style: stage_chip_style(true, &accent),
+                "Stage: {snapshot.current_setup.journey_stage.label()}"
+            }
+            div {
+                style: "font-size:12px; color:#6c8197; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                "{titlebar_status_text(&snapshot)}"
             }
         }
     };
 
     let titlebar_right = rsx! {
         div {
-            style: "display:flex; align-items:center; gap:10px; min-width:0;",
-            div {
-                style: "display:flex; align-items:center; gap:6px;",
-                for preset in ThemePreset::all() {
-                    button {
-                        style: small_chip_style(theme_matches_preset(&snapshot.shell_settings.yggui_theme, preset), &accent),
-                        onclick: move |_| {
-                            state.with_mut(|ui| {
-                                ui.shell_settings.yggui_theme = theme_spec_for_preset(preset);
-                                ui.persist_shell_settings();
-                            });
-                        },
-                        "{preset.label()}"
-                    }
-                }
-            }
-            div {
-                style: "display:flex; align-items:center; gap:6px;",
-                for finish in [ShellFinish::Sleek, ShellFinish::Crisp] {
-                    button {
-                        style: small_chip_style(snapshot.shell_settings.finish == finish, &accent),
-                        onclick: move |_| {
-                            state.with_mut(|ui| {
-                                ui.shell_settings.finish = finish;
-                                ui.persist_shell_settings();
-                            });
-                        },
-                        "{finish.label()}"
-                    }
-                }
-            }
-            div {
-                style: "display:flex; align-items:center; gap:6px;",
-                button {
-                    style: small_chip_style(snapshot.shell_settings.theme == UiTheme::ZedLight, &accent),
-                    onclick: move |_| {
-                        state.with_mut(|ui| {
-                            ui.shell_settings.theme = UiTheme::ZedLight;
-                            ui.persist_shell_settings();
-                        });
-                    },
-                    "Light"
-                }
-                button {
-                    style: small_chip_style(snapshot.shell_settings.theme == UiTheme::ZedDark, &accent),
-                    onclick: move |_| {
-                        state.with_mut(|ui| {
-                            ui.shell_settings.theme = UiTheme::ZedDark;
-                            ui.persist_shell_settings();
-                        });
-                    },
-                    "Dark"
-                }
+            style: "display:flex; align-items:center; gap:8px; min-width:0;",
+            button {
+                style: utility_button_style(snapshot.appearance_panel_open),
+                onclick: move |_| {
+                    state.with_mut(|ui| ui.appearance_panel_open = !ui.appearance_panel_open);
+                },
+                "Appearance"
             }
             button {
                 style: utility_button_style(snapshot.utility_pane_open),
@@ -689,9 +628,9 @@ fn app() -> Element {
                     span { style: shortcut_badge_style(), "T" }
                 }
                 if snapshot.utility_pane_open {
-                    "Shell Truth"
+                    "Hide Truth"
                 } else {
-                    "Truth"
+                    "Shell Truth"
                 }
             }
             button {
@@ -764,12 +703,39 @@ fn app() -> Element {
             div {
                 style: shell_surface_style(snapshot.maximized, snapshot.shell_settings.finish),
                 TitlebarChrome {
-                    background: "rgba(247,249,251,0.76)".to_owned(),
+                    background: "rgba(247,249,251,0.90)".to_owned(),
                     zoom_percent: 100.0,
                     left: titlebar_left,
                     center: titlebar_center,
                     right: titlebar_right,
                     on_toggle_maximized: move |_| toggle_maximized(state),
+                }
+                if snapshot.appearance_panel_open {
+                    AppearancePanel {
+                        accent: accent.clone(),
+                        shell_settings: snapshot.shell_settings.clone(),
+                        on_select_preset: move |preset: ThemePreset| {
+                            state.with_mut(|ui| {
+                                ui.shell_settings.yggui_theme = theme_spec_for_preset(preset);
+                                ui.persist_shell_settings();
+                            });
+                        },
+                        on_select_finish: move |finish: ShellFinish| {
+                            state.with_mut(|ui| {
+                                ui.shell_settings.finish = finish;
+                                ui.persist_shell_settings();
+                            });
+                        },
+                        on_select_theme: move |theme: UiTheme| {
+                            state.with_mut(|ui| {
+                                ui.shell_settings.theme = theme;
+                                ui.persist_shell_settings();
+                            });
+                        },
+                        on_close: move |_| {
+                            state.with_mut(|ui| ui.appearance_panel_open = false);
+                        },
+                    }
                 }
                 div {
                     style: "display:flex; flex:1; min-height:0; overflow:hidden;",
@@ -1413,6 +1379,89 @@ fn SuccessScreen(
 }
 
 #[component]
+fn AppearancePanel(
+    accent: String,
+    shell_settings: MakerShellSettings,
+    on_select_preset: EventHandler<ThemePreset>,
+    on_select_finish: EventHandler<ShellFinish>,
+    on_select_theme: EventHandler<UiTheme>,
+    on_close: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div {
+            style: "position:absolute; top:54px; right:14px; width:320px; z-index:70;",
+            div {
+                style: appearance_panel_style(),
+                div {
+                    style: "display:flex; align-items:center; justify-content:space-between; gap:12px;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px;",
+                        div {
+                            style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                            "APPEARANCE"
+                        }
+                        div {
+                            style: "font-size:13px; color:#5d7288; line-height:1.5;",
+                            "Keep shell controls out of the titlebar, but keep the shared Ygg look easy to reach."
+                        }
+                    }
+                    button {
+                        style: utility_button_style(false),
+                        onclick: move |_| on_close.call(()),
+                        "Done"
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div { style: label_style(), "Theme Preset" }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:8px;",
+                        for preset in ThemePreset::all() {
+                            button {
+                                style: small_chip_style(theme_matches_preset(&shell_settings.yggui_theme, preset), &accent),
+                                onclick: move |_| on_select_preset.call(preset),
+                                "{preset.label()}"
+                            }
+                        }
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div { style: label_style(), "Finish" }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:8px;",
+                        for finish in [ShellFinish::Sleek, ShellFinish::Crisp] {
+                            button {
+                                style: small_chip_style(shell_settings.finish == finish, &accent),
+                                onclick: move |_| on_select_finish.call(finish),
+                                "{finish.label()}"
+                            }
+                        }
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div { style: label_style(), "Shell Mode" }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:8px;",
+                        button {
+                            style: small_chip_style(shell_settings.theme == UiTheme::ZedLight, &accent),
+                            onclick: move |_| on_select_theme.call(UiTheme::ZedLight),
+                            "Light"
+                        }
+                        button {
+                            style: small_chip_style(shell_settings.theme == UiTheme::ZedDark, &accent),
+                            onclick: move |_| on_select_theme.call(UiTheme::ZedDark),
+                            "Dark"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn WindowResizeHandles() -> Element {
     rsx! {
         ResizeHandle {
@@ -1613,6 +1662,12 @@ fn toggle_maximized(mut state: Signal<MakerUiState>) {
 }
 
 fn handle_keydown(evt: KeyboardEvent, mut state: Signal<MakerUiState>) {
+    if evt.key() == Key::Escape {
+        state.with_mut(|ui| {
+            ui.alt_overlay_active = false;
+            ui.appearance_panel_open = false;
+        });
+    }
     if evt.modifiers().contains(Modifiers::ALT) {
         state.with_mut(|ui| ui.alt_overlay_active = true);
         match evt.key() {
@@ -1717,6 +1772,16 @@ fn build_summary(state: &MakerUiState) -> String {
         format!("{} · {}", success.title, success.profile_label)
     } else {
         "No build in flight.".to_owned()
+    }
+}
+
+fn titlebar_status_text(state: &MakerUiState) -> String {
+    if state.build_running {
+        "Build in flight".to_owned()
+    } else if let Some(success) = state.success_state.as_ref() {
+        success.title.clone()
+    } else {
+        state.build_status.clone()
     }
 }
 
@@ -2036,7 +2101,7 @@ fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
     };
     format!(
         "position:absolute; inset:{}px; display:flex; flex-direction:column; overflow:hidden; \
-         border-radius:{}px; background:rgba(247,249,251,0.70); box-shadow:0 26px 90px rgba(57,78,98,0.20), \
+         border-radius:{}px; background:rgba(248,250,252,0.82); box-shadow:0 26px 90px rgba(57,78,98,0.16), \
          inset 0 0 0 1px rgba(255,255,255,0.70); backdrop-filter:blur({}px) saturate({}%); \
          -webkit-backdrop-filter:blur({}px) saturate({}%);",
         if maximized { 0 } else { 10 },
@@ -2049,7 +2114,7 @@ fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
 }
 
 fn rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; background:rgba(250,252,253,0.72); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.70);"
+    "display:flex; flex-direction:column; height:100%; background:rgba(250,252,253,0.86); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.64);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
@@ -2076,9 +2141,9 @@ fn small_chip_style(selected: bool, accent: &str) -> String {
 
 fn utility_button_style(active: bool) -> String {
     if active {
-        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 11px; border:none; border-radius:10px; background:rgba(228,238,248,0.88); color:#31516b; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(180,197,214,0.56);".to_owned()
+        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 11px; border:none; border-radius:10px; background:rgba(228,238,248,0.92); color:#31516b; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(180,197,214,0.56);".to_owned()
     } else {
-        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 11px; border:none; border-radius:10px; background:rgba(255,255,255,0.78); color:#5b7086; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.48);".to_owned()
+        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 11px; border:none; border-radius:10px; background:rgba(255,255,255,0.92); color:#5b7086; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.48);".to_owned()
     }
 }
 
@@ -2099,7 +2164,7 @@ fn shortcut_badge_style() -> &'static str {
 
 fn primary_button_style(accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px rgba(94,134,190,0.26);",
+        "display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; border:none; border-radius:11px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px rgba(94,134,190,0.22);",
         accent
     )
 }
@@ -2183,6 +2248,10 @@ fn empty_note_style() -> &'static str {
 
 fn pre_panel_style() -> &'static str {
     "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:rgba(255,255,255,0.86); color:#4a6177; font-size:11px; line-height:1.62; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px rgba(196,210,224,0.5);"
+}
+
+fn appearance_panel_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:14px; padding:16px; border-radius:18px; background:rgba(252,253,254,0.96); box-shadow:0 18px 48px rgba(69,87,108,0.14), inset 0 0 0 1px rgba(255,255,255,0.76); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);"
 }
 
 fn status_card_style() -> &'static str {
