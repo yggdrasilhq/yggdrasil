@@ -1,5 +1,8 @@
 name: shell-checks
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     branches: ["main"]
@@ -37,3 +40,6 @@ jobs:
 
       - name: Smoke checks
         run: ./tests/smoke/run.sh --profile both
+
+      - name: Direct-install smoke
+        run: ./tests/install/direct-install-smoke.sh
