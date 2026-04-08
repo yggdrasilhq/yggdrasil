@@ -1,8 +1,13 @@
 use anyhow::{Context, Result, anyhow};
-use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour, window};
+use dioxus::desktop::{
+    Config, LogicalSize, WindowBuilder, WindowCloseBehaviour, use_window, window,
+};
 use dioxus::document;
 use dioxus::prelude::*;
+use dioxus_desktop::DesktopContext;
 use dioxus_desktop::UserWindowEvent;
+#[cfg(target_os = "linux")]
+use gtk::prelude::GtkWindowExt;
 use keyboard_types::{Key, Modifiers};
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
 use maker_build::{
@@ -13,16 +18,17 @@ use maker_copy::{PresetCard, preset_cards};
 use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tao::event_loop::{EventLoop, EventLoopBuilder};
 #[cfg(target_os = "linux")]
-use tao::platform::unix::EventLoopBuilderExtUnix;
+use tao::platform::unix::{EventLoopBuilderExtUnix, WindowExtUnix};
 use tao::window::ResizeDirection;
 use tokio::time::sleep;
 use yggterm_core::append_trace_event;
@@ -34,16 +40,27 @@ use yggui::{
 };
 use yggui_contract::{UiTheme, YgguiThemeColorStop, YgguiThemeSpec};
 
+use crate::app_capture::{
+    capture_visible_app_surface, describe_window, focus_app_window, record_visible_app_surface,
+};
+use crate::app_control::{
+    AppControlCommand, AppControlRequest, AppControlResponse, complete_app_control_request,
+    default_recording_output_path, default_screenshot_output_path, register_client_instance,
+    take_next_app_control_request,
+};
+#[cfg(target_os = "linux")]
+use crate::linux_desktop::{
+    YGGDRASIL_MAKER_DESKTOP_APP_ID, refresh_dev_desktop_integration,
+};
 use crate::window_icon;
 
 static BOOTSTRAP: OnceCell<MakerBootstrap> = OnceCell::new();
 
-const LEFT_RAIL_WIDTH: usize = 272;
-const RIGHT_RAIL_WIDTH: usize = 292;
+const LEFT_RAIL_WIDTH: usize = 248;
+const RIGHT_RAIL_WIDTH: usize = 276;
 const EDGE_RESIZE_HANDLE: usize = 5;
 const CORNER_RESIZE_HANDLE: usize = 10;
 const UI_FONT_FAMILY: &str = "\"Inter Variable\", \"Inter\", system-ui, sans-serif";
-const YGGDRASIL_MAKER_DESKTOP_APP_ID: &str = "dev.yggdrasil.YggdrasilMaker";
 
 pub fn launch() -> Result<()> {
     let bootstrap = MakerBootstrap::load()?;
@@ -57,6 +74,18 @@ pub fn launch() -> Result<()> {
         }),
     );
     let _ = BOOTSTRAP.set(bootstrap);
+
+    #[cfg(target_os = "linux")]
+    if let Err(error) = refresh_dev_desktop_integration() {
+        if let Some(bootstrap) = BOOTSTRAP.get() {
+            trace_ui(
+                &bootstrap.trace_root,
+                "startup",
+                "refresh_desktop_integration_failed",
+                json!({ "error": error.to_string() }),
+            );
+        }
+    }
 
     #[cfg(target_os = "macos")]
     let window_builder = WindowBuilder::new()
@@ -90,11 +119,16 @@ pub fn launch() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn configured_event_loop() -> EventLoop<UserWindowEvent> {
     let mut builder = EventLoopBuilder::<UserWindowEvent>::with_user_event();
-    #[cfg(target_os = "linux")]
     builder.with_app_id(YGGDRASIL_MAKER_DESKTOP_APP_ID);
     builder.build()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configured_event_loop() -> EventLoop<UserWindowEvent> {
+    EventLoopBuilder::<UserWindowEvent>::with_user_event().build()
 }
 
 #[derive(Clone)]
@@ -161,6 +195,7 @@ struct MakerUiState {
     build_result: String,
     build_running: bool,
     right_panel_mode: RightPanelMode,
+    sidebar_open: bool,
     utility_pane_open: bool,
     recent_artifacts: Vec<RecentArtifactSummary>,
     recent_artifacts_expanded: bool,
@@ -191,6 +226,7 @@ impl MakerUiState {
             build_result: String::new(),
             build_running: false,
             right_panel_mode: RightPanelMode::Config,
+            sidebar_open: true,
             utility_pane_open: true,
             recent_artifacts: Vec::new(),
             recent_artifacts_expanded: false,
@@ -221,6 +257,7 @@ impl MakerUiState {
         state.recent_artifacts_expanded = !state.recent_artifacts.is_empty();
         state.utility_pane_open = bootstrap.shell_settings.utility_pane_open;
         state.right_panel_mode = bootstrap.shell_settings.right_panel_mode;
+        state.sidebar_open = bootstrap.shell_settings.sidebar_open;
         state
     }
 
@@ -262,7 +299,7 @@ impl MakerUiState {
         BuildInputs {
             setup_document: self.current_setup.clone(),
             artifacts_dir: PathBuf::from(self.artifacts_dir.trim()),
-            authorized_keys_file: None,
+            authorized_keys_file: default_authorized_keys_file(&self.current_setup),
             host_keys_dir: None,
             repo_root: if self.repo_root.trim().is_empty() {
                 None
@@ -424,7 +461,7 @@ impl MakerUiState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-enum RightPanelMode {
+pub(crate) enum RightPanelMode {
     Config,
     Plan,
     Build,
@@ -441,6 +478,19 @@ impl RightPanelMode {
 
     fn all() -> [Self; 3] {
         [Self::Config, Self::Plan, Self::Build]
+    }
+}
+
+impl FromStr for RightPanelMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value {
+            "config" => Ok(Self::Config),
+            "plan" => Ok(Self::Plan),
+            "build" => Ok(Self::Build),
+            other => Err(format!("unsupported right panel mode: {other}")),
+        }
     }
 }
 
@@ -478,6 +528,7 @@ struct MakerShellSettings {
     theme: UiTheme,
     yggui_theme: YgguiThemeSpec,
     finish: ShellFinish,
+    sidebar_open: bool,
     utility_pane_open: bool,
     right_panel_mode: RightPanelMode,
 }
@@ -488,6 +539,7 @@ impl Default for MakerShellSettings {
             theme: UiTheme::ZedLight,
             yggui_theme: theme_spec_for_preset(ThemePreset::ArcFrost),
             finish: ShellFinish::Sleek,
+            sidebar_open: true,
             utility_pane_open: true,
             right_panel_mode: RightPanelMode::Config,
         }
@@ -537,7 +589,26 @@ fn app() -> Element {
         .cloned()
         .expect("maker bootstrap should be initialized before launch");
     let mut state = use_signal(|| MakerUiState::from_bootstrap(bootstrap));
+    let desktop = use_window();
     let now_ms = use_signal(current_millis);
+
+    {
+        let desktop = desktop.clone();
+        use_hook(move || {
+            desktop
+                .window
+                .set_window_icon(Some(window_icon::load_yggdrasil_maker_window_icon()));
+            #[cfg(target_os = "linux")]
+            {
+                let pixbuf = window_icon::load_yggdrasil_maker_pixbuf();
+                gtk::Window::set_default_icon(&pixbuf);
+                gtk::Window::set_default_icon_name(YGGDRASIL_MAKER_DESKTOP_APP_ID);
+                let gtk_window = desktop.window.gtk_window();
+                gtk_window.set_icon(Some(&pixbuf));
+                gtk_window.set_icon_name(Some(YGGDRASIL_MAKER_DESKTOP_APP_ID));
+            }
+        });
+    }
 
     {
         let mut now_ms = now_ms;
@@ -545,6 +616,31 @@ fn app() -> Element {
             loop {
                 sleep(Duration::from_millis(250)).await;
                 now_ms.set(current_millis());
+            }
+        });
+    }
+
+    {
+        let desktop = desktop.clone();
+        let trace_root = state.read().trace_root.clone();
+        use_future(move || {
+            let desktop = desktop.clone();
+            let trace_root = trace_root.clone();
+            async move {
+                let _ = register_client_instance(&trace_root);
+                loop {
+                    if let Err(error) =
+                        process_pending_app_control_requests(&trace_root, &desktop, state).await
+                    {
+                        trace_ui(
+                            &trace_root,
+                            "app-control",
+                            "request_error",
+                            json!({ "error": error.to_string() }),
+                        );
+                    }
+                    sleep(Duration::from_millis(80)).await;
+                }
             }
         });
     }
@@ -572,20 +668,47 @@ fn app() -> Element {
 
     let titlebar_left = rsx! {
         div {
-            style: "display:flex; align-items:center; gap:10px; min-width:0;",
+            style: "display:flex; align-items:center; gap:12px; min-width:0; width:100%; padding-left:4px;",
+            button {
+                style: titlebar_icon_button_style(snapshot.sidebar_open),
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
+                onclick: move |_| {
+                    state.with_mut(|ui| {
+                        ui.sidebar_open = !ui.sidebar_open;
+                        ui.shell_settings.sidebar_open = ui.sidebar_open;
+                        ui.persist_shell_settings();
+                    });
+                },
+                "☰"
+            }
             div {
-                style: "display:flex; flex-direction:column; min-width:0;",
+                style: "display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; max-width:320px;",
                 div {
-                    style: format!("font-size:10px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                    style: format!("font-size:9px; font-weight:800; letter-spacing:0.08em; color:{}; white-space:nowrap;", accent),
                     "YGGDRASIL MAKER"
                 }
-                div {
-                    style: "font-size:14px; font-weight:700; color:#2e4157; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
-                    "{snapshot.current_setup.setup.name}"
-                }
-                div {
-                    style: "font-size:11px; color:#73869a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
-                    "{snapshot.current_setup.journey_stage.label()} • {snapshot.current_setup.setup.preset.slug()}"
+                button {
+                    style: titlebar_setup_button_style(),
+                    onmousedown: |evt| evt.stop_propagation(),
+                    ondoubleclick: |evt| evt.stop_propagation(),
+                    onclick: move |_| {
+                        state.with_mut(|ui| {
+                            ui.current_setup.journey_stage = JourneyStage::Personalize;
+                        });
+                        let _ = document::eval("document.getElementById('maker-setup-name')?.focus?.();");
+                    },
+                    div {
+                        style: "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-width:0;",
+                        span {
+                            style: "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; color:#30465d; text-align:left;",
+                            "{snapshot.current_setup.setup.name}"
+                        }
+                        span {
+                            style: "flex:0 0 auto; font-size:10px; color:#6e8398; white-space:nowrap;",
+                            "{snapshot.current_setup.setup.preset.slug()} • {profile_title_label(snapshot.current_setup.setup.profile_override.unwrap_or_else(|| snapshot.current_setup.setup.preset.recommended_profile()))}"
+                        }
+                    }
                 }
             }
         }
@@ -593,23 +716,32 @@ fn app() -> Element {
 
     let titlebar_center = rsx! {
         div {
-            style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0;",
+            style: "display:flex; align-items:center; justify-content:center; gap:8px; min-width:0; width:min(520px, 100%);",
             div {
-                style: stage_chip_style(true, &accent),
-                "Stage: {snapshot.current_setup.journey_stage.label()}"
-            }
-            div {
-                style: "font-size:12px; color:#6c8197; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
-                "{titlebar_status_text(&snapshot)}"
+                style: titlebar_center_field_style(),
+                span {
+                    style: stage_chip_style(true, &accent),
+                    "Stage: {snapshot.current_setup.journey_stage.label()}"
+                }
+                span {
+                    style: "font-size:11px; font-weight:700; color:#53687f; white-space:nowrap;",
+                    "{snapshot.current_setup.setup.profile_override.unwrap_or_else(|| snapshot.current_setup.setup.preset.recommended_profile())}"
+                }
+                span {
+                    style: "font-size:11px; color:#6c8197; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                    "{titlebar_status_text(&snapshot)}"
+                }
             }
         }
     };
 
     let titlebar_right = rsx! {
         div {
-            style: "display:flex; align-items:center; gap:8px; min-width:0;",
+            style: "display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; width:100%;",
             button {
                 style: utility_button_style(snapshot.appearance_panel_open),
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
                 onclick: move |_| {
                     state.with_mut(|ui| ui.appearance_panel_open = !ui.appearance_panel_open);
                 },
@@ -617,6 +749,8 @@ fn app() -> Element {
             }
             button {
                 style: utility_button_style(snapshot.utility_pane_open),
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
                 onclick: move |_| {
                     state.with_mut(|ui| {
                         ui.utility_pane_open = !ui.utility_pane_open;
@@ -627,15 +761,13 @@ fn app() -> Element {
                 if snapshot.alt_overlay_active {
                     span { style: shortcut_badge_style(), "T" }
                 }
-                if snapshot.utility_pane_open {
-                    "Hide Truth"
-                } else {
-                    "Shell Truth"
-                }
+                "Truth"
             }
             button {
                 style: primary_button_style(&accent),
                 disabled: snapshot.build_running,
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
                 onclick: move |_| start_build(state),
                 if snapshot.alt_overlay_active {
                     span { style: shortcut_badge_style(), "B" }
@@ -643,9 +775,10 @@ fn app() -> Element {
                 if snapshot.build_running {
                     "Building…"
                 } else {
-                    "Build / Export"
+                    "Build"
                 }
             }
+            div { style: "flex:1; min-width:14px; max-width:26px; height:28px;" }
             WindowControlsStrip {
                 palette: chrome_palette,
                 hovered: snapshot.hovered_control,
@@ -703,7 +836,7 @@ fn app() -> Element {
             div {
                 style: shell_surface_style(snapshot.maximized, snapshot.shell_settings.finish),
                 TitlebarChrome {
-                    background: "rgba(247,249,251,0.90)".to_owned(),
+                    background: "rgba(248,251,253,0.58)".to_owned(),
                     zoom_percent: 100.0,
                     left: titlebar_left,
                     center: titlebar_center,
@@ -740,7 +873,7 @@ fn app() -> Element {
                 div {
                     style: "display:flex; flex:1; min-height:0; overflow:hidden;",
                     SideRailShell {
-                        visible: true,
+                        visible: snapshot.sidebar_open,
                         width_px: LEFT_RAIL_WIDTH,
                         zoom_percent: 100.0,
                         body: rsx! {
@@ -1655,6 +1788,356 @@ fn start_build(mut state: Signal<MakerUiState>) {
     });
 }
 
+async fn process_pending_app_control_requests(
+    home: &Path,
+    desktop: &DesktopContext,
+    mut state: Signal<MakerUiState>,
+) -> Result<bool> {
+    let Some((inflight_path, request)) = take_next_app_control_request(home, std::process::id())?
+    else {
+        return Ok(false);
+    };
+
+    trace_ui(
+        home,
+        "app-control",
+        "request_begin",
+        json!({
+            "request_id": request.request_id,
+            "command": request.command.name(),
+        }),
+    );
+
+    let response = match request.command.clone() {
+        AppControlCommand::FocusWindow => {
+            response_from_result(&request, focus_app_window(desktop), None)
+        }
+        AppControlCommand::DescribeState => AppControlResponse {
+            request_id: request.request_id.clone(),
+            handled_by_pid: std::process::id(),
+            completed_at_ms: crate::app_control::current_millis(),
+            output_path: None,
+            data: Some(describe_app_state_snapshot(&state.read(), desktop)),
+            error: None,
+        },
+        AppControlCommand::DescribeRows => AppControlResponse {
+            request_id: request.request_id.clone(),
+            handled_by_pid: std::process::id(),
+            completed_at_ms: crate::app_control::current_millis(),
+            output_path: None,
+            data: Some(describe_app_rows_snapshot(&state.read())),
+            error: None,
+        },
+        AppControlCommand::CaptureScreenshot { output_path } => {
+            let target = if output_path.trim().is_empty() {
+                default_screenshot_output_path(home, &request.request_id)
+            } else {
+                PathBuf::from(output_path)
+            };
+            match capture_visible_app_surface(desktop, &target) {
+                Ok(path) => AppControlResponse {
+                    request_id: request.request_id.clone(),
+                    handled_by_pid: std::process::id(),
+                    completed_at_ms: crate::app_control::current_millis(),
+                    output_path: Some(path.display().to_string()),
+                    data: Some(json!({
+                        "window": describe_window(desktop),
+                    })),
+                    error: None,
+                },
+                Err(error) => AppControlResponse {
+                    request_id: request.request_id.clone(),
+                    handled_by_pid: std::process::id(),
+                    completed_at_ms: crate::app_control::current_millis(),
+                    output_path: None,
+                    data: None,
+                    error: Some(error.to_string()),
+                },
+            }
+        }
+        AppControlCommand::CaptureScreenRecording {
+            output_path,
+            duration_secs,
+        } => {
+            let target = if output_path.trim().is_empty() {
+                default_recording_output_path(home, &request.request_id)
+            } else {
+                PathBuf::from(output_path)
+            };
+            match record_visible_app_surface(desktop, &target, duration_secs) {
+                Ok(path) => AppControlResponse {
+                    request_id: request.request_id.clone(),
+                    handled_by_pid: std::process::id(),
+                    completed_at_ms: crate::app_control::current_millis(),
+                    output_path: Some(path.display().to_string()),
+                    data: Some(json!({
+                        "window": describe_window(desktop),
+                        "duration_secs": duration_secs,
+                    })),
+                    error: None,
+                },
+                Err(error) => AppControlResponse {
+                    request_id: request.request_id.clone(),
+                    handled_by_pid: std::process::id(),
+                    completed_at_ms: crate::app_control::current_millis(),
+                    output_path: None,
+                    data: None,
+                    error: Some(error.to_string()),
+                },
+            }
+        }
+        AppControlCommand::NewSetup {
+            name,
+            preset,
+            profile,
+            hostname,
+        } => {
+            state.with_mut(|ui| {
+                ui.start_another_setup();
+                if let Some(name) = name {
+                    ui.current_setup.setup.name = name;
+                }
+                if let Some(preset) = preset {
+                    ui.apply_preset(preset);
+                }
+                if let Some(profile) = profile {
+                    ui.current_setup.setup.profile_override = Some(profile);
+                }
+                if let Some(hostname) = hostname {
+                    ui.current_setup.setup.personalization.hostname = hostname;
+                }
+                ui.refresh_previews();
+            });
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SelectSetup { setup_id } => {
+            state.with_mut(|ui| ui.select_setup(&setup_id));
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SaveSetup => {
+            state.with_mut(|ui| ui.save_current_setup());
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetJourneyStage { stage } => {
+            state.with_mut(|ui| ui.current_setup.journey_stage = stage);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetSetupName { value } => {
+            update_setup_name(state, value);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetHostname { value } => {
+            update_hostname(state, value);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetArtifactsDir { value } => {
+            update_artifacts_dir(state, value);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetRepoRoot { value } => {
+            update_repo_root(state, value);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetBuildContext {
+            artifacts_dir,
+            repo_root,
+        } => {
+            state.with_mut(|ui| {
+                ui.artifacts_dir = artifacts_dir;
+                ui.repo_root = repo_root;
+                ui.success_state = None;
+                ui.refresh_previews();
+                ui.refresh_recent_artifacts();
+            });
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::ApplyPreset { preset } => {
+            state.with_mut(|ui| ui.apply_preset(preset));
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetProfile { profile } => {
+            update_profile(state, profile);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::ToggleNvidia => {
+            toggle_nvidia(state);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::ToggleLts => {
+            toggle_lts(state);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetSidebarOpen { open } => {
+            state.with_mut(|ui| {
+                ui.sidebar_open = open;
+                ui.shell_settings.sidebar_open = open;
+                ui.persist_shell_settings();
+            });
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetUtilityPaneOpen { open } => {
+            state.with_mut(|ui| {
+                ui.utility_pane_open = open;
+                ui.shell_settings.utility_pane_open = open;
+                ui.persist_shell_settings();
+            });
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetRightPanelMode { mode } => {
+            state.with_mut(|ui| {
+                ui.right_panel_mode = mode;
+                ui.shell_settings.right_panel_mode = mode;
+                ui.persist_shell_settings();
+            });
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::SetAppearancePanelOpen { open } => {
+            state.with_mut(|ui| ui.appearance_panel_open = open);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::StartBuild => {
+            start_build(state);
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::OpenBuildDetails => {
+            state.with_mut(|ui| ui.open_build_details());
+            snapshot_response(&request, &state.read(), desktop)
+        }
+        AppControlCommand::RevealPrimaryArtifact => {
+            let result = state.with(|ui| {
+                if let Some(success) = ui.success_state.as_ref() {
+                    reveal_path(&success.output_path)
+                } else if let Some(manifest) = ui.latest_manifest() {
+                    let path = primary_artifact(&manifest)
+                        .map(|artifact| artifact.path.clone())
+                        .unwrap_or_else(|| ui.artifacts_dir.clone());
+                    reveal_path(&path)
+                } else {
+                    Err(anyhow!("no artifact is available to reveal"))
+                }
+            });
+            response_from_result(
+                &request,
+                result.map(|_| describe_app_state_snapshot(&state.read(), desktop)),
+                None,
+            )
+        }
+    };
+
+    complete_app_control_request(home, &inflight_path, &response)?;
+    trace_ui(
+        home,
+        "app-control",
+        "request_end",
+        json!({
+            "request_id": response.request_id,
+            "error": response.error,
+            "output_path": response.output_path,
+        }),
+    );
+    Ok(true)
+}
+
+fn snapshot_response(
+    request: &AppControlRequest,
+    state: &MakerUiState,
+    desktop: &DesktopContext,
+) -> AppControlResponse {
+    AppControlResponse {
+        request_id: request.request_id.clone(),
+        handled_by_pid: std::process::id(),
+        completed_at_ms: crate::app_control::current_millis(),
+        output_path: None,
+        data: Some(describe_app_state_snapshot(state, desktop)),
+        error: None,
+    }
+}
+
+fn response_from_result(
+    request: &AppControlRequest,
+    result: Result<Value>,
+    output_path: Option<String>,
+) -> AppControlResponse {
+    match result {
+        Ok(data) => AppControlResponse {
+            request_id: request.request_id.clone(),
+            handled_by_pid: std::process::id(),
+            completed_at_ms: crate::app_control::current_millis(),
+            output_path,
+            data: Some(data),
+            error: None,
+        },
+        Err(error) => AppControlResponse {
+            request_id: request.request_id.clone(),
+            handled_by_pid: std::process::id(),
+            completed_at_ms: crate::app_control::current_millis(),
+            output_path: None,
+            data: None,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn describe_app_state_snapshot(state: &MakerUiState, desktop: &DesktopContext) -> Value {
+    json!({
+        "window": describe_window(desktop),
+        "current_setup": {
+            "setup_id": state.current_setup.setup_id,
+            "name": state.current_setup.setup.name,
+            "slug": state.current_setup.setup.slug(),
+            "preset": state.current_setup.setup.preset.slug(),
+            "profile": state.current_setup.setup.profile_override.unwrap_or_else(|| state.current_setup.setup.preset.recommended_profile()).slug(),
+            "journey_stage": state.current_setup.journey_stage.label(),
+            "hostname": state.current_setup.setup.personalization.hostname,
+            "with_nvidia": state.current_setup.setup.hardware.with_nvidia,
+            "with_lts": state.current_setup.setup.hardware.with_lts,
+        },
+        "shell": {
+            "sidebar_open": state.sidebar_open,
+            "right_panel_mode": state.right_panel_mode.label().to_ascii_lowercase(),
+            "utility_pane_open": state.utility_pane_open,
+            "appearance_panel_open": state.appearance_panel_open,
+            "recent_artifacts_expanded": state.recent_artifacts_expanded,
+            "maximized": state.maximized,
+            "always_on_top": state.always_on_top,
+        },
+        "build": {
+            "running": state.build_running,
+            "status": state.build_status,
+            "result": state.build_result,
+            "log_line_count": state.build_log.len(),
+            "artifacts_dir": state.artifacts_dir,
+            "repo_root": state.repo_root,
+        },
+        "success": state.success_state.as_ref().map(|success| json!({
+            "title": success.title,
+            "artifact_name": success.artifact_name,
+            "artifact_path": success.artifact_path,
+            "profile_label": success.profile_label,
+            "output_path": success.output_path,
+        })),
+        "rows": describe_app_rows_snapshot(state),
+    })
+}
+
+fn describe_app_rows_snapshot(state: &MakerUiState) -> Value {
+    json!({
+        "saved_setups": state.saved_setups.iter().map(|summary| json!({
+            "setup_id": summary.setup_id,
+            "name": summary.name,
+            "slug": summary.slug,
+            "journey_stage": summary.journey_stage.label(),
+            "selected": summary.setup_id == state.current_setup.setup_id,
+            "path": summary.path,
+        })).collect::<Vec<_>>(),
+        "recent_artifacts": state.recent_artifacts.iter().map(|artifact| json!({
+            "title": artifact.title,
+            "subtitle": artifact.subtitle,
+            "path": artifact.path,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn toggle_maximized(mut state: Signal<MakerUiState>) {
     let next = !window().is_maximized();
     window().toggle_maximized();
@@ -1780,8 +2263,27 @@ fn titlebar_status_text(state: &MakerUiState) -> String {
         "Build in flight".to_owned()
     } else if let Some(success) = state.success_state.as_ref() {
         success.title.clone()
+    } else if state.build_status.to_ascii_lowercase().contains("failed") {
+        "Build needs attention".to_owned()
+    } else if !state.build_result.trim().is_empty() {
+        "Needs attention".to_owned()
     } else {
-        state.build_status.clone()
+        match state.current_setup.journey_stage {
+            JourneyStage::Outcome => "Choose the machine intent".to_owned(),
+            JourneyStage::Profile => "Set the build posture".to_owned(),
+            JourneyStage::Personalize => "Personalize the machine".to_owned(),
+            JourneyStage::Review => "Review the native plan".to_owned(),
+            JourneyStage::Build => "Ready to build".to_owned(),
+            JourneyStage::Boot => "Artifact ready to boot".to_owned(),
+        }
+    }
+}
+
+fn profile_title_label(profile: BuildProfile) -> &'static str {
+    match profile {
+        BuildProfile::Server => "Server",
+        BuildProfile::Kde => "KDE",
+        BuildProfile::Both => "Both",
     }
 }
 
@@ -1914,6 +2416,23 @@ fn save_shell_settings(settings: &MakerShellSettings) -> Result<()> {
     fs::write(&temp_path, payload)?;
     fs::rename(&temp_path, &path)?;
     Ok(())
+}
+
+fn default_authorized_keys_file(document: &SetupDocument) -> Option<PathBuf> {
+    let remembered = document
+        .setup
+        .ssh
+        .authorized_keys_file
+        .build_value()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    if remembered.is_some() {
+        return None;
+    }
+
+    let home = std::env::var("HOME").ok()?;
+    let candidate = PathBuf::from(home).join(".ssh/authorized_keys");
+    candidate.is_file().then_some(candidate)
 }
 
 fn shell_settings_path() -> Result<PathBuf> {
@@ -2080,7 +2599,7 @@ fn stop(color: &str, x: f32, y: f32, alpha: f32) -> YgguiThemeColorStop {
 
 fn chrome_palette() -> ChromePalette {
     ChromePalette {
-        titlebar: "#f8fafc",
+        titlebar: "rgba(248,251,253,0.76)",
         text: "#30465d",
         muted: "#6c8197",
         accent: "#5fa8ff",
@@ -2101,10 +2620,11 @@ fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
     };
     format!(
         "position:absolute; inset:{}px; display:flex; flex-direction:column; overflow:hidden; \
-         border-radius:{}px; background:rgba(248,250,252,0.82); box-shadow:0 26px 90px rgba(57,78,98,0.16), \
-         inset 0 0 0 1px rgba(255,255,255,0.70); backdrop-filter:blur({}px) saturate({}%); \
+         border-radius:{}px; background:rgba(246,249,251,0.28); border:1px solid rgba(255,255,255,0.78); \
+         box-shadow:0 24px 64px rgba(57,78,98,0.14), inset 0 1px 0 rgba(255,255,255,0.78); \
+         backdrop-filter:blur({}px) saturate({}%); \
          -webkit-backdrop-filter:blur({}px) saturate({}%);",
-        if maximized { 0 } else { 10 },
+        if maximized { 0 } else { 8 },
         radius,
         blur,
         saturation,
@@ -2114,17 +2634,17 @@ fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
 }
 
 fn rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; background:rgba(250,252,253,0.86); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.64);"
+    "display:flex; flex-direction:column; height:100%; background:rgba(248,251,253,0.28); box-shadow:inset 0 1px 0 rgba(255,255,255,0.54); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
     if selected {
         format!(
-            "height:28px; padding:0 10px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:700;",
+            "height:24px; padding:0 10px; border:none; border-radius:999px; background:{}; color:white; font-size:10px; font-weight:700;",
             accent
         )
     } else {
-        "height:28px; padding:0 10px; border:none; border-radius:10px; background:rgba(255,255,255,0.74); color:#5a6d81; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(196,208,220,0.52);".to_owned()
+        "height:24px; padding:0 10px; border:none; border-radius:999px; background:rgba(255,255,255,0.74); color:#5a6d81; font-size:10px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(196,208,220,0.52);".to_owned()
     }
 }
 
@@ -2140,11 +2660,47 @@ fn small_chip_style(selected: bool, accent: &str) -> String {
 }
 
 fn utility_button_style(active: bool) -> String {
-    if active {
-        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 11px; border:none; border-radius:10px; background:rgba(228,238,248,0.92); color:#31516b; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(180,197,214,0.56);".to_owned()
-    } else {
-        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 11px; border:none; border-radius:10px; background:rgba(255,255,255,0.92); color:#5b7086; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.48);".to_owned()
-    }
+    format!(
+        "display:inline-flex; align-items:center; gap:8px; height:28px; padding:0 11px; border:none; border-radius:10px; \
+         background:{}; color:{}; font-size:11px; font-weight:700; white-space:nowrap; box-shadow:{};",
+        if active {
+            "rgba(255,255,255,0.84)"
+        } else {
+            "transparent"
+        },
+        if active { "#4c86d6" } else { "#6c8197" },
+        if active {
+            "inset 0 0 0 1px rgba(188,205,222,0.52)"
+        } else {
+            "none"
+        }
+    )
+}
+
+fn titlebar_icon_button_style(active: bool) -> String {
+    format!(
+        "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
+         background:{}; color:{}; font-size:14px; font-weight:700; box-shadow:{};",
+        if active {
+            "rgba(255,255,255,0.84)"
+        } else {
+            "transparent"
+        },
+        if active { "#4c86d6" } else { "#6c8197" },
+        if active {
+            "inset 0 0 0 1px rgba(188,205,222,0.52)"
+        } else {
+            "none"
+        }
+    )
+}
+
+fn titlebar_setup_button_style() -> &'static str {
+    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:rgba(255,255,255,0.78); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.48);"
+}
+
+fn titlebar_center_field_style() -> &'static str {
+    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.78); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.44); overflow:hidden;"
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
@@ -2164,7 +2720,7 @@ fn shortcut_badge_style() -> &'static str {
 
 fn primary_button_style(accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; border:none; border-radius:11px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px rgba(94,134,190,0.22);",
+        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 12px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 8px 18px rgba(94,134,190,0.18);",
         accent
     )
 }
@@ -2201,7 +2757,7 @@ fn section_toggle_style(expanded: bool) -> String {
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:20px 22px 22px 22px; border-radius:24px; background:rgba(252,253,254,0.86); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(255,255,255,0.72);"
+    "display:flex; flex-direction:column; gap:12px; padding:20px 22px 22px 22px; border-radius:24px; background:rgba(252,253,254,0.92); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(255,255,255,0.72);"
 }
 
 fn preset_card_style(selected: bool, accent: &str) -> String {

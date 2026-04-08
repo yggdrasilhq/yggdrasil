@@ -4,6 +4,10 @@ set -euo pipefail
 CONFIG_PATH=""
 INVOKE_PATH=""
 REPO_ROOT="${YGGDRASIL_MAKER_REPO_ROOT:-/workspace/repo}"
+EDIT_BIN_BUNDLE="/workspace/input/tools/edit"
+export YGG_FORCE_IPV4_DOWNLOADS="${YGG_FORCE_IPV4_DOWNLOADS:-true}"
+export YGG_DEBOOTSTRAP_PLAIN_WGET="${YGG_DEBOOTSTRAP_PLAIN_WGET:-true}"
+FORCE_IPV4_BIN_DIR=""
 
 usage() {
   cat <<'USAGE'
@@ -34,7 +38,10 @@ PY
 
 emit_event() {
   local kind="$1"
-  local payload_json="${2:-{}}"
+  local payload_json="${2-}"
+  if [[ -z "$payload_json" ]]; then
+    payload_json='{}'
+  fi
   python3 - "$kind" "$payload_json" <<'PY'
 import json
 import sys
@@ -108,6 +115,60 @@ log_line() {
   printf '[yggdrasil-maker-build] %s\n' "$*" >&2
 }
 
+prepare_debootstrap_download_path() {
+  local partial_dir="$REPO_ROOT/chroot/var/cache/apt/archives/partial"
+  if [[ -d "$partial_dir" ]]; then
+    find "$partial_dir" -maxdepth 1 -type f -name '*.deb' -delete || true
+  fi
+}
+
+patch_debootstrap_for_plain_wget() {
+  [[ "$YGG_DEBOOTSTRAP_PLAIN_WGET" == "true" ]] || return 0
+  python3 - <<'PY'
+from pathlib import Path
+path = Path("/usr/share/debootstrap/functions")
+text = path.read_text()
+old = """wgetprogress () {
+\t[ ! \"$VERBOSE\" ] && NVSWITCH=\"-nv\"
+\tlocal ret=0
+\tif [ \"$USE_DEBIANINSTALLER_INTERACTION\" ] && [ \"$PROGRESS_NEXT\" ]; then
+\t\t# The exit status of a pipeline is that of the last command in
+\t\t# the pipeline, so wget's exit status must be saved in the
+\t\t# pipeline's first command.  Since commands in a pipeline run in
+\t\t# subshells, we have to print the exit status (on a file
+\t\t# descriptor other than standard output, which is used by the
+\t\t# pipeline itself) and then assign it to $ret outside of the
+\t\t# pipeline.  The \"||\" is necessary due to \"set -e\"; otherwise, a
+\t\t# non-zero exit status would cause the echo command to be
+\t\t# skipped.  If wget succeeds, $ret will be \"\", so it then has to
+\t\t# be set to a default value of 0.
+\t\tret=$({ { wget -U \"debootstrap/$VERSION (debian-installer)\" \"$@\" 2>&1 >/dev/null || echo $? >&2; } | \"$PKGDETAILS\" \"WGET%\" \"$PROGRESS_NOW\" \"$PROGRESS_NEXT\" \"$PROGRESS_END\" >&3; } 2>&1)
+\t\t: \"${ret:=0}\"
+\telse
+\t\twget -U \"debootstrap/$VERSION\" ${NVSWITCH:+\"$NVSWITCH\"} \"$@\"
+\t\tret=$?
+\tfi
+\treturn $ret
+}
+"""
+new = """wgetprogress () {
+\t[ ! \"$VERBOSE\" ] && NVSWITCH=\"-nv\"
+\twget -U \"debootstrap/$VERSION\" ${NVSWITCH:+\"$NVSWITCH\"} \"$@\"
+\treturn $?
+}
+"""
+if old in text and new not in text:
+    path.write_text(text.replace(old, new))
+PY
+}
+
+cleanup() {
+  if [[ -n "$FORCE_IPV4_BIN_DIR" && -d "$FORCE_IPV4_BIN_DIR" ]]; then
+    rm -rf "$FORCE_IPV4_BIN_DIR"
+  fi
+}
+trap cleanup EXIT
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config)
@@ -163,14 +224,108 @@ fi
 
 mkdir -p "$artifacts_dir"
 
+if [[ -x "$EDIT_BIN_BUNDLE" ]]; then
+  export YGG_EDIT_BIN="$EDIT_BIN_BUNDLE"
+fi
+
+if [[ "$YGG_FORCE_IPV4_DOWNLOADS" == "true" ]]; then
+  FORCE_IPV4_BIN_DIR="$(mktemp -d /tmp/ygg-force-ipv4-bin-XXXXXX)"
+  cat <<'EOF' > "$FORCE_IPV4_BIN_DIR/wget"
+#!/usr/bin/env bash
+set -euo pipefail
+
+user_agent=""
+output_path=""
+urls=()
+curl_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -O)
+      output_path="${2:-}"
+      shift 2
+      ;;
+    -U)
+      user_agent="${2:-}"
+      shift 2
+      ;;
+    -nv|--inet4-only)
+      shift
+      ;;
+    --no-check-certificate)
+      curl_args+=("--insecure")
+      shift
+      ;;
+    --certificate|--private-key|--ca-certificate)
+      shift 2
+      ;;
+    http://*|https://*|ftp://*)
+      urls+=("$1")
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#urls[@]} -eq 0 ]]; then
+  echo "ygg wget shim: missing URL" >&2
+  exit 2
+fi
+
+temp_output=""
+cleanup_temp() {
+  if [[ -n "$temp_output" ]]; then
+    rm -f "$temp_output"
+  fi
+}
+trap cleanup_temp EXIT
+
+cmd=(
+  /usr/bin/curl
+  -4
+  -L
+  --fail
+  --silent
+  --show-error
+  --retry 8
+  --retry-delay 1
+  --retry-all-errors
+  --connect-timeout 15
+  --speed-time 20
+  --speed-limit 1024
+)
+if [[ -n "$user_agent" ]]; then
+  cmd+=(-A "$user_agent")
+fi
+if [[ -n "$output_path" ]]; then
+  temp_output="${output_path}.curl-part.$$"
+  cmd+=(--output "$temp_output")
+fi
+last_url_index=$((${#urls[@]} - 1))
+cmd+=("${curl_args[@]}" "${urls[$last_url_index]}")
+"${cmd[@]}"
+if [[ -n "$output_path" ]]; then
+  mv -f "$temp_output" "$output_path"
+  temp_output=""
+fi
+EOF
+  chmod +x "$FORCE_IPV4_BIN_DIR/wget"
+  export PATH="$FORCE_IPV4_BIN_DIR:$PATH"
+fi
+
+prepare_debootstrap_download_path
+patch_debootstrap_for_plain_wget
+
 emit_stage_finished "preflight"
 emit_stage_started "build"
 
 cd "$REPO_ROOT"
 
-cmd=(./mkconfig.sh --config "$CONFIG_PATH" --profile "$profile" --skip-smoke)
+cmd=(./mkconfig.sh --config "$CONFIG_PATH" --profile "$profile")
 if [[ "$skip_smoke" == "true" ]]; then
-  :
+  cmd+=(--skip-smoke)
 fi
 
 set +e
