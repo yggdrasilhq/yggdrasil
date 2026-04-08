@@ -885,6 +885,7 @@ fn app() -> Element {
                                     state: snapshot.clone(),
                                     accent: accent.clone(),
                                     preview_surface: preview_surface.clone(),
+                                    on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.current_setup.journey_stage = stage),
                                     on_update_setup_name: move |value: String| update_setup_name(state, value),
                                     on_update_hostname: move |value: String| update_hostname(state, value),
                                     on_update_artifacts_dir: move |value: String| update_artifacts_dir(state, value),
@@ -902,6 +903,7 @@ fn app() -> Element {
                                 state: snapshot.clone(),
                                 accent: accent.clone(),
                                 preview_surface: preview_surface.clone(),
+                                on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.current_setup.journey_stage = stage),
                                 on_update_setup_name: move |value: String| update_setup_name(state, value),
                                 on_update_hostname: move |value: String| update_hostname(state, value),
                                 on_update_artifacts_dir: move |value: String| update_artifacts_dir(state, value),
@@ -1027,6 +1029,7 @@ fn StudioCanvas(
     state: MakerUiState,
     accent: String,
     preview_surface: String,
+    on_set_stage: EventHandler<JourneyStage>,
     on_update_setup_name: EventHandler<String>,
     on_update_hostname: EventHandler<String>,
     on_update_artifacts_dir: EventHandler<String>,
@@ -1038,11 +1041,19 @@ fn StudioCanvas(
     on_save: EventHandler<()>,
     on_build: EventHandler<()>,
 ) -> Element {
+    let current_stage = state.current_setup.journey_stage;
     let selected_profile = state
         .current_setup
         .setup
         .profile_override
         .unwrap_or_else(|| state.current_setup.setup.preset.recommended_profile());
+    let selected_preset = preset_cards()
+        .iter()
+        .find(|card| card.id == state.current_setup.setup.preset)
+        .copied();
+    let previous_stage = previous_journey_stage(current_stage);
+    let next_stage = next_journey_stage(current_stage);
+    let (stage_title, stage_copy) = stage_headline(current_stage);
 
     rsx! {
         div {
@@ -1054,133 +1065,259 @@ fn StudioCanvas(
                 ),
                 div {
                     style: format!("font-size:12px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                    "GUIDED BUILD STUDIO"
+                    "{current_stage.label()} STAGE"
                 }
                 h1 {
                     style: "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:#243648;",
-                    "Build the next Yggdrasil artifact."
+                    "{stage_title}"
                 }
                 p {
                     style: "margin:0; max-width:720px; font-size:14px; line-height:1.7; color:#566a80;",
-                    "The studio is back on the real Ygg shell. Choose the machine intent, set the build posture, save the truthful native config, then build or export with one clear artifact path."
+                    "{stage_copy}"
+                }
+                div {
+                    style: "display:flex; flex-wrap:wrap; gap:10px; margin-top:18px;",
+                    div { style: success_stat_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
+                    div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                    div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
                 }
             }
-            div {
-                style: section_card_style(),
-                h2 { style: section_title_style(), "Outcome" }
-                p { style: section_copy_style(), "Pick the machine you are trying to make real." }
+
+            if current_stage == JourneyStage::Outcome {
                 div {
-                    style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;",
-                    for card in preset_cards().iter().copied() {
-                        PresetOption {
-                            card: card,
-                            selected: state.current_setup.setup.preset == card.id,
-                            accent: accent.clone(),
-                            on_select: move |preset: PresetId| on_apply_preset.call(preset),
-                        }
-                    }
-                }
-            }
-            div {
-                style: section_card_style(),
-                h2 { style: section_title_style(), "Identity" }
-                p { style: section_copy_style(), "Name the setup and give the future host a stable identity." }
-                div {
-                    style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;",
+                    style: section_card_style(),
+                    h2 { style: section_title_style(), "Outcome" }
+                    p { style: section_copy_style(), "Pick the machine you are trying to make real. The preset drives the build profile, defaults, and the posture of the rest of the studio." }
                     div {
-                        style: "display:flex; flex-direction:column; gap:6px;",
-                        label { style: label_style(), "Setup" }
-                        input {
-                            id: "maker-setup-name",
-                            r#type: "text",
-                            value: "{state.current_setup.setup.name}",
-                            style: input_style(),
-                            oninput: move |evt| on_update_setup_name.call(evt.value()),
-                        }
-                    }
-                    div {
-                        style: "display:flex; flex-direction:column; gap:6px;",
-                        label { style: label_style(), "Hostname" }
-                        input {
-                            r#type: "text",
-                            value: "{state.current_setup.setup.personalization.hostname}",
-                            style: input_style(),
-                            oninput: move |evt| on_update_hostname.call(evt.value()),
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;",
+                        for card in preset_cards().iter().copied() {
+                            PresetOption {
+                                card: card,
+                                selected: state.current_setup.setup.preset == card.id,
+                                accent: accent.clone(),
+                                on_select: move |preset: PresetId| on_apply_preset.call(preset),
+                            }
                         }
                     }
                 }
             }
-            div {
-                style: section_card_style(),
-                h2 { style: section_title_style(), "Build Posture" }
-                p { style: section_copy_style(), "Keep the public build contract visible and honest." }
+
+            if current_stage == JourneyStage::Profile {
                 div {
-                    style: "display:flex; flex-wrap:wrap; gap:10px;",
-                    for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
+                    style: section_card_style(),
+                    h2 { style: section_title_style(), "Profile" }
+                    p { style: section_copy_style(), "Set the build posture clearly. This is where you decide whether the artifact should land as server, KDE, or the dual-profile build." }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:10px;",
+                        for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
+                            button {
+                                style: option_button_style(selected_profile == profile, &accent),
+                                onclick: move |_| on_select_profile.call(profile),
+                                "{profile.slug()}"
+                            }
+                        }
+                    }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;",
                         button {
-                            style: option_button_style(selected_profile == profile, &accent),
-                            onclick: move |_| on_select_profile.call(profile),
-                            "{profile.slug()}"
+                            style: option_button_style(state.current_setup.setup.hardware.with_nvidia, &accent),
+                            onclick: move |_| on_toggle_nvidia.call(()),
+                            "NVIDIA path"
                         }
-                    }
-                }
-                div {
-                    style: "display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;",
-                    button {
-                        style: option_button_style(state.current_setup.setup.hardware.with_nvidia, &accent),
-                        onclick: move |_| on_toggle_nvidia.call(()),
-                        "NVIDIA path"
-                    }
-                    button {
-                        style: option_button_style(state.current_setup.setup.hardware.with_lts, &accent),
-                        onclick: move |_| on_toggle_lts.call(()),
-                        "LTS kernel"
-                    }
-                }
-                div {
-                    style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px; margin-top:16px;",
-                    div {
-                        style: "display:flex; flex-direction:column; gap:6px;",
-                        label { style: label_style(), "Artifacts directory" }
-                        input {
-                            r#type: "text",
-                            value: "{state.artifacts_dir}",
-                            style: input_style(),
-                            oninput: move |evt| on_update_artifacts_dir.call(evt.value()),
+                        button {
+                            style: option_button_style(state.current_setup.setup.hardware.with_lts, &accent),
+                            onclick: move |_| on_toggle_lts.call(()),
+                            "LTS kernel"
                         }
                     }
                     div {
-                        style: "display:flex; flex-direction:column; gap:6px;",
-                        label { style: label_style(), "Repo root (optional for repo-local builds)" }
-                        input {
-                            r#type: "text",
-                            value: "{state.repo_root}",
-                            style: input_style(),
-                            oninput: move |evt| on_update_repo_root.call(evt.value()),
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:6px;",
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Recommended" } span { style: stat_value_style(), "{state.current_setup.setup.preset.recommended_profile().slug()}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Selected" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
+                    }
+                }
+            }
+
+            if current_stage == JourneyStage::Personalize {
+                div {
+                    style: section_card_style(),
+                    h2 { style: section_title_style(), "Personalize" }
+                    p { style: section_copy_style(), "Name the setup and give the future host a stable identity before you ask the builder to make it real." }
+                    div {
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;",
+                        div {
+                            style: "display:flex; flex-direction:column; gap:6px;",
+                            label { style: label_style(), "Setup" }
+                            input {
+                                id: "maker-setup-name",
+                                r#type: "text",
+                                value: "{state.current_setup.setup.name}",
+                                style: input_style(),
+                                oninput: move |evt| on_update_setup_name.call(evt.value()),
+                            }
+                        }
+                        div {
+                            style: "display:flex; flex-direction:column; gap:6px;",
+                            label { style: label_style(), "Hostname" }
+                            input {
+                                r#type: "text",
+                                value: "{state.current_setup.setup.personalization.hostname}",
+                                style: input_style(),
+                                oninput: move |evt| on_update_hostname.call(evt.value()),
+                            }
+                        }
+                    }
+                    div {
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:6px;",
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Slug" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Journey" } span { style: stat_value_style(), "{current_stage.label()}" } }
+                    }
+                }
+            }
+
+            if current_stage == JourneyStage::Review {
+                div {
+                    style: section_card_style(),
+                    h2 { style: section_title_style(), "Review" }
+                    p { style: section_copy_style(), "Lock the build inputs before you launch. Shell Truth on the right keeps the native config and build plan visible while you do this." }
+                    div {
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
+                    }
+                    div {
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;",
+                        div {
+                            style: "display:flex; flex-direction:column; gap:6px;",
+                            label { style: label_style(), "Artifacts directory" }
+                            input {
+                                r#type: "text",
+                                value: "{state.artifacts_dir}",
+                                style: input_style(),
+                                oninput: move |evt| on_update_artifacts_dir.call(evt.value()),
+                            }
+                        }
+                        div {
+                            style: "display:flex; flex-direction:column; gap:6px;",
+                            label { style: label_style(), "Repo root (optional for repo-local builds)" }
+                            input {
+                                r#type: "text",
+                                value: "{state.repo_root}",
+                                style: input_style(),
+                                oninput: move |evt| on_update_repo_root.call(evt.value()),
+                            }
+                        }
+                    }
+                    div {
+                        style: status_card_style(),
+                        div { style: "font-size:12px; font-weight:700; color:#30475f;", "{state.build_status}" }
+                        div { style: "font-size:11px; color:#7b8da1;", "Save the setup, then continue into Build when the right rail looks truthful." }
+                    }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
+                        button {
+                            style: secondary_button_style(),
+                            onclick: move |_| on_save.call(()),
+                            "Save Setup"
+                        }
+                        button {
+                            style: primary_button_style(&accent),
+                            onclick: move |_| on_set_stage.call(JourneyStage::Build),
+                            "Continue to Build"
                         }
                     }
                 }
             }
-            div {
-                style: section_card_style(),
-                h2 { style: section_title_style(), "Review And Launch" }
-                p { style: section_copy_style(), "Save the setup first. Build after the native config and plan look right in Shell Truth." }
+
+            if current_stage == JourneyStage::Build {
                 div {
-                    style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
-                    button {
-                        style: secondary_button_style(),
-                        onclick: move |_| on_save.call(()),
-                        "Save Setup"
+                    style: section_card_style(),
+                    h2 { style: section_title_style(), "Build" }
+                    p { style: section_copy_style(), "Launch the local Docker build on Linux, or export the truthful handoff bundle on the other platforms. Raw logs stay in Shell Truth; the main canvas stays focused on the outcome." }
+                    div {
+                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Artifacts" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
+                    }
+                    if !state.build_result.trim().is_empty() {
+                        div {
+                            style: status_card_style(),
+                            div { style: "font-size:12px; font-weight:700; color:#30475f;", "Latest result" }
+                            div { style: "font-size:11px; line-height:1.6; color:#677b90;", "{latest_result_summary(&state)}" }
+                        }
+                    }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
+                        button {
+                            style: secondary_button_style(),
+                            onclick: move |_| on_save.call(()),
+                            "Save Setup"
+                        }
+                        button {
+                            style: primary_button_style(&accent),
+                            disabled: state.build_running,
+                            onclick: move |_| on_build.call(()),
+                            if state.build_running { "Building…" } else { "Build / Export" }
+                        }
+                    }
+                }
+            }
+
+            if current_stage == JourneyStage::Boot {
+                div {
+                    style: section_card_style(),
+                    h2 { style: section_title_style(), "Boot" }
+                    p { style: section_copy_style(), "This stage is the handoff moment after a truthful build or export. If the dedicated success surface is not active yet, return to Build and rerun or inspect the latest artifacts." }
+                    if state.recent_artifacts.is_empty() {
+                        div { style: empty_note_style(), "No recent artifact summary is available yet for this setup." }
+                    } else {
+                        div {
+                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
+                            for artifact in state.recent_artifacts.iter().take(3).cloned() {
+                                div {
+                                    style: success_stat_style(),
+                                    span { style: stat_label_style(), "{artifact.subtitle}" }
+                                    span { style: stat_value_style(), "{artifact.title}" }
+                                }
+                            }
+                        }
                     }
                     button {
                         style: primary_button_style(&accent),
-                        disabled: state.build_running,
-                        onclick: move |_| on_build.call(()),
-                        if state.build_running { "Building…" } else { "Build / Export" }
+                        onclick: move |_| on_set_stage.call(JourneyStage::Build),
+                        "Open Build Stage"
                     }
-                    span {
-                        style: "font-size:12px; color:#6d8096;",
-                        "{state.build_status}"
+                }
+            }
+
+            div {
+                style: section_card_style(),
+                div {
+                    style: "display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px;",
+                        div { style: "font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#7890a6;", "Stage Control" }
+                        div { style: "font-size:13px; color:#5c7287;", "{stage_footer_copy(current_stage)}" }
+                    }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:10px;",
+                        if let Some(stage) = previous_stage {
+                            button {
+                                style: secondary_button_style(),
+                                onclick: move |_| on_set_stage.call(stage),
+                                "Back to {stage.label()}"
+                            }
+                        }
+                        if let Some(stage) = next_stage {
+                            button {
+                                style: primary_button_style(&accent),
+                                onclick: move |_| on_set_stage.call(stage),
+                                "Next: {stage.label()}"
+                            }
+                        }
                     }
                 }
             }
@@ -1497,7 +1634,7 @@ fn handle_keyup(evt: KeyboardEvent, mut state: Signal<MakerUiState>) {
 fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.current_setup.setup.name = value;
-        ui.current_setup.journey_stage = JourneyStage::Profile;
+        ui.current_setup.journey_stage = JourneyStage::Personalize;
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -1506,7 +1643,7 @@ fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
 fn update_hostname(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.current_setup.setup.personalization.hostname = value;
-        ui.current_setup.journey_stage = JourneyStage::Review;
+        ui.current_setup.journey_stage = JourneyStage::Personalize;
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -1532,7 +1669,7 @@ fn update_repo_root(mut state: Signal<MakerUiState>, value: String) {
 fn update_profile(mut state: Signal<MakerUiState>, value: BuildProfile) {
     state.with_mut(|ui| {
         ui.current_setup.setup.profile_override = Some(value);
-        ui.current_setup.journey_stage = JourneyStage::Review;
+        ui.current_setup.journey_stage = JourneyStage::Profile;
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -1541,6 +1678,7 @@ fn update_profile(mut state: Signal<MakerUiState>, value: BuildProfile) {
 fn toggle_nvidia(mut state: Signal<MakerUiState>) {
     state.with_mut(|ui| {
         ui.current_setup.setup.hardware.with_nvidia = !ui.current_setup.setup.hardware.with_nvidia;
+        ui.current_setup.journey_stage = JourneyStage::Profile;
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -1549,6 +1687,7 @@ fn toggle_nvidia(mut state: Signal<MakerUiState>) {
 fn toggle_lts(mut state: Signal<MakerUiState>) {
     state.with_mut(|ui| {
         ui.current_setup.setup.hardware.with_lts = !ui.current_setup.setup.hardware.with_lts;
+        ui.current_setup.journey_stage = JourneyStage::Profile;
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -1561,6 +1700,116 @@ fn build_summary(state: &MakerUiState) -> String {
         format!("{} · {}", success.title, success.profile_label)
     } else {
         "No build in flight.".to_owned()
+    }
+}
+
+fn previous_journey_stage(stage: JourneyStage) -> Option<JourneyStage> {
+    match stage {
+        JourneyStage::Outcome => None,
+        JourneyStage::Profile => Some(JourneyStage::Outcome),
+        JourneyStage::Personalize => Some(JourneyStage::Profile),
+        JourneyStage::Review => Some(JourneyStage::Personalize),
+        JourneyStage::Build => Some(JourneyStage::Review),
+        JourneyStage::Boot => Some(JourneyStage::Build),
+    }
+}
+
+fn next_journey_stage(stage: JourneyStage) -> Option<JourneyStage> {
+    match stage {
+        JourneyStage::Outcome => Some(JourneyStage::Profile),
+        JourneyStage::Profile => Some(JourneyStage::Personalize),
+        JourneyStage::Personalize => Some(JourneyStage::Review),
+        JourneyStage::Review => Some(JourneyStage::Build),
+        JourneyStage::Build | JourneyStage::Boot => None,
+    }
+}
+
+fn stage_headline(stage: JourneyStage) -> (&'static str, &'static str) {
+    match stage {
+        JourneyStage::Outcome => (
+            "Choose the machine intent.",
+            "Start with the thing you are actually trying to make. The preset is the honest first move because it sets the tone for the rest of the build studio.",
+        ),
+        JourneyStage::Profile => (
+            "Set the build posture.",
+            "Choose whether this artifact lands as server, KDE, or both, then decide whether the hardware path needs NVIDIA or LTS bias before you continue.",
+        ),
+        JourneyStage::Personalize => (
+            "Give the machine a stable identity.",
+            "Name the setup, set the hostname, and make the future artifact feel deliberate before you save or build anything.",
+        ),
+        JourneyStage::Review => (
+            "Review the truthful inputs.",
+            "Check the artifact destination and optional repo root while Shell Truth keeps the native config and build plan visible on the right.",
+        ),
+        JourneyStage::Build => (
+            "Launch the artifact path.",
+            "Build locally on Linux or export a truthful handoff bundle elsewhere. The main canvas stays calm while the structured build truth streams in the utility rail.",
+        ),
+        JourneyStage::Boot => (
+            "Hand off the artifact.",
+            "This is the moment after a truthful build or export, where the app should help you reveal what was created and move toward the next machine.",
+        ),
+    }
+}
+
+fn stage_footer_copy(stage: JourneyStage) -> &'static str {
+    match stage {
+        JourneyStage::Outcome => {
+            "Pick the machine intent first, then continue into the build posture."
+        }
+        JourneyStage::Profile => {
+            "Set the artifact profile clearly before moving into identity and naming."
+        }
+        JourneyStage::Personalize => {
+            "Keep the setup and hostname clean, then move into the truthful review."
+        }
+        JourneyStage::Review => {
+            "Save if needed, then continue into Build when the right rail looks honest."
+        }
+        JourneyStage::Build => {
+            "This is the final launch step before the dedicated success handoff."
+        }
+        JourneyStage::Boot => {
+            "Boot is the handoff moment. Return to Build if you need to inspect or regenerate the output."
+        }
+    }
+}
+
+fn hardware_summary(state: &MakerUiState) -> String {
+    let mut parts = Vec::new();
+    if state.current_setup.setup.hardware.with_nvidia {
+        parts.push("NVIDIA");
+    }
+    if state.current_setup.setup.hardware.with_lts {
+        parts.push("LTS");
+    }
+    if parts.is_empty() {
+        "Standard".to_owned()
+    } else {
+        parts.join(" + ")
+    }
+}
+
+fn build_mode_label() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Local Docker build",
+        _ => "Export-only handoff",
+    }
+}
+
+fn latest_result_summary(state: &MakerUiState) -> String {
+    if let Some(success) = state.success_state.as_ref() {
+        format!("{} at {}", success.artifact_name, success.output_path)
+    } else if state.build_running {
+        "Build events are streaming in Shell Truth.".to_owned()
+    } else {
+        state
+            .build_result
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("No result recorded yet.")
+            .to_owned()
     }
 }
 
