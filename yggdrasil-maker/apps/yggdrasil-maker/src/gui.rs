@@ -21,13 +21,14 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tao::window::ResizeDirection;
 use tokio::time::sleep;
-use yggterm_core::{UiTheme, YgguiThemeSpec, append_trace_event};
+use yggterm_core::append_trace_event;
 use yggui::{
     ChromePalette, HoveredChromeControl, RailHeader, RailScrollBody, RailSectionTitle,
     SideRailShell, TOAST_CSS, TitlebarChrome, ToastItem, ToastPalette, ToastTone, ToastViewport,
     WindowControlsStrip, default_theme_editor_spec, dominant_accent, gradient_css,
     preview_surface_css, shell_tint,
 };
+use yggui_contract::{UiTheme, YgguiThemeColorStop, YgguiThemeSpec};
 
 static BOOTSTRAP: OnceCell<MakerBootstrap> = OnceCell::new();
 
@@ -1737,8 +1738,8 @@ fn theme_matches_preset(spec: &YgguiThemeSpec, preset: ThemePreset) -> bool {
     to_signature(spec) == to_signature(&reference)
 }
 
-fn stop(color: &str, x: f32, y: f32, alpha: f32) -> yggterm_core::YgguiThemeColorStop {
-    yggterm_core::YgguiThemeColorStop {
+fn stop(color: &str, x: f32, y: f32, alpha: f32) -> YgguiThemeColorStop {
+    YgguiThemeColorStop {
         color: color.to_owned(),
         x,
         y,

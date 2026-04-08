@@ -15,6 +15,7 @@ desktop-ui = [
   "dep:tao",
   "dep:tokio",
   "dep:yggterm-core",
+  "dep:yggui-contract",
   "dep:yggui",
 ]
 
@@ -38,4 +39,5 @@ serde_json.workspace = true
 tao = { version = "0.34.6", optional = true }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
 yggterm-core = { path = "../../../../yggterm/crates/yggterm-core", optional = true }
+yggui-contract = { path = "../../../../yggterm/crates/yggui-contract", optional = true }
 yggui = { path = "../../../../yggterm/crates/yggui", optional = true }
