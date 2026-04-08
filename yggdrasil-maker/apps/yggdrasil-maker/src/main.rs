@@ -159,7 +159,8 @@ fn run_preset(args: PresetCommand) -> Result<()> {
 fn run_setup(app: &MakerApp, command: SetupCommand) -> Result<()> {
     match command {
         SetupCommand::New(args) => {
-            let document = app.create_setup_document(args.name, args.preset, args.profile, args.hostname);
+            let document =
+                app.create_setup_document(args.name, args.preset, args.profile, args.hostname);
             let output_path = args
                 .output
                 .unwrap_or_else(|| PathBuf::from(document.storage_filename()));
@@ -205,9 +206,15 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
                 }
                 println!("input bundle: {}", plan.input_bundle_dir.display());
                 println!("config: {}", plan.host_config_path.display());
-                println!("persisted setup: {}", plan.host_persisted_setup_path.display());
+                println!(
+                    "persisted setup: {}",
+                    plan.host_persisted_setup_path.display()
+                );
                 println!("invocation: {}", plan.host_invocation_path.display());
-                println!("artifact manifest: {}", plan.host_artifact_manifest_path.display());
+                println!(
+                    "artifact manifest: {}",
+                    plan.host_artifact_manifest_path.display()
+                );
                 println!("artifacts: {}", plan.artifacts_dir.display());
                 if !plan.docker_command.is_empty() {
                     println!("docker command:");

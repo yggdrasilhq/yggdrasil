@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+WORKSPACE_DIR="${ROOT_DIR}/yggdrasil-maker"
 DIST_DIR="${ROOT_DIR}/dist"
 TARGET_LABEL="${1:?usage: package-maker-platform-release.sh <label> [target-triple] [--skip-build] [--input PATH]}"
 shift
@@ -44,11 +45,18 @@ case "$TARGET_LABEL" in
     ;;
 esac
 
-BIN_PATH="${ROOT_DIR}/target/release/${BIN_NAME}"
-BUILD_CMD=(cargo build --release -p yggdrasil-maker --bin yggdrasil-maker --features "$CARGO_FEATURES")
+BIN_PATH="${WORKSPACE_DIR}/target/release/${BIN_NAME}"
+BUILD_CMD=(
+  cargo build
+  --manifest-path "${WORKSPACE_DIR}/Cargo.toml"
+  --release
+  -p yggdrasil-maker
+  --bin yggdrasil-maker
+  --features "$CARGO_FEATURES"
+)
 if [[ -n "$TARGET_TRIPLE" ]]; then
   BUILD_CMD+=(--target "$TARGET_TRIPLE")
-  BIN_PATH="${ROOT_DIR}/target/${TARGET_TRIPLE}/release/${BIN_NAME}"
+  BIN_PATH="${WORKSPACE_DIR}/target/${TARGET_TRIPLE}/release/${BIN_NAME}"
 fi
 
 if [[ -n "$INPUT_PATH" ]]; then

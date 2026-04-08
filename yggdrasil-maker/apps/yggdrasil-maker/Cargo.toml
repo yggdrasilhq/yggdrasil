@@ -1,0 +1,41 @@
+[package]
+name = "yggdrasil-maker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = []
+desktop-ui = [
+  "dep:dioxus",
+  "dep:dioxus-desktop",
+  "dep:keyboard-types",
+  "dep:once_cell",
+  "dep:tao",
+  "dep:tokio",
+  "dep:yggterm-core",
+  "dep:yggui",
+]
+
+[[bin]]
+name = "yggdrasil-maker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+maker-app = { path = "../../crates/maker-app" }
+maker-build = { path = "../../crates/maker-build" }
+maker-copy = { path = "../../crates/maker-copy" }
+maker-model = { path = "../../crates/maker-model" }
+dioxus = { version = "=0.7.3", features = ["desktop"], optional = true }
+dioxus-desktop = { version = "=0.7.3", optional = true }
+keyboard-types = { version = "0.7", optional = true }
+once_cell = { version = "1", optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tao = { version = "0.34.6", optional = true }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
+yggterm-core = { path = "../../../../yggterm/crates/yggterm-core", optional = true }
+yggui = { path = "../../../../yggterm/crates/yggui", optional = true }

@@ -655,7 +655,9 @@ mod tests {
         document.schema_version = 0;
         document.setup_id.clear();
 
-        let migrated = document.migrate_to_current().expect("migrate legacy document");
+        let migrated = document
+            .migrate_to_current()
+            .expect("migrate legacy document");
         assert_eq!(migrated.schema_version, SETUP_SCHEMA_VERSION);
         assert!(!migrated.setup_id.is_empty());
     }

@@ -40,6 +40,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout sibling yggterm workspace
+        uses: actions/checkout@v4
+        with:
+          repository: yggdrasilhq/yggterm
+          path: .deps/yggterm
+
+      - name: Link sibling yggterm path for local workspace deps
+        shell: bash
+        run: |
+          ln -sfn "$GITHUB_WORKSPACE/.deps/yggterm" "$GITHUB_WORKSPACE/../yggterm"
+
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |

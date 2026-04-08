@@ -90,8 +90,8 @@ impl MakerApp {
     }
 
     pub fn load_setup_path(&self, path: &Path) -> Result<SetupDocument> {
-        let raw =
-            fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         let document = serde_json::from_str::<SetupDocument>(&raw)
             .with_context(|| format!("invalid setup JSON in {}", path.display()))?;
         document
@@ -105,7 +105,10 @@ impl MakerApp {
     }
 
     pub fn emit_config_toml(&self, document: &SetupDocument) -> Result<String> {
-        let migrated = document.clone().migrate_to_current().map_err(|error| anyhow!(error))?;
+        let migrated = document
+            .clone()
+            .migrate_to_current()
+            .map_err(|error| anyhow!(error))?;
         let config = migrated.validate().map_err(|error| anyhow!(error))?;
         config.to_native_toml().map_err(|error| anyhow!(error))
     }
@@ -210,7 +213,9 @@ impl MakerApp {
         command.args(plan.docker_command.iter().skip(1));
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
-        let mut child = command.statusless_spawn().context("failed to launch docker")?;
+        let mut child = command
+            .statusless_spawn()
+            .context("failed to launch docker")?;
 
         let stdout = child.stdout.take().context("missing docker stdout pipe")?;
         let stderr = child.stderr.take().context("missing docker stderr pipe")?;
@@ -317,8 +322,8 @@ impl SetupStore {
 
     pub fn load(&self, setup_id: &str) -> Result<SetupDocument> {
         let path = self.path_for_id(setup_id)?;
-        let raw =
-            fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         let document = serde_json::from_str::<SetupDocument>(&raw)
             .with_context(|| format!("invalid setup JSON in {}", path.display()))?;
         document
@@ -461,8 +466,7 @@ fn default_setup_store_root() -> Result<PathBuf> {
             let base = std::env::var("XDG_DATA_HOME")
                 .map(PathBuf::from)
                 .or_else(|_| {
-                    std::env::var("HOME")
-                        .map(|home| PathBuf::from(home).join(".local/share"))
+                    std::env::var("HOME").map(|home| PathBuf::from(home).join(".local/share"))
                 })
                 .context("unable to resolve Linux data directory")?;
             Ok(base.join("yggdrasil-maker").join("setups"))
@@ -476,7 +480,9 @@ fn default_setup_store_root() -> Result<PathBuf> {
         }
         "windows" => {
             let appdata = std::env::var("APPDATA").context("unable to resolve APPDATA")?;
-            Ok(PathBuf::from(appdata).join("yggdrasil-maker").join("setups"))
+            Ok(PathBuf::from(appdata)
+                .join("yggdrasil-maker")
+                .join("setups"))
         }
         other => bail!("unsupported platform for setup store: {other}"),
     }
@@ -565,7 +571,10 @@ fn verify_manifest_paths(manifest: &ArtifactManifest) -> Result<()> {
     for artifact in &manifest.artifacts {
         let path = Path::new(&artifact.path);
         if !path.exists() {
-            bail!("artifact missing after reported success: {}", path.display());
+            bail!(
+                "artifact missing after reported success: {}",
+                path.display()
+            );
         }
     }
     Ok(())
@@ -621,7 +630,8 @@ mod tests {
     fn setup_store_round_trips_and_strips_ephemeral_values() {
         let tempdir = tempdir().expect("tempdir");
         let app = MakerApp::from_setup_root(tempdir.path().join("setups")).expect("app");
-        let mut document = app.create_setup_document("Lab NAS".to_owned(), PresetId::Nas, None, None);
+        let mut document =
+            app.create_setup_document("Lab NAS".to_owned(), PresetId::Nas, None, None);
         document.setup.ssh.authorized_keys_file = SensitiveField::ephemeral("secret".to_owned());
 
         let path = app.setup_store().save(&document).expect("save setup");
@@ -639,7 +649,8 @@ mod tests {
     fn export_bundle_contains_expected_files() {
         let tempdir = tempdir().expect("tempdir");
         let app = MakerApp::from_setup_root(tempdir.path().join("setups")).expect("app");
-        let mut document = app.create_setup_document("Lab NAS".to_owned(), PresetId::Nas, None, None);
+        let mut document =
+            app.create_setup_document("Lab NAS".to_owned(), PresetId::Nas, None, None);
         let ssh_path = tempdir.path().join("authorized_keys");
         fs::write(&ssh_path, "ssh-ed25519 AAAA test\n").expect("write authorized_keys");
         document.setup.ssh.authorized_keys_file =

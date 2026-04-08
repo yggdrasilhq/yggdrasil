@@ -23,3 +23,7 @@ sha2 = "0.11"
 tempfile = "3"
 thiserror = "2"
 toml = "0.8"
+
+[patch.crates-io]
+dioxus-desktop = { path = "../../yggterm/vendor/dioxus-desktop" }
+dioxus-interpreter-js = { path = "../../yggterm/vendor/dioxus-interpreter-js" }

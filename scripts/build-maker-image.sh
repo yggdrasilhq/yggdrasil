@@ -11,7 +11,7 @@ version="$(
 import pathlib
 import tomllib
 
-with pathlib.Path("Cargo.toml").open("rb") as handle:
+with pathlib.Path("yggdrasil-maker/Cargo.toml").open("rb") as handle:
     payload = tomllib.load(handle)
 print(payload["workspace"]["package"]["version"])
 PY

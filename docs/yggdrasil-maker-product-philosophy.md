@@ -200,7 +200,7 @@ Fix the front door first. Do not rewrite the foundation just because Rust is ava
 
 1. Write the README-level story first: `yggdrasil-maker` is the new guided front door, `mkconfig.sh` remains the native direct path, `yggcli` moves to decommissioned status.
 2. Define the app boundary: config editor, profile chooser, validation, build launcher, smoke viewer, artifact view.
-3. Mirror the `yggterm` shape in this repo: workspace root, `apps/yggdrasil-maker`, and a small set of supporting crates.
+3. Mirror the `yggterm` shape in this repo inside a contained Rust workspace: `yggdrasil-maker/apps/yggdrasil-maker`, `yggdrasil-maker/crates/*`, and direct sibling-path reuse of `~/gh/yggterm`'s `yggui` crates while the shared shell layer is still under active development there.
 4. Add structured build and smoke output that the app can consume without fragile log scraping.
 5. Only after parity, mark the external `yggcli` repo read-only and point users here.
 
