@@ -19,18 +19,21 @@ jobs:
 
       - name: Shell syntax check
         run: |
-          bash -n mkconfig.sh
-          bash -n scripts/build-profile.sh
-          bash -n scripts/mkconfig-tui.sh
-          bash -n scripts/prune-isos.sh
-          bash -n scripts/setup-github-remote.sh
-          bash -n tests/smoke/run.sh
-          bash -n tests/smoke/iso-rootfs-check.sh
-          bash -n tests/smoke/boot-qemu.sh
+          mapfile -t shell_files < <(
+            printf '%s\n' mkconfig.sh
+            rg --files scripts tests/smoke -g '*.sh'
+          )
+          printf 'syntax-check %s\n' "${shell_files[@]}"
+          bash -n "${shell_files[@]}"
 
       - name: ShellCheck
         run: |
-          shellcheck mkconfig.sh scripts/build-profile.sh scripts/mkconfig-tui.sh scripts/prune-isos.sh scripts/setup-github-remote.sh tests/smoke/run.sh tests/smoke/iso-rootfs-check.sh tests/smoke/boot-qemu.sh
+          mapfile -t shell_files < <(
+            printf '%s\n' mkconfig.sh
+            rg --files scripts tests/smoke -g '*.sh'
+          )
+          printf 'shellcheck %s\n' "${shell_files[@]}"
+          shellcheck -S error "${shell_files[@]}"
 
       - name: Smoke checks
         run: ./tests/smoke/run.sh --profile both
