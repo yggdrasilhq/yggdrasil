@@ -5634,6 +5634,7 @@ dependencies = [
  "maker-copy",
  "maker-model",
  "once_cell",
+ "png",
  "serde",
  "serde_json",
  "tao",

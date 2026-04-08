@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 #[cfg(feature = "desktop-ui")]
 mod gui;
+#[cfg(feature = "desktop-ui")]
+mod window_icon;
 
 #[derive(Parser, Debug)]
 #[command(name = "yggdrasil-maker")]

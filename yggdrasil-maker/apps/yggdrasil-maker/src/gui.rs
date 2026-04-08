@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour, window};
 use dioxus::document;
 use dioxus::prelude::*;
+use dioxus_desktop::UserWindowEvent;
 use keyboard_types::{Key, Modifiers};
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
 use maker_build::{
@@ -19,6 +20,9 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tao::event_loop::{EventLoop, EventLoopBuilder};
+#[cfg(target_os = "linux")]
+use tao::platform::unix::EventLoopBuilderExtUnix;
 use tao::window::ResizeDirection;
 use tokio::time::sleep;
 use yggterm_core::append_trace_event;
@@ -30,6 +34,8 @@ use yggui::{
 };
 use yggui_contract::{UiTheme, YgguiThemeColorStop, YgguiThemeSpec};
 
+use crate::window_icon;
+
 static BOOTSTRAP: OnceCell<MakerBootstrap> = OnceCell::new();
 
 const LEFT_RAIL_WIDTH: usize = 296;
@@ -37,6 +43,7 @@ const RIGHT_RAIL_WIDTH: usize = 328;
 const EDGE_RESIZE_HANDLE: usize = 5;
 const CORNER_RESIZE_HANDLE: usize = 10;
 const UI_FONT_FAMILY: &str = "\"Inter Variable\", \"Inter\", system-ui, sans-serif";
+const YGGDRASIL_MAKER_DESKTOP_APP_ID: &str = "dev.yggdrasil.YggdrasilMaker";
 
 pub fn launch() -> Result<()> {
     let bootstrap = MakerBootstrap::load()?;
@@ -53,7 +60,8 @@ pub fn launch() -> Result<()> {
 
     #[cfg(target_os = "macos")]
     let window_builder = WindowBuilder::new()
-        .with_title("yggdrasil-maker")
+        .with_title("Yggdrasil Maker")
+        .with_window_icon(Some(window_icon::load_yggdrasil_maker_window_icon()))
         .with_transparent(false)
         .with_decorations(false)
         .with_resizable(true)
@@ -62,7 +70,8 @@ pub fn launch() -> Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     let window_builder = WindowBuilder::new()
-        .with_title("yggdrasil-maker")
+        .with_title("Yggdrasil Maker")
+        .with_window_icon(Some(window_icon::load_yggdrasil_maker_window_icon()))
         .with_transparent(true)
         .with_decorations(false)
         .with_resizable(true)
@@ -70,6 +79,7 @@ pub fn launch() -> Result<()> {
         .with_min_inner_size(LogicalSize::new(1120.0, 760.0));
 
     let config = Config::new()
+        .with_event_loop(configured_event_loop())
         .with_window(window_builder)
         .with_close_behaviour(WindowCloseBehaviour::WindowCloses)
         .with_exits_when_last_window_closes(true);
@@ -78,6 +88,13 @@ pub fn launch() -> Result<()> {
         .with_cfg(config)
         .launch(app);
     Ok(())
+}
+
+fn configured_event_loop() -> EventLoop<UserWindowEvent> {
+    let mut builder = EventLoopBuilder::<UserWindowEvent>::with_user_event();
+    #[cfg(target_os = "linux")]
+    builder.with_app_id(YGGDRASIL_MAKER_DESKTOP_APP_ID);
+    builder.build()
 }
 
 #[derive(Clone)]

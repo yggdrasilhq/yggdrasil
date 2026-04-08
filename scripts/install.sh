@@ -31,6 +31,102 @@ need_cmd tar
 need_cmd sed
 need_cmd uname
 
+escape_desktop_value() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/ /\\ /g'
+}
+
+try_run() {
+  if command -v "$1" >/dev/null 2>&1; then
+    "$@" >/dev/null 2>&1 || true
+  fi
+}
+
+refresh_kde_desktop_caches() {
+  cache_home="${XDG_CACHE_HOME:-${HOME}/.cache}"
+  rm -f "${cache_home}/icon-cache.kcache" 2>/dev/null || true
+  if [ -d "${cache_home}" ]; then
+    find "${cache_home}" -maxdepth 1 -type f -name 'ksycoca*' -exec rm -f {} \; 2>/dev/null || true
+  fi
+  try_run kbuildsycoca6 --noincremental
+  try_run kbuildsycoca5 --noincremental
+  try_run qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.refreshCurrentShell
+}
+
+install_linux_desktop_integration() {
+  version_dir="$1"
+  launcher_path="$2"
+  install_root="$3"
+
+  svg_src="${version_dir}/assets/brand/yggdrasil-maker-icon.svg"
+  png_src="${version_dir}/assets/brand/yggdrasil-maker-icon-512.png"
+  [ -f "${svg_src}" ] || return 0
+  [ -f "${png_src}" ] || return 0
+
+  data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
+  apps_dir="${data_home}/applications"
+  pixmaps_dir="${data_home}/pixmaps"
+  icons_dir="${data_home}/icons/hicolor/512x512/apps"
+  scalable_icons_dir="${data_home}/icons/hicolor/scalable/apps"
+  direct_icons_dir="${install_root}/icons"
+
+  mkdir -p "${apps_dir}" "${pixmaps_dir}" "${icons_dir}" "${scalable_icons_dir}" "${direct_icons_dir}"
+
+  cp "${png_src}" "${icons_dir}/yggdrasil-maker.png"
+  cp "${png_src}" "${icons_dir}/dev.yggdrasil.YggdrasilMaker.png"
+  cp "${svg_src}" "${scalable_icons_dir}/yggdrasil-maker.svg"
+  cp "${svg_src}" "${scalable_icons_dir}/dev.yggdrasil.YggdrasilMaker.svg"
+  cp "${png_src}" "${pixmaps_dir}/yggdrasil-maker.png"
+  cp "${svg_src}" "${pixmaps_dir}/yggdrasil-maker.svg"
+  cp "${png_src}" "${direct_icons_dir}/yggdrasil-maker.png"
+  cp "${svg_src}" "${direct_icons_dir}/yggdrasil-maker.svg"
+
+  escaped_exec="$(escape_desktop_value "${launcher_path}")"
+  escaped_icon="$(escape_desktop_value "${direct_icons_dir}/yggdrasil-maker.svg")"
+  startup_wm_class="dev.yggdrasil.YggdrasilMaker"
+
+  cat > "${apps_dir}/dev.yggdrasil.YggdrasilMaker.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Yggdrasil Maker
+Comment=GUI-first Debian live ISO build studio
+Exec=${escaped_exec}
+TryExec=${escaped_exec}
+Icon=${escaped_icon}
+Terminal=false
+NoDisplay=true
+Categories=Utility;System;Development;
+StartupNotify=true
+StartupWMClass=${startup_wm_class}
+X-Desktop-File-Install-Version=0.27
+EOF
+
+  cat > "${apps_dir}/yggdrasil-maker.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Yggdrasil Maker
+Comment=GUI-first Debian live ISO build studio
+Exec=${escaped_exec}
+TryExec=${escaped_exec}
+Icon=${escaped_icon}
+Terminal=false
+NoDisplay=false
+Categories=Utility;System;Development;
+StartupNotify=true
+StartupWMClass=${startup_wm_class}
+X-Desktop-File-Install-Version=0.27
+EOF
+
+  try_run update-desktop-database "${apps_dir}"
+  try_run gtk-update-icon-cache -f -t "${data_home}/icons/hicolor"
+  try_run xdg-icon-resource forceupdate
+  try_run xdg-desktop-menu forceupdate
+  refresh_kde_desktop_caches
+
+  log "desktop integration refreshed in ${apps_dir}"
+}
+
 os="$(uname -s)"
 arch="$(uname -m)"
 
@@ -127,6 +223,10 @@ cat > "${state_path}" <<EOF
   "active_executable": "${installed_binary}"
 }
 EOF
+
+if [ "${os}" = "Linux" ]; then
+  install_linux_desktop_integration "${version_dir}" "${launcher_path}" "${install_root}"
+fi
 
 log "installed ${installed_binary}"
 log "launcher ${launcher_path}"

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="maker-bg" x1="84" y1="68" x2="436" y2="454" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6FBFF"/>
+      <stop offset="0.52" stop-color="#DCEFFF"/>
+      <stop offset="1" stop-color="#D7F4E7"/>
+    </linearGradient>
+    <linearGradient id="maker-frame" x1="128" y1="104" x2="386" y2="402" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4F88D8"/>
+      <stop offset="1" stop-color="#3AB58E"/>
+    </linearGradient>
+    <linearGradient id="maker-glow" x1="168" y1="150" x2="346" y2="358" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.94"/>
+      <stop offset="1" stop-color="#EFF8FF" stop-opacity="0.58"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="40" y="40" width="432" height="432" rx="112" fill="url(#maker-bg)"/>
+  <rect x="40" y="40" width="432" height="432" rx="112" stroke="#FFFFFF" stroke-opacity="0.88" stroke-width="10"/>
+
+  <rect x="124" y="114" width="264" height="284" rx="66" fill="url(#maker-frame)"/>
+  <rect x="124" y="114" width="264" height="284" rx="66" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="4"/>
+
+  <path d="M173 173C173 153.118 189.118 137 209 137H303C322.882 137 339 153.118 339 173V339C339 358.882 322.882 375 303 375H209C189.118 375 173 358.882 173 339V173Z" fill="url(#maker-glow)"/>
+
+  <path d="M209 206L256 244L303 206" stroke="#214A69" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M209 314L256 268L303 314" stroke="#214A69" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M256 245V267" stroke="#214A69" stroke-width="24" stroke-linecap="round"/>
+
+  <circle cx="208" cy="425" r="12" fill="#4A83D4"/>
+  <circle cx="256" cy="425" r="12" fill="#5BA7DA"/>
+  <circle cx="304" cy="425" r="12" fill="#53C69B"/>
+</svg>

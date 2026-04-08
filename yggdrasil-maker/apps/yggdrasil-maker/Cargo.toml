@@ -12,6 +12,7 @@ desktop-ui = [
   "dep:dioxus-desktop",
   "dep:keyboard-types",
   "dep:once_cell",
+  "dep:png",
   "dep:tao",
   "dep:tokio",
   "dep:yggterm-core",
@@ -34,6 +35,7 @@ dioxus = { version = "=0.7.3", features = ["desktop"], optional = true }
 dioxus-desktop = { version = "=0.7.3", optional = true }
 keyboard-types = { version = "0.7", optional = true }
 once_cell = { version = "1", optional = true }
+png = { version = "0.17", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tao = { version = "0.34.6", optional = true }

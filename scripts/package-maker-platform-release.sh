@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE_DIR="${ROOT_DIR}/yggdrasil-maker"
 DIST_DIR="${ROOT_DIR}/dist"
+ASSETS_DIR="${WORKSPACE_DIR}/assets/brand"
 TARGET_LABEL="${1:?usage: package-maker-platform-release.sh <label> [target-triple] [--skip-build] [--input PATH]}"
 shift
 
@@ -95,19 +96,37 @@ checksum_file() {
 checksum_file "${DIST_DIR}/${OUT_BASENAME}" "${DIST_DIR}/${OUT_BASENAME}.sha256"
 
 ARCHIVE_PATH="${DIST_DIR}/yggdrasil-maker-${TARGET_LABEL}.${ARCHIVE_EXT}"
+ARCHIVE_FILES=(
+  "${OUT_BASENAME}"
+  "${OUT_BASENAME}.sha256"
+)
+rm -rf "${DIST_DIR}/assets"
+if [[ -d "$ASSETS_DIR" ]]; then
+  mkdir -p "${DIST_DIR}/assets/brand"
+  cp "${ASSETS_DIR}/"*.svg "${DIST_DIR}/assets/brand/" 2>/dev/null || true
+  cp "${ASSETS_DIR}/"*.png "${DIST_DIR}/assets/brand/" 2>/dev/null || true
+fi
+if [[ -f "${ASSETS_DIR}/yggdrasil-maker-icon.svg" ]]; then
+  ARCHIVE_FILES+=(
+    "assets/brand/yggdrasil-maker-icon.svg"
+  )
+fi
+if [[ -f "${ASSETS_DIR}/yggdrasil-maker-icon-512.png" ]]; then
+  ARCHIVE_FILES+=(
+    "assets/brand/yggdrasil-maker-icon-512.png"
+  )
+fi
 if [[ "$ARCHIVE_EXT" == "tar.gz" ]]; then
-  tar -C "$DIST_DIR" -czf "$ARCHIVE_PATH" \
-    "${OUT_BASENAME}" \
-    "${OUT_BASENAME}.sha256"
+  tar -C "$DIST_DIR" -czf "$ARCHIVE_PATH" "${ARCHIVE_FILES[@]}"
 else
-  python3 - "$DIST_DIR" "$ARCHIVE_PATH" "$OUT_BASENAME" "${OUT_BASENAME}.sha256" <<'PY'
+  python3 - "$DIST_DIR" "$ARCHIVE_PATH" "${ARCHIVE_FILES[@]}" <<'PY'
 import pathlib
 import sys
 import zipfile
 
 dist = pathlib.Path(sys.argv[1])
 archive = pathlib.Path(sys.argv[2])
-files = [sys.argv[3], sys.argv[4]]
+files = sys.argv[3:]
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     for name in files:
         zf.write(dist / name, arcname=name)
