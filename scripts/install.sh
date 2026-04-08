@@ -5,7 +5,7 @@ set -eu
 (set -o pipefail) >/dev/null 2>&1 && set -o pipefail
 
 REPO="${YGGDRASIL_MAKER_REPO:-yggdrasilhq/yggdrasil}"
-LATEST_API="https://api.github.com/repos/${REPO}/releases/latest"
+LATEST_API="${YGGDRASIL_MAKER_LATEST_API:-https://api.github.com/repos/${REPO}/releases/latest}"
 TMP_DIR="$(mktemp -d)"
 
 log() {
@@ -157,8 +157,8 @@ release_version="$(printf '%s' "${release_tag}" | sed 's/^v//')"
 [ -n "${release_tag}" ] || fail "failed to resolve latest release tag"
 [ -n "${release_version}" ] || fail "failed to resolve latest release version"
 
-archive_url="https://github.com/${REPO}/releases/download/${release_tag}/yggdrasil-maker-${target_label}.tar.gz"
-checksum_url="${archive_url}.sha256"
+archive_url="${YGGDRASIL_MAKER_ARCHIVE_URL:-https://github.com/${REPO}/releases/download/${release_tag}/yggdrasil-maker-${target_label}.tar.gz}"
+checksum_url="${YGGDRASIL_MAKER_CHECKSUM_URL:-${archive_url}.sha256}"
 archive_path="${TMP_DIR}/yggdrasil-maker.tar.gz"
 checksum_path="${TMP_DIR}/yggdrasil-maker.tar.gz.sha256"
 state_path="${install_root}/install-state.json"
