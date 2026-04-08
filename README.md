@@ -197,13 +197,15 @@ The current app shape is now:
 Example in-repo foundation flow:
 
 ```bash
-cargo run --bin yggdrasil-maker -- setup new --name "Lab NAS" --preset nas --output ./lab-nas.maker.json
-cargo run --bin yggdrasil-maker -- build plan --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --json
+cargo run --manifest-path yggdrasil-maker/Cargo.toml --bin yggdrasil-maker -- setup new --name "Lab NAS" --preset nas --output ./lab-nas.maker.json
+cargo run --manifest-path yggdrasil-maker/Cargo.toml --bin yggdrasil-maker -- build plan --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --json
 ./scripts/build-maker-image.sh
-cargo run --bin yggdrasil-maker -- build run --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --repo-root "$(pwd)"
+cargo run --manifest-path yggdrasil-maker/Cargo.toml --bin yggdrasil-maker -- build run --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --repo-root "$(pwd)"
 ./scripts/package-maker-platform-release.sh linux-x86_64
 ./scripts/package-maker-release-manifest.sh
 ```
+
+For desktop development right now, keep a sibling checkout of `~/gh/yggterm`. `yggdrasil-maker` reuses the in-flight `yggui` crates directly from that repo until the shared shell layer is split into its own portable home.
 
 Sensitive paths are permission-gated by design, so the automation CLI accepts runtime flags such as `--authorized-keys-file` instead of silently persisting those values unless the user explicitly opts in later.
 
