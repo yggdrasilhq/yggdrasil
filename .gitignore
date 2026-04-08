@@ -55,3 +55,4 @@ config/includes.chroot/usr/local/bin/edit
 chroot.packages.*
 config/includes.chroot/root/.ssh/
 .gstack/
+.agents_chat/
