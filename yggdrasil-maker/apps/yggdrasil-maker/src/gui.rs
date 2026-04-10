@@ -2982,10 +2982,10 @@ fn section_card_style() -> &'static str {
 fn selected_intent_card_style(accent: &str) -> String {
     format!(
         "display:flex; flex-direction:column; gap:14px; padding:18px 18px 18px 18px; border-radius:22px; \
-         background:linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(244,249,253,0.92) 100%); \
-         box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.42); \
-         border-left:3px solid {};",
-        accent
+         background:radial-gradient(circle at top right, color-mix(in srgb, {} 14%, white) 0%, rgba(255,255,255,0) 36%), \
+         linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(244,249,253,0.92) 100%); \
+         box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.42), inset 0 1px 0 rgba(255,255,255,0.86);",
+        accent,
     )
 }
 
