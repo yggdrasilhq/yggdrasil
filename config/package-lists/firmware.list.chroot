@@ -15,3 +15,14 @@ firmware-ast
 firmware-bnx2
 firmware-bnx2x
 # firmware-tg3
+# KDE profile: broad laptop graphics/wifi firmware
+firmware-linux
+firmware-linux-nonfree
+firmware-amd-graphics
+firmware-iwlwifi
+firmware-atheros
+firmware-mediatek
+firmware-realtek
+firmware-brcm80211
+firmware-libertas
+firmware-ti-connectivity
