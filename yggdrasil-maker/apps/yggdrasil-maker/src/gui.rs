@@ -14,7 +14,7 @@ use maker_build::{
     ARTIFACT_MANIFEST_NAME, ArtifactKind, ArtifactManifest, ArtifactRecord, BuildMode,
     read_artifact_manifest,
 };
-use maker_copy::{PresetCard, preset_cards};
+use maker_copy::preset_cards;
 use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -1251,16 +1251,63 @@ fn StudioCanvas(
             if current_stage == JourneyStage::Outcome {
                 div {
                     style: section_card_style(),
-                    h2 { style: section_title_style(), "Outcome" }
-                    p { style: section_copy_style(), "Pick the machine you are trying to make real. The preset drives the build profile, defaults, and the posture of the rest of the studio." }
                     div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;",
-                        for card in preset_cards().iter().copied() {
-                            PresetOption {
-                                card: card,
-                                selected: state.current_setup.setup.preset == card.id,
-                                accent: accent.clone(),
-                                on_select: move |preset: PresetId| on_apply_preset.call(preset),
+                        style: "display:flex; align-items:end; justify-content:space-between; gap:12px; flex-wrap:wrap;",
+                        div {
+                            style: "display:flex; flex-direction:column; gap:6px;",
+                            h2 { style: section_title_style(), "Outcome" }
+                            p { style: section_copy_style(), "Pick the machine you are trying to make real. The selected intent should feel concrete before you move deeper into the build." }
+                        }
+                        div {
+                            style: "font-size:11px; font-weight:700; color:#6f8398;",
+                            "Choose once, then tune posture and identity."
+                        }
+                    }
+                    div {
+                        style: "display:grid; grid-template-columns:minmax(0, 1.08fr) minmax(260px, 0.92fr); gap:14px;",
+                        div {
+                            style: selected_intent_card_style(&accent),
+                            div {
+                                style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
+                                span { style: label_style(), "Selected intent" }
+                                span { style: format!("font-size:10px; font-weight:800; color:{};", accent), "{selected_profile.slug()}" }
+                            }
+                            h3 {
+                                style: "margin:0; font-size:28px; line-height:1.04; color:#1f3347;",
+                                "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}"
+                            }
+                            p {
+                                style: "margin:0; font-size:14px; line-height:1.72; color:#4e647a;",
+                                "{selected_preset.map(|card| card.summary).unwrap_or(\"No preset copy available.\")}"
+                            }
+                            div {
+                                style: "display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px;",
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Hostname" } span { style: stat_value_style(), "{state.current_setup.setup.personalization.hostname}" } }
+                            }
+                        }
+                        div {
+                            style: "display:flex; flex-direction:column; gap:10px;",
+                            div { style: label_style(), "Other intents" }
+                            for card in preset_cards()
+                                .iter()
+                                .copied()
+                                .filter(|card| card.id != state.current_setup.setup.preset)
+                            {
+                                button {
+                                    style: secondary_preset_card_style(),
+                                    onclick: move |_| on_apply_preset.call(card.id),
+                                    div {
+                                        style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
+                                        span { style: "font-size:14px; font-weight:700; color:#294158;", "{card.title}" }
+                                        span { style: "font-size:10px; font-weight:800; color:#7ab8ff;", "{card.recommended_profile.slug()}" }
+                                    }
+                                    p {
+                                        style: "margin:0; font-size:12px; line-height:1.6; color:#62788e;",
+                                        "{card.summary}"
+                                    }
+                                }
                             }
                         }
                     }
@@ -1270,36 +1317,44 @@ fn StudioCanvas(
             if current_stage == JourneyStage::Profile {
                 div {
                     style: section_card_style(),
-                    h2 { style: section_title_style(), "Profile" }
-                    p { style: section_copy_style(), "Set the build posture clearly. This is where you decide whether the artifact should land as server, KDE, or the dual-profile build." }
                     div {
-                        style: "display:flex; flex-wrap:wrap; gap:10px;",
-                        for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
-                            button {
-                                style: option_button_style(selected_profile == profile, &accent),
-                                onclick: move |_| on_select_profile.call(profile),
-                                "{profile.slug()}"
+                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.78fr); gap:14px;",
+                        div {
+                            style: "display:flex; flex-direction:column; gap:14px;",
+                            h2 { style: section_title_style(), "Profile" }
+                            p { style: section_copy_style(), "Set the build posture clearly. This decides whether the artifact lands as server, KDE, or the dual-profile build." }
+                            div {
+                                style: "display:flex; flex-wrap:wrap; gap:10px;",
+                                for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
+                                    button {
+                                        style: option_button_style(selected_profile == profile, &accent),
+                                        onclick: move |_| on_select_profile.call(profile),
+                                        "{profile.slug()}"
+                                    }
+                                }
+                            }
+                            div {
+                                style: "display:flex; flex-wrap:wrap; gap:10px;",
+                                button {
+                                    style: option_button_style(state.current_setup.setup.hardware.with_nvidia, &accent),
+                                    onclick: move |_| on_toggle_nvidia.call(()),
+                                    "NVIDIA path"
+                                }
+                                button {
+                                    style: option_button_style(state.current_setup.setup.hardware.with_lts, &accent),
+                                    onclick: move |_| on_toggle_lts.call(()),
+                                    "LTS kernel"
+                                }
                             }
                         }
-                    }
-                    div {
-                        style: "display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;",
-                        button {
-                            style: option_button_style(state.current_setup.setup.hardware.with_nvidia, &accent),
-                            onclick: move |_| on_toggle_nvidia.call(()),
-                            "NVIDIA path"
+                        div {
+                            style: proof_stack_style(),
+                            div { style: label_style(), "Posture proof" }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Recommended" } span { style: stat_value_style(), "{state.current_setup.setup.preset.recommended_profile().slug()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Selected" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Preset intent" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
                         }
-                        button {
-                            style: option_button_style(state.current_setup.setup.hardware.with_lts, &accent),
-                            onclick: move |_| on_toggle_lts.call(()),
-                            "LTS kernel"
-                        }
-                    }
-                    div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:6px;",
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Recommended" } span { style: stat_value_style(), "{state.current_setup.setup.preset.recommended_profile().slug()}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Selected" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
                     }
                 }
             }
@@ -1307,36 +1362,46 @@ fn StudioCanvas(
             if current_stage == JourneyStage::Personalize {
                 div {
                     style: section_card_style(),
-                    h2 { style: section_title_style(), "Personalize" }
-                    p { style: section_copy_style(), "Name the setup and give the future host a stable identity before you ask the builder to make it real." }
                     div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;",
+                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.76fr); gap:14px;",
                         div {
-                            style: "display:flex; flex-direction:column; gap:6px;",
-                            label { style: label_style(), "Setup" }
-                            input {
-                                id: "maker-setup-name",
-                                r#type: "text",
-                                value: "{state.current_setup.setup.name}",
-                                style: input_style(),
-                                oninput: move |evt| on_update_setup_name.call(evt.value()),
+                            style: "display:flex; flex-direction:column; gap:14px;",
+                            h2 { style: section_title_style(), "Personalize" }
+                            p { style: section_copy_style(), "Name the setup and give the future host a stable identity before you ask the builder to make it real." }
+                            div {
+                                style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px;",
+                                div {
+                                    style: "display:flex; flex-direction:column; gap:6px;",
+                                    label { style: label_style(), "Setup" }
+                                    input {
+                                        id: "maker-setup-name",
+                                        r#type: "text",
+                                        value: "{state.current_setup.setup.name}",
+                                        style: input_style(),
+                                        oninput: move |evt| on_update_setup_name.call(evt.value()),
+                                    }
+                                }
+                                div {
+                                    style: "display:flex; flex-direction:column; gap:6px;",
+                                    label { style: label_style(), "Hostname" }
+                                    input {
+                                        r#type: "text",
+                                        value: "{state.current_setup.setup.personalization.hostname}",
+                                        style: input_style(),
+                                        oninput: move |evt| on_update_hostname.call(evt.value()),
+                                    }
+                                }
                             }
                         }
                         div {
-                            style: "display:flex; flex-direction:column; gap:6px;",
-                            label { style: label_style(), "Hostname" }
-                            input {
-                                r#type: "text",
-                                value: "{state.current_setup.setup.personalization.hostname}",
-                                style: input_style(),
-                                oninput: move |evt| on_update_hostname.call(evt.value()),
-                            }
+                            style: identity_preview_style(),
+                            div { style: label_style(), "Identity preview" }
+                            h3 { style: "margin:0; font-size:24px; line-height:1.08; color:#1f3347;", "{state.current_setup.setup.personalization.hostname}" }
+                            p { style: "margin:0; font-size:13px; line-height:1.65; color:#5a7085;", "This is the machine identity that will carry through the emitted native config and the saved setup story." }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Setup slug" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Journey" } span { style: stat_value_style(), "{current_stage.label()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Artifacts root" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
                         }
-                    }
-                    div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:6px;",
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Slug" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Journey" } span { style: stat_value_style(), "{current_stage.label()}" } }
                     }
                 }
             }
@@ -1344,41 +1409,48 @@ fn StudioCanvas(
             if current_stage == JourneyStage::Review {
                 div {
                     style: section_card_style(),
-                    h2 { style: section_title_style(), "Review" }
-                    p { style: section_copy_style(), "Lock the build inputs before you launch. Shell Truth on the right keeps the native config and build plan visible while you do this." }
                     div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
-                    }
-                    div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;",
+                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(270px, 0.8fr); gap:14px;",
                         div {
-                            style: "display:flex; flex-direction:column; gap:6px;",
-                            label { style: label_style(), "Artifacts directory" }
-                            input {
-                                r#type: "text",
-                                value: "{state.artifacts_dir}",
-                                style: input_style(),
-                                oninput: move |evt| on_update_artifacts_dir.call(evt.value()),
+                            style: "display:flex; flex-direction:column; gap:14px;",
+                            h2 { style: section_title_style(), "Review" }
+                            p { style: section_copy_style(), "Lock the build inputs before you launch. Shell Truth on the right holds the native config and build plan while you check the last mile." }
+                            div {
+                                style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;",
+                                div {
+                                    style: "display:flex; flex-direction:column; gap:6px;",
+                                    label { style: label_style(), "Artifacts directory" }
+                                    input {
+                                        r#type: "text",
+                                        value: "{state.artifacts_dir}",
+                                        style: input_style(),
+                                        oninput: move |evt| on_update_artifacts_dir.call(evt.value()),
+                                    }
+                                }
+                                div {
+                                    style: "display:flex; flex-direction:column; gap:6px;",
+                                    label { style: label_style(), "Repo root (optional for repo-local builds)" }
+                                    input {
+                                        r#type: "text",
+                                        value: "{state.repo_root}",
+                                        style: input_style(),
+                                        oninput: move |evt| on_update_repo_root.call(evt.value()),
+                                    }
+                                }
                             }
                         }
                         div {
-                            style: "display:flex; flex-direction:column; gap:6px;",
-                            label { style: label_style(), "Repo root (optional for repo-local builds)" }
-                            input {
-                                r#type: "text",
-                                value: "{state.repo_root}",
-                                style: input_style(),
-                                oninput: move |evt| on_update_repo_root.call(evt.value()),
+                            style: proof_stack_style(),
+                            div { style: label_style(), "Ready check" }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
+                            div {
+                                style: status_card_style(),
+                                div { style: "font-size:12px; font-weight:700; color:#30475f;", "{state.build_status}" }
+                                div { style: "font-size:11px; color:#7b8da1;", "Save the setup, then continue into Build when the right rail looks truthful." }
                             }
                         }
-                    }
-                    div {
-                        style: status_card_style(),
-                        div { style: "font-size:12px; font-weight:700; color:#30475f;", "{state.build_status}" }
-                        div { style: "font-size:11px; color:#7b8da1;", "Save the setup, then continue into Build when the right rail looks truthful." }
                     }
                     div {
                         style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
@@ -1399,19 +1471,32 @@ fn StudioCanvas(
             if current_stage == JourneyStage::Build {
                 div {
                     style: section_card_style(),
-                    h2 { style: section_title_style(), "Build" }
-                    p { style: section_copy_style(), "Launch the local Docker build on Linux, or export the truthful handoff bundle on the other platforms. Raw logs stay in Shell Truth; the main canvas stays focused on the outcome." }
                     div {
-                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Artifacts" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
-                    }
-                    if !state.build_result.trim().is_empty() {
+                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.76fr); gap:14px;",
                         div {
-                            style: status_card_style(),
-                            div { style: "font-size:12px; font-weight:700; color:#30475f;", "Latest result" }
-                            div { style: "font-size:11px; line-height:1.6; color:#677b90;", "{latest_result_summary(&state)}" }
+                            style: "display:flex; flex-direction:column; gap:14px;",
+                            h2 { style: section_title_style(), "Build" }
+                            p { style: section_copy_style(), "Launch the local Docker build on Linux, or export the truthful handoff bundle on the other platforms. Raw logs stay in Shell Truth; the main canvas stays focused on the outcome." }
+                            div {
+                                style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Artifacts" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
+                            }
+                            if !state.build_result.trim().is_empty() {
+                                div {
+                                    style: status_card_style(),
+                                    div { style: "font-size:12px; font-weight:700; color:#30475f;", "Latest result" }
+                                    div { style: "font-size:11px; line-height:1.6; color:#677b90;", "{latest_result_summary(&state)}" }
+                                }
+                            }
+                        }
+                        div {
+                            style: proof_stack_style(),
+                            div { style: label_style(), "Launch" }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "OS path" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Truth rail" } span { style: stat_value_style(), "Structured logs and manifest stay on the right." } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "After build" } span { style: stat_value_style(), "Dedicated success handoff with artifact actions." } }
                         }
                     }
                     div {
@@ -1434,20 +1519,32 @@ fn StudioCanvas(
             if current_stage == JourneyStage::Boot {
                 div {
                     style: section_card_style(),
-                    h2 { style: section_title_style(), "Boot" }
-                    p { style: section_copy_style(), "This stage is the handoff moment after a truthful build or export. If the dedicated success surface is not active yet, return to Build and rerun or inspect the latest artifacts." }
-                    if state.recent_artifacts.is_empty() {
-                        div { style: empty_note_style(), "No recent artifact summary is available yet for this setup." }
-                    } else {
+                    div {
+                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.78fr); gap:14px;",
                         div {
-                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
-                            for artifact in state.recent_artifacts.iter().take(3).cloned() {
+                            style: "display:flex; flex-direction:column; gap:14px;",
+                            h2 { style: section_title_style(), "Boot" }
+                            p { style: section_copy_style(), "This is the handoff moment after a truthful build or export. If the dedicated success surface is not active yet, return to Build and rerun or inspect the latest artifacts." }
+                            if state.recent_artifacts.is_empty() {
+                                div { style: empty_note_style(), "No recent artifact summary is available yet for this setup." }
+                            } else {
                                 div {
-                                    style: success_stat_style(),
-                                    span { style: stat_label_style(), "{artifact.subtitle}" }
-                                    span { style: stat_value_style(), "{artifact.title}" }
+                                    style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
+                                    for artifact in state.recent_artifacts.iter().take(3).cloned() {
+                                        div {
+                                            style: proof_card_style(),
+                                            span { style: stat_label_style(), "{artifact.subtitle}" }
+                                            span { style: stat_value_style(), "{artifact.title}" }
+                                        }
+                                    }
                                 }
                             }
+                        }
+                        div {
+                            style: proof_stack_style(),
+                            div { style: label_style(), "Handoff" }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Primary action" } span { style: stat_value_style(), "Reveal artifact, inspect details, or start the next setup." } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Current setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
                         }
                     }
                     button {
@@ -1482,30 +1579,6 @@ fn StudioCanvas(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn PresetOption(
-    card: PresetCard,
-    selected: bool,
-    accent: String,
-    on_select: EventHandler<PresetId>,
-) -> Element {
-    rsx! {
-        button {
-            style: preset_card_style(selected, &accent),
-            onclick: move |_| on_select.call(card.id),
-            div {
-                style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                span { style: "font-size:14px; font-weight:700; color:#294158;", "{card.title}" }
-                span { style: format!("font-size:10px; font-weight:800; color:{};", accent), "{card.recommended_profile.slug()}" }
-            }
-            div {
-                style: "font-size:12px; line-height:1.55; color:#5d7187; text-align:left;",
-                "{card.summary}"
             }
         }
     }
@@ -2880,18 +2953,33 @@ fn section_toggle_style(expanded: bool) -> String {
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:14px; padding:20px 22px 22px 22px; border-radius:24px; background:rgba(252,253,254,0.96); box-shadow:0 18px 42px rgba(88,107,129,0.11), inset 0 0 0 1px rgba(255,255,255,0.76);"
+    "display:flex; flex-direction:column; gap:14px; padding:20px 22px 22px 22px; border-radius:22px; background:rgba(250,252,254,0.88); box-shadow:0 18px 42px rgba(88,107,129,0.09), inset 0 0 0 1px rgba(255,255,255,0.72); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
 }
 
-fn preset_card_style(selected: bool, accent: &str) -> String {
-    if selected {
-        format!(
-            "display:flex; flex-direction:column; gap:8px; min-height:124px; padding:14px 14px 15px 14px; border:none; border-radius:18px; background:rgba(233,241,250,0.98); box-shadow:inset 0 0 0 1px rgba(160,188,218,0.56), 0 16px 34px rgba(86,113,147,0.10); color:{};",
-            accent
-        )
-    } else {
-        "display:flex; flex-direction:column; gap:8px; min-height:124px; padding:14px 14px 15px 14px; border:none; border-radius:18px; background:rgba(255,255,255,0.88); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.52);".to_owned()
-    }
+fn selected_intent_card_style(accent: &str) -> String {
+    format!(
+        "display:flex; flex-direction:column; gap:14px; min-height:100%; padding:18px 18px 18px 18px; border-radius:22px; \
+         background:linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(244,249,253,0.92) 100%); \
+         box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.42); \
+         border-left:3px solid {};",
+        accent
+    )
+}
+
+fn secondary_preset_card_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:8px; padding:14px 14px 15px 14px; border:none; border-radius:18px; background:rgba(255,255,255,0.72); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.46); text-align:left;"
+}
+
+fn proof_stack_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:18px; background:rgba(255,255,255,0.62); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.42);"
+}
+
+fn identity_preview_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:20px; background:linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(245,249,253,0.90) 100%); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.44);"
+}
+
+fn proof_card_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:15px; background:rgba(255,255,255,0.82); box-shadow:inset 0 0 0 1px rgba(196,210,224,0.48);"
 }
 
 fn option_button_style(selected: bool, accent: &str) -> String {
