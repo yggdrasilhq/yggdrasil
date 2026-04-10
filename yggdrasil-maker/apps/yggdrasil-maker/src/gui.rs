@@ -633,6 +633,20 @@ fn app() -> Element {
     }
 
     {
+        use_future(move || async move {
+            loop {
+                let maximized = window().is_maximized();
+                state.with_mut(|ui| {
+                    if ui.maximized != maximized {
+                        ui.maximized = maximized;
+                    }
+                });
+                sleep(Duration::from_millis(160)).await;
+            }
+        });
+    }
+
+    {
         let desktop = desktop.clone();
         let trace_root = state.read().trace_root.clone();
         use_future(move || {
@@ -833,8 +847,7 @@ fn app() -> Element {
                 evt.stop_propagation();
             },
             style: format!(
-                "position:relative; width:100vw; height:100vh; overflow:hidden; background:{}; font-family:{};",
-                shell_tint_fill,
+                "position:relative; width:100vw; height:100vh; overflow:hidden; background:transparent; font-family:{};",
                 UI_FONT_FAMILY,
             ),
             if !snapshot.maximized {
@@ -2680,7 +2693,7 @@ fn shell_surface_style(
     shell_tint_fill: &str,
     shell_gradient: &str,
 ) -> String {
-    let radius = if maximized { 0 } else { 28 };
+    let radius = if maximized { 0 } else { 24 };
     let blur = match finish {
         ShellFinish::Sleek => 10,
         ShellFinish::Crisp => 0,
@@ -2708,7 +2721,7 @@ fn shell_surface_style(
         "position:absolute; inset:{}px; display:flex; flex-direction:column; overflow:hidden; \
          border-radius:{}px; background-color:{}; background-image:{}; box-shadow:{}; \
          backdrop-filter:{}; -webkit-backdrop-filter:{};",
-        if maximized { 0 } else { 8 },
+        if maximized { 0 } else { 6 },
         radius,
         shell_tint_fill,
         shell_gradient,
