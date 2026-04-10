@@ -995,7 +995,7 @@ fn app() -> Element {
                         }
                     }
                     div {
-                        style: "flex:1; min-width:0; min-height:0; overflow:auto; padding:22px 22px 26px 22px;",
+                        style: "flex:1; min-width:0; min-height:0; overflow:auto; padding:18px 20px 20px 20px;",
                         if let Some(success) = snapshot.success_state.clone() {
                             if success.setup_id == snapshot.current_setup.setup_id {
                                 SuccessScreen {
@@ -1222,7 +1222,7 @@ fn StudioCanvas(
 
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; gap:18px; max-width:920px; margin:0 auto;",
+            style: "display:flex; flex-direction:column; gap:14px; max-width:920px; margin:0 auto;",
             div {
                 style: format!(
                     "{} {};",
@@ -2916,9 +2916,9 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
 
 fn stage_banner_style(compact: bool) -> &'static str {
     if compact {
-        "padding:18px 22px 20px 22px; border-radius:28px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "padding:16px 20px 18px 20px; border-radius:28px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
     } else {
-        "padding:22px 24px 24px 24px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "padding:20px 22px 20px 22px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
     }
 }
 
@@ -2951,7 +2951,7 @@ fn secondary_button_style() -> &'static str {
 }
 
 fn stage_footer_bar_style() -> &'static str {
-    "display:flex; flex-wrap:wrap; gap:14px; justify-content:space-between; align-items:center; padding:14px 18px; border-radius:20px; background:rgba(250,252,254,0.94); box-shadow:0 12px 28px rgba(88,107,129,0.08), inset 0 0 0 1px rgba(255,255,255,0.76);"
+    "display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; padding:12px 16px; border-radius:18px; background:rgba(250,252,254,0.94); box-shadow:0 12px 28px rgba(88,107,129,0.08), inset 0 0 0 1px rgba(255,255,255,0.76);"
 }
 
 fn primary_rail_button_style(accent: &str) -> String {
@@ -2982,7 +2982,7 @@ fn section_toggle_style(expanded: bool) -> String {
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:14px; padding:20px 22px 22px 22px; border-radius:22px; background:rgba(250,252,254,0.88); box-shadow:0 18px 42px rgba(88,107,129,0.09), inset 0 0 0 1px rgba(255,255,255,0.72); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
+    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:22px; background:rgba(250,252,254,0.88); box-shadow:0 18px 42px rgba(88,107,129,0.09), inset 0 0 0 1px rgba(255,255,255,0.72); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
 }
 
 fn selected_intent_card_style(accent: &str) -> String {
