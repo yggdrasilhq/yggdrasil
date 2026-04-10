@@ -2693,7 +2693,7 @@ fn shell_surface_style(
     shell_tint_fill: &str,
     shell_gradient: &str,
 ) -> String {
-    let radius = if maximized { 0 } else { 18 };
+    let radius = if maximized { 0 } else { 16 };
     let blur = match finish {
         ShellFinish::Sleek => 10,
         ShellFinish::Crisp => 0,
