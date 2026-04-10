@@ -909,7 +909,7 @@ fn app() -> Element {
                         zoom_percent: 100.0,
                         body: rsx! {
                             div {
-                                style: rail_container_style(),
+                                style: left_rail_container_style(),
                                 RailHeader {
                                     title: "Setups".to_owned(),
                                     color: "#49637d".to_owned(),
@@ -1070,7 +1070,7 @@ fn app() -> Element {
                         zoom_percent: 100.0,
                         body: rsx! {
                             div {
-                                style: rail_container_style(),
+                                style: right_rail_container_style(),
                                 RailHeader {
                                     title: "Shell Truth".to_owned(),
                                     color: "#49637d".to_owned(),
@@ -2827,8 +2827,14 @@ fn shell_surface_style(
     )
 }
 
-fn rail_container_style() -> &'static str {
+fn left_rail_container_style() -> &'static str {
     "display:flex; flex-direction:column; height:100%; background:transparent;"
+}
+
+fn right_rail_container_style() -> &'static str {
+    "display:flex; flex-direction:column; height:100%; margin-left:8px; padding-left:6px; border-radius:24px 0 0 24px; \
+     background:linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(248,251,254,0.34) 18%, rgba(248,251,254,0.64) 100%); \
+     box-shadow:inset 18px 0 28px rgba(255,255,255,0.18);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
