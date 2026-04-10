@@ -837,19 +837,18 @@ fn app() -> Element {
                 shell_tint_fill,
                 UI_FONT_FAMILY,
             ),
-            div {
-                style: format!(
-                    "position:absolute; inset:0; background:{}; opacity:0.92;",
-                    shell_gradient
-                )
-            }
             if !snapshot.maximized {
                 WindowResizeHandles {}
             }
             div {
-                style: shell_surface_style(snapshot.maximized, snapshot.shell_settings.finish),
+                style: shell_surface_style(
+                    snapshot.maximized,
+                    snapshot.shell_settings.finish,
+                    &shell_tint_fill,
+                    &shell_gradient,
+                ),
                 TitlebarChrome {
-                    background: "rgba(248,251,253,0.58)".to_owned(),
+                    background: "transparent".to_owned(),
                     zoom_percent: 100.0,
                     left: titlebar_left,
                     center: titlebar_center,
@@ -2675,33 +2674,52 @@ fn chrome_palette() -> ChromePalette {
     }
 }
 
-fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
+fn shell_surface_style(
+    maximized: bool,
+    finish: ShellFinish,
+    shell_tint_fill: &str,
+    shell_gradient: &str,
+) -> String {
     let radius = if maximized { 0 } else { 28 };
     let blur = match finish {
-        ShellFinish::Sleek => 24,
-        ShellFinish::Crisp => 14,
+        ShellFinish::Sleek => 10,
+        ShellFinish::Crisp => 0,
     };
     let saturation = match finish {
-        ShellFinish::Sleek => 165,
-        ShellFinish::Crisp => 132,
+        ShellFinish::Sleek => 135,
+        ShellFinish::Crisp => 100,
+    };
+    let frame_outline = if maximized {
+        "none"
+    } else {
+        "inset 0 0 0 1px rgba(214,222,232,0.72)"
+    };
+    let shadow = if maximized {
+        "0 24px 52px rgba(72,102,118,0.16)".to_owned()
+    } else {
+        format!("0 24px 52px rgba(72,102,118,0.16), {}", frame_outline)
+    };
+    let backdrop = if blur == 0 {
+        "none".to_owned()
+    } else {
+        format!("blur({blur}px) saturate({saturation}%)")
     };
     format!(
         "position:absolute; inset:{}px; display:flex; flex-direction:column; overflow:hidden; \
-         border-radius:{}px; background:rgba(247,250,252,0.44); border:1px solid rgba(255,255,255,0.84); \
-         box-shadow:0 24px 64px rgba(57,78,98,0.16), inset 0 1px 0 rgba(255,255,255,0.82); \
-         backdrop-filter:blur({}px) saturate({}%); \
-         -webkit-backdrop-filter:blur({}px) saturate({}%);",
+         border-radius:{}px; background-color:{}; background-image:{}; box-shadow:{}; \
+         backdrop-filter:{}; -webkit-backdrop-filter:{};",
         if maximized { 0 } else { 8 },
         radius,
-        blur,
-        saturation,
-        blur,
-        saturation,
+        shell_tint_fill,
+        shell_gradient,
+        shadow,
+        backdrop,
+        backdrop,
     )
 }
 
 fn rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; background:rgba(246,249,252,0.58); box-shadow:inset 0 1px 0 rgba(255,255,255,0.60), inset 0 0 0 1px rgba(203,216,229,0.28); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);"
+    "display:flex; flex-direction:column; height:100%; background:transparent;"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
@@ -2763,11 +2781,11 @@ fn titlebar_icon_button_style(active: bool) -> String {
 }
 
 fn titlebar_setup_button_style() -> &'static str {
-    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:rgba(255,255,255,0.78); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.48);"
+    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:rgba(255,255,255,0.86); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.56);"
 }
 
 fn titlebar_center_field_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.78); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.44); overflow:hidden;"
+    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.84); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.50); overflow:hidden;"
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
