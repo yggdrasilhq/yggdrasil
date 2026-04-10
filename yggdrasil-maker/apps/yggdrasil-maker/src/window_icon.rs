@@ -3,6 +3,8 @@ use tao::window::Icon;
 
 pub const YGGDRASIL_MAKER_ICON_PNG_512: &[u8] =
     include_bytes!("../../../assets/brand/yggdrasil-maker-icon-512.png");
+pub const YGGDRASIL_MAKER_ICON_SVG: &[u8] =
+    include_bytes!("../../../assets/brand/yggdrasil-maker-icon.svg");
 
 pub fn load_window_icon_from_png(png_bytes: &[u8], asset_name: &str) -> Icon {
     let decoder = png::Decoder::new(Cursor::new(png_bytes));
@@ -31,4 +33,10 @@ pub fn load_window_icon_from_png(png_bytes: &[u8], asset_name: &str) -> Icon {
 
 pub fn load_yggdrasil_maker_window_icon() -> Icon {
     load_window_icon_from_png(YGGDRASIL_MAKER_ICON_PNG_512, "yggdrasil-maker")
+}
+
+#[cfg(target_os = "linux")]
+pub fn load_yggdrasil_maker_pixbuf() -> gdk_pixbuf::Pixbuf {
+    gdk_pixbuf::Pixbuf::from_read(Cursor::new(YGGDRASIL_MAKER_ICON_PNG_512))
+        .expect("decode yggdrasil-maker gtk pixbuf")
 }

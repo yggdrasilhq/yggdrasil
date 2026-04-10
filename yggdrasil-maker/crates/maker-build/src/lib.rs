@@ -12,6 +12,7 @@ const CONTAINER_CONFIG_PATH: &str = "/workspace/input/ygg.local.toml";
 const CONTAINER_INVOCATION_PATH: &str = "/workspace/input/invocation.json";
 const CONTAINER_SSH_AUTHORIZED_KEYS_PATH: &str = "/workspace/input/secrets/authorized_keys";
 const CONTAINER_SSH_HOST_KEYS_PATH: &str = "/workspace/input/secrets/ssh-host-keys";
+pub const CONTAINER_EDIT_BINARY_PATH: &str = "/workspace/input/tools/edit";
 const BUNDLE_CONFIG_NAME: &str = "ygg.local.toml";
 const BUNDLE_SETUP_NAME: &str = "setup.runtime.json";
 const BUNDLE_SETUP_PERSISTED_NAME: &str = "setup.persisted.json";
@@ -195,6 +196,7 @@ fn docker_command(
         "docker".to_owned(),
         "run".to_owned(),
         "--rm".to_owned(),
+        "--privileged".to_owned(),
         "--pull".to_owned(),
         "never".to_owned(),
         "--mount".to_owned(),
@@ -256,8 +258,12 @@ impl PreparedBundle {
             .tempdir()
             .context("failed to create build input bundle")?;
         let secrets_dir = tempdir.path().join("secrets");
+        let tools_dir = tempdir.path().join("tools");
         fs::create_dir_all(&secrets_dir)
             .context("failed to create secrets directory in build bundle")?;
+        fs::create_dir_all(&tools_dir)
+            .context("failed to create tools directory in build bundle")?;
+        prepare_host_tools(&tools_dir)?;
 
         let container_config =
             prepare_sensitive_mounts(&validated, &request.setup_document, &secrets_dir)?;
@@ -377,6 +383,42 @@ fn prepare_sensitive_mounts(
     Ok(config)
 }
 
+fn prepare_host_tools(tools_dir: &Path) -> Result<()> {
+    if let Some(edit_path) = resolve_host_tool_binary("edit") {
+        let target = tools_dir.join("edit");
+        fs::copy(&edit_path, &target).with_context(|| {
+            format!(
+                "failed to copy host edit binary into bundle from {}",
+                edit_path.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&target)?.permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&target, permissions)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_host_tool_binary(name: &str) -> Option<PathBuf> {
+    let candidate = Path::new(name);
+    if candidate.is_absolute() && candidate.is_file() {
+        return Some(candidate.to_path_buf());
+    }
+
+    let path = std::env::var_os("PATH")?;
+    for entry in std::env::split_paths(&path) {
+        let candidate = entry.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
     fs::create_dir_all(target).with_context(|| format!("failed to create {}", target.display()))?;
     for entry in
@@ -469,6 +511,11 @@ mod tests {
         };
 
         let plan = build_plan_for_request(&request).expect("build plan");
+        assert!(
+            plan.docker_command
+                .iter()
+                .any(|value| value == "--privileged")
+        );
         let repo_mount = plan
             .docker_command
             .iter()

@@ -36,4 +36,4 @@ COPY . /workspace/repo
 
 RUN chmod +x /workspace/repo/scripts/maker-build-container-entrypoint.sh
 
-ENTRYPOINT ["/workspace/repo/scripts/maker-build-container-entrypoint.sh"]
+ENTRYPOINT ["bash", "/workspace/repo/scripts/maker-build-container-entrypoint.sh"]

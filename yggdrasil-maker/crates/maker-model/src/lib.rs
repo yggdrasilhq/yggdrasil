@@ -276,6 +276,36 @@ impl JourneyStage {
     }
 }
 
+impl fmt::Display for JourneyStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Outcome => "outcome",
+            Self::Profile => "profile",
+            Self::Personalize => "personalize",
+            Self::Review => "review",
+            Self::Build => "build",
+            Self::Boot => "boot",
+        };
+        f.write_str(value)
+    }
+}
+
+impl FromStr for JourneyStage {
+    type Err = ParseEnumError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "outcome" => Ok(Self::Outcome),
+            "profile" => Ok(Self::Profile),
+            "personalize" => Ok(Self::Personalize),
+            "review" => Ok(Self::Review),
+            "build" => Ok(Self::Build),
+            "boot" => Ok(Self::Boot),
+            _ => Err(ParseEnumError::new("journey-stage", value)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Setup {
     pub name: String,

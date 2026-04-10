@@ -7,7 +7,13 @@ use maker_model::{BuildProfile, PresetId};
 use std::path::PathBuf;
 
 #[cfg(feature = "desktop-ui")]
+mod app_capture;
+#[cfg(feature = "desktop-ui")]
+mod app_control;
+#[cfg(feature = "desktop-ui")]
 mod gui;
+#[cfg(all(feature = "desktop-ui", target_os = "linux"))]
+mod linux_desktop;
 #[cfg(feature = "desktop-ui")]
 mod window_icon;
 
@@ -33,6 +39,11 @@ enum Command {
     Build {
         #[command(subcommand)]
         command: BuildCommand,
+    },
+    #[cfg(feature = "desktop-ui")]
+    Server {
+        #[command(subcommand)]
+        command: ServerCommand,
     },
 }
 
@@ -87,6 +98,153 @@ enum BuildCommand {
     Run(RunBuildArgs),
 }
 
+#[cfg(feature = "desktop-ui")]
+#[derive(Subcommand, Debug)]
+enum ServerCommand {
+    App {
+        #[command(subcommand)]
+        command: AppCommand,
+    },
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Subcommand, Debug)]
+enum AppCommand {
+    Clients,
+    State(TimeoutArgs),
+    Rows(TimeoutArgs),
+    Screenshot(CaptureArgs),
+    Screenrecord(ScreenrecordArgs),
+    Focus(TimeoutArgs),
+    NewSetup(AppNewSetupArgs),
+    SelectSetup(AppSelectSetupArgs),
+    SaveSetup(TimeoutArgs),
+    SetStage(AppSetStageArgs),
+    SetSetupName(AppValueArgs),
+    SetHostname(AppValueArgs),
+    SetArtifactsDir(AppValueArgs),
+    SetRepoRoot(AppValueArgs),
+    SetBuildContext(AppBuildContextArgs),
+    ApplyPreset(AppPresetArgs),
+    SetProfile(AppProfileArgs),
+    ToggleNvidia(TimeoutArgs),
+    ToggleLts(TimeoutArgs),
+    SetSidebar(AppBoolArgs),
+    SetUtilityPane(AppBoolArgs),
+    SetRightPanel(AppRightPanelArgs),
+    SetAppearancePanel(AppBoolArgs),
+    StartBuild(TimeoutArgs),
+    OpenBuildDetails(TimeoutArgs),
+    RevealPrimaryArtifact(TimeoutArgs),
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct TimeoutArgs {
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct CaptureArgs {
+    output: Option<PathBuf>,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct ScreenrecordArgs {
+    output: Option<PathBuf>,
+    #[arg(long, default_value_t = 12)]
+    duration_sec: u64,
+    #[arg(long, default_value_t = 20_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppNewSetupArgs {
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    preset: Option<PresetId>,
+    #[arg(long)]
+    profile: Option<BuildProfile>,
+    #[arg(long)]
+    hostname: Option<String>,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppSelectSetupArgs {
+    setup_id: String,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppSetStageArgs {
+    stage: maker_model::JourneyStage,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppValueArgs {
+    value: String,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppBuildContextArgs {
+    #[arg(long)]
+    artifacts_dir: PathBuf,
+    #[arg(long)]
+    repo_root: PathBuf,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppPresetArgs {
+    preset: PresetId,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppProfileArgs {
+    profile: BuildProfile,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppBoolArgs {
+    open: bool,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppRightPanelArgs {
+    mode: gui::RightPanelMode,
+    #[arg(long, default_value_t = 8_000)]
+    timeout_ms: u64,
+}
+
 #[derive(Args, Debug, Clone)]
 struct BuildInputArgs {
     #[arg(long)]
@@ -133,6 +291,8 @@ fn main() -> Result<()> {
         Command::Setup { command } => run_setup(&app, command)?,
         Command::Config { command } => run_config(&app, command)?,
         Command::Build { command } => run_build(&app, command)?,
+        #[cfg(feature = "desktop-ui")]
+        Command::Server { command } => run_server(command)?,
     }
     Ok(())
 }
@@ -256,6 +416,199 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+#[cfg(feature = "desktop-ui")]
+fn run_server(command: ServerCommand) -> Result<()> {
+    match command {
+        ServerCommand::App { command } => run_server_app(command),
+    }
+}
+
+#[cfg(feature = "desktop-ui")]
+fn run_server_app(command: AppCommand) -> Result<()> {
+    use app_control::{
+        AppControlCommand, active_client_instance_records, default_recording_output_path,
+        default_screenshot_output_path, request_app_control, resolve_home_dir,
+    };
+
+    let home = resolve_home_dir()?;
+    match command {
+        AppCommand::Clients => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "count": active_client_instance_records(&home)?.len(),
+                    "clients": active_client_instance_records(&home)?,
+                }))?
+            );
+            Ok(())
+        }
+        AppCommand::State(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::DescribeState,
+            args.timeout_ms,
+        )?),
+        AppCommand::Rows(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::DescribeRows,
+            args.timeout_ms,
+        )?),
+        AppCommand::Screenshot(args) => {
+            let response = request_app_control(
+                &home,
+                AppControlCommand::CaptureScreenshot {
+                    output_path: args
+                        .output
+                        .unwrap_or_else(|| default_screenshot_output_path(&home, "manual"))
+                        .display()
+                        .to_string(),
+                },
+                args.timeout_ms,
+            )?;
+            emit_app_response(response)
+        }
+        AppCommand::Screenrecord(args) => {
+            let response = request_app_control(
+                &home,
+                AppControlCommand::CaptureScreenRecording {
+                    output_path: args
+                        .output
+                        .unwrap_or_else(|| default_recording_output_path(&home, "manual"))
+                        .display()
+                        .to_string(),
+                    duration_secs: args.duration_sec,
+                },
+                args.timeout_ms,
+            )?;
+            emit_app_response(response)
+        }
+        AppCommand::Focus(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::FocusWindow,
+            args.timeout_ms,
+        )?),
+        AppCommand::NewSetup(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::NewSetup {
+                name: args.name,
+                preset: args.preset,
+                profile: args.profile,
+                hostname: args.hostname,
+            },
+            args.timeout_ms,
+        )?),
+        AppCommand::SelectSetup(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SelectSetup {
+                setup_id: args.setup_id,
+            },
+            args.timeout_ms,
+        )?),
+        AppCommand::SaveSetup(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SaveSetup,
+            args.timeout_ms,
+        )?),
+        AppCommand::SetStage(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetJourneyStage { stage: args.stage },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetSetupName(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetSetupName { value: args.value },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetHostname(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetHostname { value: args.value },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetArtifactsDir(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetArtifactsDir { value: args.value },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetRepoRoot(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetRepoRoot { value: args.value },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetBuildContext(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetBuildContext {
+                artifacts_dir: args.artifacts_dir.display().to_string(),
+                repo_root: args.repo_root.display().to_string(),
+            },
+            args.timeout_ms,
+        )?),
+        AppCommand::ApplyPreset(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::ApplyPreset {
+                preset: args.preset,
+            },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetProfile(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetProfile {
+                profile: args.profile,
+            },
+            args.timeout_ms,
+        )?),
+        AppCommand::ToggleNvidia(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::ToggleNvidia,
+            args.timeout_ms,
+        )?),
+        AppCommand::ToggleLts(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::ToggleLts,
+            args.timeout_ms,
+        )?),
+        AppCommand::SetSidebar(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetSidebarOpen { open: args.open },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetUtilityPane(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetUtilityPaneOpen { open: args.open },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetRightPanel(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetRightPanelMode { mode: args.mode },
+            args.timeout_ms,
+        )?),
+        AppCommand::SetAppearancePanel(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::SetAppearancePanelOpen { open: args.open },
+            args.timeout_ms,
+        )?),
+        AppCommand::StartBuild(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::StartBuild,
+            args.timeout_ms,
+        )?),
+        AppCommand::OpenBuildDetails(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::OpenBuildDetails,
+            args.timeout_ms,
+        )?),
+        AppCommand::RevealPrimaryArtifact(args) => emit_app_response(request_app_control(
+            &home,
+            AppControlCommand::RevealPrimaryArtifact,
+            args.timeout_ms,
+        )?),
+    }
+}
+
+#[cfg(feature = "desktop-ui")]
+fn emit_app_response(response: app_control::AppControlResponse) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(&response)?);
     Ok(())
 }
 

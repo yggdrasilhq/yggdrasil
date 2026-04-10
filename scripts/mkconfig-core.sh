@@ -117,10 +117,18 @@ set -euo pipefail
 
 # Function framework for error management
 HOST_APT_PROXY_BACKUP=""
+HOST_FORCE_IPV4_CONF=""
+WGETRC_TEMP=""
 
 restore_host_apt_proxy() {
     if [[ -n "${HOST_APT_PROXY_BACKUP:-}" && -f "$HOST_APT_PROXY_BACKUP" ]]; then
         mv -f "$HOST_APT_PROXY_BACKUP" "$APT_PROXY_CONF"
+    fi
+    if [[ -n "${HOST_FORCE_IPV4_CONF:-}" && -f "$HOST_FORCE_IPV4_CONF" ]]; then
+        rm -f "$HOST_FORCE_IPV4_CONF"
+    fi
+    if [[ -n "${WGETRC_TEMP:-}" && -f "$WGETRC_TEMP" ]]; then
+        rm -f "$WGETRC_TEMP"
     fi
 }
 
@@ -242,6 +250,17 @@ if [[ "$APT_PROXY_MODE" == "host" && -z "$APT_HTTPS_PROXY" && -f "$APT_PROXY_CON
 fi
 if [[ -z "$APT_HTTPS_PROXY" ]]; then
     APT_HTTPS_PROXY="$APT_HTTP_PROXY"
+fi
+
+if [[ "${YGG_FORCE_IPV4_DOWNLOADS:-false}" == "true" ]]; then
+    HOST_FORCE_IPV4_CONF="/etc/apt/apt.conf.d/99ygg-force-ipv4"
+    echo 'Acquire::ForceIPv4 "true";' > "$HOST_FORCE_IPV4_CONF"
+    WGETRC_TEMP="$(mktemp /tmp/ygg-wgetrc-XXXXXX.conf)"
+    cat <<'EOF' > "$WGETRC_TEMP"
+inet4_only = on
+prefer-family = IPv4
+EOF
+    export WGETRC="$WGETRC_TEMP"
 fi
 
 if ! [[ "$INTEL_ARC_SRIOV_VF_COUNT" =~ ^[0-9]+$ ]]; then
@@ -893,9 +912,13 @@ fi
 
 # --- Bundle local helper binaries ---
 mkdir -p "config/includes.chroot/usr/local/bin"
-EDIT_BIN_PATH=$(command -v edit || true)
+EDIT_BIN_PATH="${YGG_EDIT_BIN:-}"
 
 if [[ -z "$EDIT_BIN_PATH" ]]; then
+    EDIT_BIN_PATH=$(command -v edit || true)
+fi
+
+if [[ -z "$EDIT_BIN_PATH" || ! -x "$EDIT_BIN_PATH" ]]; then
     echo "ERROR: 'edit' binary not found on host; install it before running mkconfig." >&2
     exit 1
 fi

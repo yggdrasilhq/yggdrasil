@@ -5628,6 +5628,8 @@ dependencies = [
  "clap",
  "dioxus",
  "dioxus-desktop",
+ "gdk-pixbuf",
+ "gtk",
  "keyboard-types",
  "maker-app",
  "maker-build",
@@ -5640,6 +5642,7 @@ dependencies = [
  "tao",
  "tokio",
  "yggterm-core",
+ "yggterm-platform",
  "yggui",
  "yggui-contract",
 ]
@@ -5663,6 +5666,15 @@ dependencies = [
  "tracing",
  "uuid",
  "yggui-contract",
+]
+
+[[package]]
+name = "yggterm-platform"
+version = "2.1.4"
+dependencies = [
+ "anyhow",
+ "objc2",
+ "serde_json",
 ]
 
 [[package]]

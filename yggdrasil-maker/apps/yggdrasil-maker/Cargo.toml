@@ -10,12 +10,15 @@ default = []
 desktop-ui = [
   "dep:dioxus",
   "dep:dioxus-desktop",
+  "dep:gdk-pixbuf",
+  "dep:gtk",
   "dep:keyboard-types",
   "dep:once_cell",
   "dep:png",
   "dep:tao",
   "dep:tokio",
   "dep:yggterm-core",
+  "dep:yggterm-platform",
   "dep:yggui-contract",
   "dep:yggui",
 ]
@@ -33,6 +36,8 @@ maker-copy = { path = "../../crates/maker-copy" }
 maker-model = { path = "../../crates/maker-model" }
 dioxus = { version = "=0.7.3", features = ["desktop"], optional = true }
 dioxus-desktop = { version = "=0.7.3", optional = true }
+gdk-pixbuf = { version = "0.18", optional = true }
+gtk = { version = "0.18", optional = true }
 keyboard-types = { version = "0.7", optional = true }
 once_cell = { version = "1", optional = true }
 png = { version = "0.17", optional = true }
@@ -41,5 +46,6 @@ serde_json.workspace = true
 tao = { version = "0.34.6", optional = true }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
 yggterm-core = { path = "../../../../yggterm/crates/yggterm-core", optional = true }
+yggterm-platform = { path = "../../../../yggterm/crates/yggterm-platform", optional = true }
 yggui-contract = { path = "../../../../yggterm/crates/yggui-contract", optional = true }
 yggui = { path = "../../../../yggterm/crates/yggui", optional = true }

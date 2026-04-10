@@ -60,11 +60,8 @@ sudo
 bash-completion
 mokutil
 
-# KVM packages for Android Studio development
-qemu-system-x86
-qemu-utils
-ovmf
-bridge-utils
-cpu-checker
-libvirt-daemon-system
-libvirt-clients
+# KDE packages
+tasksel
+virt-manager
+chromium
+plasma-nm
