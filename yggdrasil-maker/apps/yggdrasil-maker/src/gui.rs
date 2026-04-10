@@ -205,6 +205,7 @@ struct MakerUiState {
     hovered_control: Option<HoveredChromeControl>,
     maximized: bool,
     always_on_top: bool,
+    window_width: u32,
 }
 
 impl MakerUiState {
@@ -236,6 +237,7 @@ impl MakerUiState {
             hovered_control: None,
             maximized: false,
             always_on_top: false,
+            window_width: 1460,
         }
     }
 
@@ -636,9 +638,13 @@ fn app() -> Element {
         use_future(move || async move {
             loop {
                 let maximized = window().is_maximized();
+                let window_width = window().inner_size().width;
                 state.with_mut(|ui| {
                     if ui.maximized != maximized {
                         ui.maximized = maximized;
+                    }
+                    if ui.window_width != window_width {
+                        ui.window_width = window_width;
                     }
                 });
                 sleep(Duration::from_millis(160)).await;
@@ -1183,6 +1189,8 @@ fn StudioCanvas(
     on_build: EventHandler<()>,
 ) -> Element {
     let current_stage = state.current_setup.journey_stage;
+    let compact_studio = state.window_width < 1280;
+    let stacked_studio = state.window_width < 1340;
     let selected_profile = state
         .current_setup
         .setup
@@ -1196,6 +1204,21 @@ fn StudioCanvas(
     let next_stage = next_journey_stage(current_stage);
     let (stage_title, stage_copy) = stage_headline(current_stage);
     let hero_compact = current_stage != JourneyStage::Outcome;
+    let outcome_grid_style = if compact_studio {
+        "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
+    } else {
+        "display:grid; grid-template-columns:minmax(0, 1.08fr) minmax(260px, 0.92fr); gap:14px; align-items:start;"
+    };
+    let stage_split_style = if stacked_studio {
+        "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
+    } else {
+        "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.78fr); gap:14px; align-items:start;"
+    };
+    let build_split_style = if stacked_studio {
+        "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
+    } else {
+        "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.76fr); gap:14px; align-items:start;"
+    };
 
     rsx! {
         div {
@@ -1264,7 +1287,7 @@ fn StudioCanvas(
                         }
                     }
                     div {
-                        style: "display:grid; grid-template-columns:minmax(0, 1.08fr) minmax(260px, 0.92fr); gap:14px;",
+                        style: outcome_grid_style,
                         div {
                             style: selected_intent_card_style(&accent),
                             div {
@@ -1281,7 +1304,7 @@ fn StudioCanvas(
                                 "{selected_preset.map(|card| card.summary).unwrap_or(\"No preset copy available.\")}"
                             }
                             div {
-                                style: "display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px;",
+                                style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px;",
                                 div { style: proof_card_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
                                 div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
                                 div { style: proof_card_style(), span { style: stat_label_style(), "Hostname" } span { style: stat_value_style(), "{state.current_setup.setup.personalization.hostname}" } }
@@ -1318,7 +1341,7 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.78fr); gap:14px;",
+                        style: stage_split_style,
                         div {
                             style: "display:flex; flex-direction:column; gap:14px;",
                             h2 { style: section_title_style(), "Profile" }
@@ -1363,7 +1386,7 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.76fr); gap:14px;",
+                        style: stage_split_style,
                         div {
                             style: "display:flex; flex-direction:column; gap:14px;",
                             h2 { style: section_title_style(), "Personalize" }
@@ -1410,7 +1433,7 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(270px, 0.8fr); gap:14px;",
+                        style: stage_split_style,
                         div {
                             style: "display:flex; flex-direction:column; gap:14px;",
                             h2 { style: section_title_style(), "Review" }
@@ -1472,7 +1495,7 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.76fr); gap:14px;",
+                        style: build_split_style,
                         div {
                             style: "display:flex; flex-direction:column; gap:14px;",
                             h2 { style: section_title_style(), "Build" }
@@ -1520,7 +1543,7 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:grid; grid-template-columns:minmax(0, 1fr) minmax(250px, 0.78fr); gap:14px;",
+                        style: stage_split_style,
                         div {
                             style: "display:flex; flex-direction:column; gap:14px;",
                             h2 { style: section_title_style(), "Boot" }
@@ -2958,7 +2981,7 @@ fn section_card_style() -> &'static str {
 
 fn selected_intent_card_style(accent: &str) -> String {
     format!(
-        "display:flex; flex-direction:column; gap:14px; min-height:100%; padding:18px 18px 18px 18px; border-radius:22px; \
+        "display:flex; flex-direction:column; gap:14px; padding:18px 18px 18px 18px; border-radius:22px; \
          background:linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(244,249,253,0.92) 100%); \
          box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.42); \
          border-left:3px solid {};",
