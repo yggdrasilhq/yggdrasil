@@ -49,9 +49,7 @@ use crate::app_control::{
     take_next_app_control_request,
 };
 #[cfg(target_os = "linux")]
-use crate::linux_desktop::{
-    YGGDRASIL_MAKER_DESKTOP_APP_ID, refresh_dev_desktop_integration,
-};
+use crate::linux_desktop::{YGGDRASIL_MAKER_DESKTOP_APP_ID, refresh_dev_desktop_integration};
 use crate::window_icon;
 
 static BOOTSTRAP: OnceCell<MakerBootstrap> = OnceCell::new();
@@ -258,6 +256,7 @@ impl MakerUiState {
         state.utility_pane_open = bootstrap.shell_settings.utility_pane_open;
         state.right_panel_mode = bootstrap.shell_settings.right_panel_mode;
         state.sidebar_open = bootstrap.shell_settings.sidebar_open;
+        state.sync_truth_surface_for_stage();
         state
     }
 
@@ -369,6 +368,7 @@ impl MakerUiState {
         if let Ok(document) = self.app.setup_store().load(setup_id) {
             self.current_setup = document;
             self.success_state = None;
+            self.sync_truth_surface_for_stage();
             self.refresh_previews();
             trace_ui(
                 &self.trace_root,
@@ -383,13 +383,11 @@ impl MakerUiState {
         self.current_setup =
             self.app
                 .create_setup_document("New Yggdrasil".to_owned(), PresetId::Nas, None, None);
-        self.current_setup.journey_stage = JourneyStage::Outcome;
+        self.set_journey_stage(JourneyStage::Outcome);
         self.build_status = "Ready to build".to_owned();
         self.build_result.clear();
         self.build_log.clear();
         self.success_state = None;
-        self.right_panel_mode = RightPanelMode::Config;
-        self.utility_pane_open = true;
         self.refresh_previews();
         trace_ui(&self.trace_root, "setup", "new", json!({}));
     }
@@ -403,7 +401,7 @@ impl MakerUiState {
     fn apply_preset(&mut self, preset: PresetId) {
         self.current_setup.setup.preset = preset;
         self.current_setup.setup.profile_override = Some(preset.recommended_profile());
-        self.current_setup.journey_stage = JourneyStage::Profile;
+        self.set_journey_stage(JourneyStage::Profile);
         self.success_state = None;
         self.refresh_previews();
         trace_ui(
@@ -454,8 +452,22 @@ impl MakerUiState {
             profile_label: manifest.build_profile.slug().to_owned(),
             output_path: artifact_path,
         });
-        self.current_setup.journey_stage = JourneyStage::Boot;
+        self.set_journey_stage(JourneyStage::Boot);
         self.recent_artifacts_expanded = true;
+    }
+
+    fn set_journey_stage(&mut self, stage: JourneyStage) {
+        self.current_setup.journey_stage = stage;
+        self.sync_truth_surface_for_stage();
+    }
+
+    fn sync_truth_surface_for_stage(&mut self) {
+        let mode = default_truth_mode_for_stage(self.current_setup.journey_stage);
+        self.right_panel_mode = mode;
+        self.utility_pane_open = true;
+        self.shell_settings.right_panel_mode = mode;
+        self.shell_settings.utility_pane_open = true;
+        self.persist_shell_settings();
     }
 }
 
@@ -664,6 +676,7 @@ fn app() -> Element {
         text: "#315066",
         muted: "#6b7b8d",
         accent: "#5fa8ff",
+        is_dark: false,
     };
 
     let titlebar_left = rsx! {
@@ -694,7 +707,7 @@ fn app() -> Element {
                     ondoubleclick: |evt| evt.stop_propagation(),
                     onclick: move |_| {
                         state.with_mut(|ui| {
-                            ui.current_setup.journey_stage = JourneyStage::Personalize;
+                            ui.set_journey_stage(JourneyStage::Personalize);
                         });
                         let _ = document::eval("document.getElementById('maker-setup-name')?.focus?.();");
                     },
@@ -1001,7 +1014,7 @@ fn app() -> Element {
                                     state: snapshot.clone(),
                                     accent: accent.clone(),
                                     preview_surface: preview_surface.clone(),
-                                    on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.current_setup.journey_stage = stage),
+                                    on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.set_journey_stage(stage)),
                                     on_update_setup_name: move |value: String| update_setup_name(state, value),
                                     on_update_hostname: move |value: String| update_hostname(state, value),
                                     on_update_artifacts_dir: move |value: String| update_artifacts_dir(state, value),
@@ -1019,7 +1032,7 @@ fn app() -> Element {
                                 state: snapshot.clone(),
                                 accent: accent.clone(),
                                 preview_surface: preview_surface.clone(),
-                                on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.current_setup.journey_stage = stage),
+                                on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.set_journey_stage(stage)),
                                 on_update_setup_name: move |value: String| update_setup_name(state, value),
                                 on_update_hostname: move |value: String| update_hostname(state, value),
                                 on_update_artifacts_dir: move |value: String| update_artifacts_dir(state, value),
@@ -1170,32 +1183,56 @@ fn StudioCanvas(
     let previous_stage = previous_journey_stage(current_stage);
     let next_stage = next_journey_stage(current_stage);
     let (stage_title, stage_copy) = stage_headline(current_stage);
+    let hero_compact = current_stage != JourneyStage::Outcome;
 
     rsx! {
         div {
             style: "display:flex; flex-direction:column; gap:18px; max-width:920px; margin:0 auto;",
             div {
                 style: format!(
-                    "{} padding:22px 24px 24px 24px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.18), inset 0 0 0 1px rgba(255,255,255,0.64);",
-                    preview_surface
+                    "{} {};",
+                    preview_surface,
+                    stage_banner_style(hero_compact)
                 ),
                 div {
                     style: format!("font-size:12px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
                     "{current_stage.label()} STAGE"
                 }
                 h1 {
-                    style: "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:#243648;",
+                    style: if hero_compact {
+                        "margin:8px 0 6px 0; font-size:30px; line-height:1.08; color:#1f3347;"
+                    } else {
+                        "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:#1f3347;"
+                    },
                     "{stage_title}"
                 }
                 p {
-                    style: "margin:0; max-width:720px; font-size:14px; line-height:1.7; color:#566a80;",
+                    style: if hero_compact {
+                        "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:#4f6479;"
+                    } else {
+                        "margin:0; max-width:720px; font-size:14px; line-height:1.7; color:#4f6479;"
+                    },
                     "{stage_copy}"
                 }
                 div {
-                    style: "display:flex; flex-wrap:wrap; gap:10px; margin-top:18px;",
+                    style: format!(
+                        "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
+                        if hero_compact { 14 } else { 18 }
+                    ),
                     div { style: success_stat_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
                     div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
                     div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                }
+            }
+
+            div {
+                style: "display:flex; flex-wrap:wrap; gap:8px; align-items:center;",
+                for stage in journey_stages() {
+                    button {
+                        style: stage_pill_style(stage == current_stage, stage_precedes(stage, current_stage), &accent),
+                        onclick: move |_| on_set_stage.call(stage),
+                        "{stage.label()}"
+                    }
                 }
             }
 
@@ -1410,29 +1447,26 @@ fn StudioCanvas(
             }
 
             div {
-                style: section_card_style(),
+                style: stage_footer_bar_style(),
                 div {
-                    style: "display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center;",
-                    div {
-                        style: "display:flex; flex-direction:column; gap:4px;",
-                        div { style: "font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#7890a6;", "Stage Control" }
-                        div { style: "font-size:13px; color:#5c7287;", "{stage_footer_copy(current_stage)}" }
-                    }
-                    div {
-                        style: "display:flex; flex-wrap:wrap; gap:10px;",
-                        if let Some(stage) = previous_stage {
-                            button {
-                                style: secondary_button_style(),
-                                onclick: move |_| on_set_stage.call(stage),
-                                "Back to {stage.label()}"
-                            }
+                    style: "display:flex; flex-direction:column; gap:4px;",
+                    div { style: "font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#6f8498;", "Next move" }
+                    div { style: "font-size:13px; color:#52677d;", "{stage_footer_copy(current_stage)}" }
+                }
+                div {
+                    style: "display:flex; flex-wrap:wrap; gap:10px;",
+                    if let Some(stage) = previous_stage {
+                        button {
+                            style: secondary_button_style(),
+                            onclick: move |_| on_set_stage.call(stage),
+                            "Back to {stage.label()}"
                         }
-                        if let Some(stage) = next_stage {
-                            button {
-                                style: primary_button_style(&accent),
-                                onclick: move |_| on_set_stage.call(stage),
-                                "Next: {stage.label()}"
-                            }
+                    }
+                    if let Some(stage) = next_stage {
+                        button {
+                            style: primary_button_style(&accent),
+                            onclick: move |_| on_set_stage.call(stage),
+                            "Next: {stage.label()}"
                         }
                     }
                 }
@@ -1664,7 +1698,7 @@ fn start_build(mut state: Signal<MakerUiState>) {
             ui.shell_settings.utility_pane_open = true;
             ui.shell_settings.right_panel_mode = RightPanelMode::Build;
             ui.persist_shell_settings();
-            ui.current_setup.journey_stage = JourneyStage::Build;
+            ui.set_journey_stage(JourneyStage::Build);
             ui.push_notification(
                 ToastTone::Info,
                 "Build Started",
@@ -1919,7 +1953,7 @@ async fn process_pending_app_control_requests(
             snapshot_response(&request, &state.read(), desktop)
         }
         AppControlCommand::SetJourneyStage { stage } => {
-            state.with_mut(|ui| ui.current_setup.journey_stage = stage);
+            state.with_mut(|ui| ui.set_journey_stage(stage));
             snapshot_response(&request, &state.read(), desktop)
         }
         AppControlCommand::SetSetupName { value } => {
@@ -2189,7 +2223,7 @@ fn handle_keyup(evt: KeyboardEvent, mut state: Signal<MakerUiState>) {
 fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.current_setup.setup.name = value;
-        ui.current_setup.journey_stage = JourneyStage::Personalize;
+        ui.set_journey_stage(JourneyStage::Personalize);
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -2198,7 +2232,7 @@ fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
 fn update_hostname(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.current_setup.setup.personalization.hostname = value;
-        ui.current_setup.journey_stage = JourneyStage::Personalize;
+        ui.set_journey_stage(JourneyStage::Personalize);
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -2207,6 +2241,7 @@ fn update_hostname(mut state: Signal<MakerUiState>, value: String) {
 fn update_artifacts_dir(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.artifacts_dir = value;
+        ui.set_journey_stage(JourneyStage::Review);
         ui.success_state = None;
         ui.refresh_previews();
         ui.refresh_recent_artifacts();
@@ -2216,6 +2251,7 @@ fn update_artifacts_dir(mut state: Signal<MakerUiState>, value: String) {
 fn update_repo_root(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.repo_root = value;
+        ui.set_journey_stage(JourneyStage::Review);
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -2224,7 +2260,7 @@ fn update_repo_root(mut state: Signal<MakerUiState>, value: String) {
 fn update_profile(mut state: Signal<MakerUiState>, value: BuildProfile) {
     state.with_mut(|ui| {
         ui.current_setup.setup.profile_override = Some(value);
-        ui.current_setup.journey_stage = JourneyStage::Profile;
+        ui.set_journey_stage(JourneyStage::Profile);
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -2233,7 +2269,7 @@ fn update_profile(mut state: Signal<MakerUiState>, value: BuildProfile) {
 fn toggle_nvidia(mut state: Signal<MakerUiState>) {
     state.with_mut(|ui| {
         ui.current_setup.setup.hardware.with_nvidia = !ui.current_setup.setup.hardware.with_nvidia;
-        ui.current_setup.journey_stage = JourneyStage::Profile;
+        ui.set_journey_stage(JourneyStage::Profile);
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -2242,7 +2278,7 @@ fn toggle_nvidia(mut state: Signal<MakerUiState>) {
 fn toggle_lts(mut state: Signal<MakerUiState>) {
     state.with_mut(|ui| {
         ui.current_setup.setup.hardware.with_lts = !ui.current_setup.setup.hardware.with_lts;
-        ui.current_setup.journey_stage = JourneyStage::Profile;
+        ui.set_journey_stage(JourneyStage::Profile);
         ui.success_state = None;
         ui.refresh_previews();
     });
@@ -2287,6 +2323,16 @@ fn profile_title_label(profile: BuildProfile) -> &'static str {
     }
 }
 
+fn default_truth_mode_for_stage(stage: JourneyStage) -> RightPanelMode {
+    match stage {
+        JourneyStage::Outcome | JourneyStage::Profile | JourneyStage::Personalize => {
+            RightPanelMode::Config
+        }
+        JourneyStage::Review => RightPanelMode::Plan,
+        JourneyStage::Build | JourneyStage::Boot => RightPanelMode::Build,
+    }
+}
+
 fn previous_journey_stage(stage: JourneyStage) -> Option<JourneyStage> {
     match stage {
         JourneyStage::Outcome => None,
@@ -2306,6 +2352,26 @@ fn next_journey_stage(stage: JourneyStage) -> Option<JourneyStage> {
         JourneyStage::Review => Some(JourneyStage::Build),
         JourneyStage::Build | JourneyStage::Boot => None,
     }
+}
+
+fn journey_stages() -> [JourneyStage; 6] {
+    [
+        JourneyStage::Outcome,
+        JourneyStage::Profile,
+        JourneyStage::Personalize,
+        JourneyStage::Review,
+        JourneyStage::Build,
+        JourneyStage::Boot,
+    ]
+}
+
+fn stage_precedes(candidate: JourneyStage, current: JourneyStage) -> bool {
+    journey_stages()
+        .iter()
+        .position(|stage| *stage == candidate)
+        .zip(journey_stages().iter().position(|stage| *stage == current))
+        .map(|(candidate_idx, current_idx)| candidate_idx < current_idx)
+        .unwrap_or(false)
 }
 
 fn stage_headline(stage: JourneyStage) -> (&'static str, &'static str) {
@@ -2600,11 +2666,12 @@ fn stop(color: &str, x: f32, y: f32, alpha: f32) -> YgguiThemeColorStop {
 fn chrome_palette() -> ChromePalette {
     ChromePalette {
         titlebar: "rgba(248,251,253,0.76)",
-        text: "#30465d",
-        muted: "#6c8197",
+        text: "#25384c",
+        muted: "#607489",
         accent: "#5fa8ff",
         close_hover: "#cf5d5d",
         control_hover: "#ebf1f6",
+        is_dark: false,
     }
 }
 
@@ -2620,8 +2687,8 @@ fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
     };
     format!(
         "position:absolute; inset:{}px; display:flex; flex-direction:column; overflow:hidden; \
-         border-radius:{}px; background:rgba(246,249,251,0.28); border:1px solid rgba(255,255,255,0.78); \
-         box-shadow:0 24px 64px rgba(57,78,98,0.14), inset 0 1px 0 rgba(255,255,255,0.78); \
+         border-radius:{}px; background:rgba(247,250,252,0.44); border:1px solid rgba(255,255,255,0.84); \
+         box-shadow:0 24px 64px rgba(57,78,98,0.16), inset 0 1px 0 rgba(255,255,255,0.82); \
          backdrop-filter:blur({}px) saturate({}%); \
          -webkit-backdrop-filter:blur({}px) saturate({}%);",
         if maximized { 0 } else { 8 },
@@ -2634,7 +2701,7 @@ fn shell_surface_style(maximized: bool, finish: ShellFinish) -> String {
 }
 
 fn rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; background:rgba(248,251,253,0.28); box-shadow:inset 0 1px 0 rgba(255,255,255,0.54); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);"
+    "display:flex; flex-direction:column; height:100%; background:rgba(246,249,252,0.58); box-shadow:inset 0 1px 0 rgba(255,255,255,0.60), inset 0 0 0 1px rgba(203,216,229,0.28); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
@@ -2714,6 +2781,27 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
     }
 }
 
+fn stage_banner_style(compact: bool) -> &'static str {
+    if compact {
+        "padding:18px 22px 20px 22px; border-radius:28px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
+    } else {
+        "padding:22px 24px 24px 24px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
+    }
+}
+
+fn stage_pill_style(active: bool, complete: bool, accent: &str) -> String {
+    if active {
+        format!(
+            "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 22px rgba(94,134,190,0.20);",
+            accent
+        )
+    } else if complete {
+        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:rgba(236,243,249,0.96); color:#39546c; font-size:11px; font-weight:800; box-shadow:inset 0 0 0 1px rgba(190,206,220,0.52);".to_owned()
+    } else {
+        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:rgba(255,255,255,0.82); color:#5d7187; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.50);".to_owned()
+    }
+}
+
 fn shortcut_badge_style() -> &'static str {
     "display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:6px; background:rgba(95,168,255,0.14); color:#2667a9; font-size:9px; font-weight:800;"
 }
@@ -2729,6 +2817,10 @@ fn secondary_button_style() -> &'static str {
     "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:rgba(255,255,255,0.86); color:#35516a; font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px rgba(188,203,217,0.52);"
 }
 
+fn stage_footer_bar_style() -> &'static str {
+    "display:flex; flex-wrap:wrap; gap:14px; justify-content:space-between; align-items:center; padding:14px 18px; border-radius:20px; background:rgba(250,252,254,0.94); box-shadow:0 12px 28px rgba(88,107,129,0.08), inset 0 0 0 1px rgba(255,255,255,0.76);"
+}
+
 fn primary_rail_button_style(accent: &str) -> String {
     format!(
         "display:inline-flex; align-items:center; gap:8px; justify-content:center; width:100%; height:38px; border:none; border-radius:12px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px rgba(94,134,190,0.24);",
@@ -2738,9 +2830,9 @@ fn primary_rail_button_style(accent: &str) -> String {
 
 fn rail_setup_card_style(selected: bool) -> String {
     if selected {
-        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:rgba(232,240,248,0.96); box-shadow:inset 0 0 0 1px rgba(159,186,215,0.54);".to_owned()
+        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:rgba(232,240,248,0.98); box-shadow:inset 0 0 0 1px rgba(159,186,215,0.54), 0 10px 24px rgba(91,118,151,0.10);".to_owned()
     } else {
-        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:rgba(255,255,255,0.80); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.52);".to_owned()
+        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:rgba(255,255,255,0.90); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.52);".to_owned()
     }
 }
 
@@ -2757,7 +2849,7 @@ fn section_toggle_style(expanded: bool) -> String {
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:20px 22px 22px 22px; border-radius:24px; background:rgba(252,253,254,0.92); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(255,255,255,0.72);"
+    "display:flex; flex-direction:column; gap:14px; padding:20px 22px 22px 22px; border-radius:24px; background:rgba(252,253,254,0.96); box-shadow:0 18px 42px rgba(88,107,129,0.11), inset 0 0 0 1px rgba(255,255,255,0.76);"
 }
 
 fn preset_card_style(selected: bool, accent: &str) -> String {
@@ -2783,7 +2875,7 @@ fn option_button_style(selected: bool, accent: &str) -> String {
 }
 
 fn input_style() -> &'static str {
-    "height:38px; padding:0 12px; border:none; border-radius:12px; background:rgba(255,255,255,0.92); color:#30475f; font-size:13px; box-shadow:inset 0 0 0 1px rgba(194,206,218,0.56);"
+    "height:40px; padding:0 12px; border:none; border-radius:12px; background:rgba(255,255,255,0.96); color:#30475f; font-size:13px; box-shadow:inset 0 0 0 1px rgba(194,206,218,0.60);"
 }
 
 fn label_style() -> &'static str {
@@ -2803,7 +2895,7 @@ fn empty_note_style() -> &'static str {
 }
 
 fn pre_panel_style() -> &'static str {
-    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:rgba(255,255,255,0.86); color:#4a6177; font-size:11px; line-height:1.62; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px rgba(196,210,224,0.5);"
+    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:rgba(255,255,255,0.92); color:#42596f; font-size:11px; line-height:1.62; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px rgba(196,210,224,0.56);"
 }
 
 fn appearance_panel_style() -> &'static str {
@@ -2811,11 +2903,11 @@ fn appearance_panel_style() -> &'static str {
 }
 
 fn status_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:4px; padding:12px 13px; border-radius:14px; background:rgba(240,246,250,0.88); box-shadow:inset 0 0 0 1px rgba(186,203,219,0.54);"
+    "display:flex; flex-direction:column; gap:4px; padding:12px 13px; border-radius:14px; background:rgba(241,247,252,0.96); box-shadow:inset 0 0 0 1px rgba(186,203,219,0.58);"
 }
 
 fn success_stat_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:14px 15px; border-radius:16px; background:rgba(255,255,255,0.86); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.56);"
+    "display:flex; flex-direction:column; gap:6px; padding:14px 15px; border-radius:16px; background:rgba(255,255,255,0.94); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.60);"
 }
 
 fn stat_label_style() -> &'static str {
