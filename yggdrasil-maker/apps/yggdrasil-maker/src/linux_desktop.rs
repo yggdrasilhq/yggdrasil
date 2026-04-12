@@ -14,9 +14,11 @@ pub fn refresh_dev_desktop_integration() -> Result<()> {
     let applications_dir = data_home.join("applications");
     let direct_assets_dir = data_home.join("yggdrasil-maker").join("icons");
     let icons_dir = data_home.join("icons").join("hicolor");
+    let pixmaps_dir = data_home.join("pixmaps");
 
     fs::create_dir_all(&applications_dir)?;
     fs::create_dir_all(&direct_assets_dir)?;
+    fs::create_dir_all(&pixmaps_dir)?;
 
     let _installed_icons = install_linux_icon_assets(
         &data_home,
@@ -33,8 +35,12 @@ pub fn refresh_dev_desktop_integration() -> Result<()> {
     )?;
     let direct_png_path = direct_assets_dir.join("yggdrasil-maker.png");
     let direct_svg_path = direct_assets_dir.join("yggdrasil-maker.svg");
+    let pixmaps_png_path = pixmaps_dir.join("yggdrasil-maker.png");
+    let pixmaps_svg_path = pixmaps_dir.join("yggdrasil-maker.svg");
     write_if_changed(&direct_png_path, YGGDRASIL_MAKER_ICON_PNG_512)?;
     write_if_changed(&direct_svg_path, YGGDRASIL_MAKER_ICON_SVG)?;
+    write_if_changed(&pixmaps_png_path, YGGDRASIL_MAKER_ICON_PNG_512)?;
+    write_if_changed(&pixmaps_svg_path, YGGDRASIL_MAKER_ICON_SVG)?;
 
     let current_exe = std::env::current_exe().context("resolve current executable")?;
     let escaped_exec = escape_desktop_value(&current_exe);
@@ -54,7 +60,7 @@ pub fn refresh_dev_desktop_integration() -> Result<()> {
         "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Yggdrasil Maker\nComment=GUI-first Debian live ISO build studio\nExec={exec}\nTryExec={exec}\nIcon={icon}\nTerminal=false\nNoDisplay=false\nCategories=Utility;System;Development;\nStartupNotify=true\nStartupWMClass={wm_class}\nX-GNOME-WMClass={wm_class}\nX-Desktop-File-Install-Version=0.27\n",
         exec = escaped_exec,
         icon = escaped_icon,
-        wm_class = "Yggdrasil-maker",
+        wm_class = YGGDRASIL_MAKER_WM_CLASS,
     );
     let lower_alias_contents = format!(
         "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Yggdrasil Maker\nComment=GUI-first Debian live ISO build studio\nExec={exec}\nTryExec={exec}\nIcon={icon}\nTerminal=false\nNoDisplay=true\nCategories=Utility;System;Development;\nStartupNotify=true\nStartupWMClass={wm_class}\nX-GNOME-WMClass={wm_class}\nX-Desktop-File-Install-Version=0.27\n",
@@ -66,7 +72,7 @@ pub fn refresh_dev_desktop_integration() -> Result<()> {
         "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Yggdrasil Maker\nComment=GUI-first Debian live ISO build studio\nExec={exec}\nTryExec={exec}\nIcon={icon}\nTerminal=false\nNoDisplay=true\nCategories=Utility;System;Development;\nStartupNotify=true\nStartupWMClass={wm_class}\nX-GNOME-WMClass={wm_class}\nX-Desktop-File-Install-Version=0.27\n",
         exec = escaped_exec,
         icon = escaped_icon,
-        wm_class = "Yggdrasil-maker",
+        wm_class = YGGDRASIL_MAKER_WM_CLASS,
     );
     write_if_changed(&hidden_desktop, hidden_contents.as_bytes())?;
     write_if_changed(&visible_desktop, visible_contents.as_bytes())?;

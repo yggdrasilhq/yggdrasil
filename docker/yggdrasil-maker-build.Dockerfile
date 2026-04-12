@@ -15,8 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     grub-efi-amd64-bin \
     grub-pc-bin \
     isolinux \
+    iproute2 \
     live-build \
     mtools \
+    openssh-client \
+    ovmf \
+    qemu-system-x86 \
+    qemu-utils \
     python3 \
     ripgrep \
     rsync \

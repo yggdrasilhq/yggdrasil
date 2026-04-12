@@ -82,7 +82,9 @@ install_linux_desktop_integration() {
 
   escaped_exec="$(escape_desktop_value "${launcher_path}")"
   escaped_icon="$(escape_desktop_value "${direct_icons_dir}/yggdrasil-maker.svg")"
-  startup_wm_class="dev.yggdrasil.YggdrasilMaker"
+  desktop_app_id="dev.yggdrasil.YggdrasilMaker"
+  startup_wm_class="yggdrasil-maker"
+  startup_wm_class_title="Yggdrasil-maker"
 
   cat > "${apps_dir}/dev.yggdrasil.YggdrasilMaker.desktop" <<EOF
 [Desktop Entry]
@@ -97,7 +99,8 @@ Terminal=false
 NoDisplay=true
 Categories=Utility;System;Development;
 StartupNotify=true
-StartupWMClass=${startup_wm_class}
+StartupWMClass=${desktop_app_id}
+X-GNOME-WMClass=${desktop_app_id}
 X-Desktop-File-Install-Version=0.27
 EOF
 
@@ -115,6 +118,43 @@ NoDisplay=false
 Categories=Utility;System;Development;
 StartupNotify=true
 StartupWMClass=${startup_wm_class}
+X-GNOME-WMClass=${startup_wm_class}
+X-Desktop-File-Install-Version=0.27
+EOF
+
+  cat > "${apps_dir}/yggdrasil-maker-wmclass.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Yggdrasil Maker
+Comment=GUI-first Debian live ISO build studio
+Exec=${escaped_exec}
+TryExec=${escaped_exec}
+Icon=${escaped_icon}
+Terminal=false
+NoDisplay=true
+Categories=Utility;System;Development;
+StartupNotify=true
+StartupWMClass=${startup_wm_class}
+X-GNOME-WMClass=${startup_wm_class}
+X-Desktop-File-Install-Version=0.27
+EOF
+
+  cat > "${apps_dir}/Yggdrasil-maker.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Yggdrasil Maker
+Comment=GUI-first Debian live ISO build studio
+Exec=${escaped_exec}
+TryExec=${escaped_exec}
+Icon=${escaped_icon}
+Terminal=false
+NoDisplay=true
+Categories=Utility;System;Development;
+StartupNotify=true
+StartupWMClass=${startup_wm_class_title}
+X-GNOME-WMClass=${startup_wm_class_title}
 X-Desktop-File-Install-Version=0.27
 EOF
 

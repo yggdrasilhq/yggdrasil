@@ -16,14 +16,15 @@ use maker_build::{
 };
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tao::event_loop::{EventLoop, EventLoopBuilder};
@@ -49,16 +50,44 @@ use crate::app_control::{
     take_next_app_control_request,
 };
 #[cfg(target_os = "linux")]
-use crate::linux_desktop::{YGGDRASIL_MAKER_DESKTOP_APP_ID, refresh_dev_desktop_integration};
+use crate::linux_desktop::{
+    YGGDRASIL_MAKER_DESKTOP_APP_ID, YGGDRASIL_MAKER_WM_CLASS, refresh_dev_desktop_integration,
+};
 use crate::window_icon;
 
-static BOOTSTRAP: OnceCell<MakerBootstrap> = OnceCell::new();
+static BOOTSTRAP: Lazy<Mutex<Option<MakerBootstrap>>> = Lazy::new(|| Mutex::new(None));
+static APP_MOUNT_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 const LEFT_RAIL_WIDTH: usize = 248;
 const RIGHT_RAIL_WIDTH: usize = 276;
 const EDGE_RESIZE_HANDLE: usize = 5;
 const CORNER_RESIZE_HANDLE: usize = 10;
 const UI_FONT_FAMILY: &str = "\"Inter Variable\", \"Inter\", system-ui, sans-serif";
+
+fn set_bootstrap(bootstrap: MakerBootstrap) {
+    if let Ok(mut guard) = BOOTSTRAP.lock() {
+        *guard = Some(bootstrap);
+    }
+}
+
+fn cloned_bootstrap() -> Option<MakerBootstrap> {
+    BOOTSTRAP.lock().ok().and_then(|guard| guard.clone())
+}
+
+fn sync_bootstrap_from_state(state: &MakerUiState) {
+    if let Ok(mut guard) = BOOTSTRAP.lock()
+        && let Some(bootstrap) = guard.as_mut()
+    {
+        bootstrap.shell_settings = state.shell_settings.clone();
+        bootstrap.saved_setups = state.saved_setups.clone();
+        bootstrap.current_setup = state.current_setup.clone();
+        bootstrap.artifacts_dir = state.artifacts_dir.clone();
+        bootstrap.repo_root = state.repo_root.clone();
+        bootstrap.config_preview = state.config_preview.clone();
+        bootstrap.plan_preview = state.plan_preview.clone();
+        bootstrap.recent_artifacts = state.recent_artifacts.clone();
+    }
+}
 
 pub fn launch() -> Result<()> {
     let bootstrap = MakerBootstrap::load()?;
@@ -71,11 +100,11 @@ pub fn launch() -> Result<()> {
             "current_setup_id": bootstrap.current_setup.setup_id,
         }),
     );
-    let _ = BOOTSTRAP.set(bootstrap);
+    set_bootstrap(bootstrap);
 
     #[cfg(target_os = "linux")]
     if let Err(error) = refresh_dev_desktop_integration() {
-        if let Some(bootstrap) = BOOTSTRAP.get() {
+        if let Some(bootstrap) = cloned_bootstrap() {
             trace_ui(
                 &bootstrap.trace_root,
                 "startup",
@@ -342,6 +371,7 @@ impl MakerUiState {
                 self.right_panel_mode = RightPanelMode::Plan;
                 self.utility_pane_open = true;
                 self.refresh_saved_setups();
+                sync_bootstrap_from_state(self);
                 self.push_notification(
                     ToastTone::Success,
                     "Setup Saved",
@@ -372,6 +402,7 @@ impl MakerUiState {
             self.success_state = None;
             self.sync_truth_surface_for_stage();
             self.refresh_previews();
+            sync_bootstrap_from_state(self);
             trace_ui(
                 &self.trace_root,
                 "setup",
@@ -391,6 +422,7 @@ impl MakerUiState {
         self.build_log.clear();
         self.success_state = None;
         self.refresh_previews();
+        sync_bootstrap_from_state(self);
         trace_ui(&self.trace_root, "setup", "new", json!({}));
     }
 
@@ -406,6 +438,7 @@ impl MakerUiState {
         self.set_journey_stage(JourneyStage::Profile);
         self.success_state = None;
         self.refresh_previews();
+        sync_bootstrap_from_state(self);
         trace_ui(
             &self.trace_root,
             "setup",
@@ -456,11 +489,13 @@ impl MakerUiState {
         });
         self.set_journey_stage(JourneyStage::Boot);
         self.recent_artifacts_expanded = true;
+        sync_bootstrap_from_state(self);
     }
 
     fn set_journey_stage(&mut self, stage: JourneyStage) {
         self.current_setup.journey_stage = stage;
         self.sync_truth_surface_for_stage();
+        sync_bootstrap_from_state(self);
     }
 
     fn sync_truth_surface_for_stage(&mut self) {
@@ -598,29 +633,40 @@ impl ThemePreset {
 }
 
 fn app() -> Element {
-    let bootstrap = BOOTSTRAP
-        .get()
-        .cloned()
-        .expect("maker bootstrap should be initialized before launch");
+    let bootstrap =
+        cloned_bootstrap().expect("maker bootstrap should be initialized before launch");
     let mut state = use_signal(|| MakerUiState::from_bootstrap(bootstrap));
+    let mount_generation = use_hook(|| APP_MOUNT_GENERATION.fetch_add(1, Ordering::Relaxed) + 1);
     let desktop = use_window();
     let now_ms = use_signal(current_millis);
+    let window_icon_applied =
+        use_hook(|| Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
 
     {
         let desktop = desktop.clone();
-        use_hook(move || {
-            desktop
-                .window
-                .set_window_icon(Some(window_icon::load_yggdrasil_maker_window_icon()));
-            #[cfg(target_os = "linux")]
-            {
-                let pixbuf = window_icon::load_yggdrasil_maker_pixbuf();
-                gtk::Window::set_default_icon(&pixbuf);
-                gtk::Window::set_default_icon_name(YGGDRASIL_MAKER_DESKTOP_APP_ID);
-                let gtk_window = desktop.window.gtk_window();
-                gtk_window.set_icon(Some(&pixbuf));
-                gtk_window.set_icon_name(Some(YGGDRASIL_MAKER_DESKTOP_APP_ID));
+        let window_icon_applied = window_icon_applied.clone();
+        use_effect(move || {
+            if window_icon_applied.swap(true, Ordering::SeqCst) {
+                return;
             }
+            let desktop = desktop.clone();
+            let window_icon_applied = window_icon_applied.clone();
+            spawn(async move {
+                sleep(Duration::from_millis(250)).await;
+                desktop
+                    .window
+                    .set_window_icon(Some(window_icon::load_yggdrasil_maker_window_icon()));
+                #[cfg(target_os = "linux")]
+                {
+                    let pixbuf = window_icon::load_yggdrasil_maker_pixbuf();
+                    gtk::Window::set_default_icon(&pixbuf);
+                    gtk::Window::set_default_icon_name(YGGDRASIL_MAKER_WM_CLASS);
+                    let gtk_window = desktop.window.gtk_window();
+                    gtk_window.set_icon(Some(&pixbuf));
+                    gtk_window.set_icon_name(Some(YGGDRASIL_MAKER_WM_CLASS));
+                }
+                let _ = window_icon_applied;
+            });
         });
     }
 
@@ -628,6 +674,9 @@ fn app() -> Element {
         let mut now_ms = now_ms;
         use_future(move || async move {
             loop {
+                if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
+                    break;
+                }
                 sleep(Duration::from_millis(250)).await;
                 now_ms.set(current_millis());
             }
@@ -637,6 +686,9 @@ fn app() -> Element {
     {
         use_future(move || async move {
             loop {
+                if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
+                    break;
+                }
                 let maximized = window().is_maximized();
                 let window_width = window().inner_size().width;
                 state.with_mut(|ui| {
@@ -653,6 +705,19 @@ fn app() -> Element {
     }
 
     {
+        use_future(move || async move {
+            loop {
+                if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
+                    break;
+                }
+                let snapshot = state.read().clone();
+                sync_bootstrap_from_state(&snapshot);
+                sleep(Duration::from_millis(120)).await;
+            }
+        });
+    }
+
+    {
         let desktop = desktop.clone();
         let trace_root = state.read().trace_root.clone();
         use_future(move || {
@@ -661,6 +726,9 @@ fn app() -> Element {
             async move {
                 let _ = register_client_instance(&trace_root);
                 loop {
+                    if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
+                        break;
+                    }
                     if let Err(error) =
                         process_pending_app_control_requests(&trace_root, &desktop, state).await
                     {
@@ -1976,7 +2044,7 @@ async fn process_pending_app_control_requests(
             } else {
                 PathBuf::from(output_path)
             };
-            match capture_visible_app_surface(desktop, &target) {
+            match capture_visible_app_surface(desktop, &target).await {
                 Ok(path) => AppControlResponse {
                     request_id: request.request_id.clone(),
                     handled_by_pid: std::process::id(),
@@ -2185,6 +2253,7 @@ fn snapshot_response(
     state: &MakerUiState,
     desktop: &DesktopContext,
 ) -> AppControlResponse {
+    sync_bootstrap_from_state(state);
     AppControlResponse {
         request_id: request.request_id.clone(),
         handled_by_pid: std::process::id(),
@@ -2248,6 +2317,7 @@ fn describe_app_state_snapshot(state: &MakerUiState, desktop: &DesktopContext) -
             "status": state.build_status,
             "result": state.build_result,
             "log_line_count": state.build_log.len(),
+            "log_tail": state.build_log.iter().rev().take(80).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>(),
             "artifacts_dir": state.artifacts_dir,
             "repo_root": state.repo_root,
         },

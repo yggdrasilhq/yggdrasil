@@ -12,6 +12,7 @@ const CONTAINER_CONFIG_PATH: &str = "/workspace/input/ygg.local.toml";
 const CONTAINER_INVOCATION_PATH: &str = "/workspace/input/invocation.json";
 const CONTAINER_SSH_AUTHORIZED_KEYS_PATH: &str = "/workspace/input/secrets/authorized_keys";
 const CONTAINER_SSH_HOST_KEYS_PATH: &str = "/workspace/input/secrets/ssh-host-keys";
+const CONTAINER_QEMU_SSH_PRIVATE_KEY_PATH: &str = "/workspace/input/secrets/qemu-smoke-ssh-key";
 pub const CONTAINER_EDIT_BINARY_PATH: &str = "/workspace/input/tools/edit";
 const BUNDLE_CONFIG_NAME: &str = "ygg.local.toml";
 const BUNDLE_SETUP_NAME: &str = "setup.runtime.json";
@@ -213,6 +214,19 @@ fn docker_command(
         ),
     ];
 
+    let qemu_smoke_key_path = prepared
+        .tempdir
+        .path()
+        .join("secrets")
+        .join("qemu-smoke-ssh-key");
+    if qemu_smoke_key_path.is_file() {
+        args.push("--env".to_owned());
+        args.push(format!(
+            "YGG_QEMU_SSH_PRIVATE_KEY={}",
+            CONTAINER_QEMU_SSH_PRIVATE_KEY_PATH
+        ));
+    }
+
     if request.source_mode == SourceMode::RepoLocal {
         let repo_root = request
             .repo_root
@@ -267,6 +281,7 @@ impl PreparedBundle {
 
         let container_config =
             prepare_sensitive_mounts(&validated, &request.setup_document, &secrets_dir)?;
+        prepare_qemu_smoke_private_key(&secrets_dir)?;
         let config_path = tempdir.path().join(BUNDLE_CONFIG_NAME);
         fs::write(&config_path, container_config.to_native_toml()?.as_bytes())
             .context("failed to write native config bundle")?;
@@ -381,6 +396,35 @@ fn prepare_sensitive_mounts(
     }
 
     Ok(config)
+}
+
+fn prepare_qemu_smoke_private_key(secrets_dir: &Path) -> Result<()> {
+    let Some(host_path) = std::env::var_os("YGG_QEMU_SSH_PRIVATE_KEY") else {
+        return Ok(());
+    };
+
+    let source = PathBuf::from(host_path);
+    if !source.is_file() {
+        bail!("qemu smoke ssh private key not found: {}", source.display());
+    }
+
+    let target = secrets_dir.join("qemu-smoke-ssh-key");
+    fs::copy(&source, &target).with_context(|| {
+        format!(
+            "failed to copy qemu smoke ssh private key into bundle from {}",
+            source.display()
+        )
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&target)?.permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&target, permissions)?;
+    }
+
+    Ok(())
 }
 
 fn prepare_host_tools(tools_dir: &Path) -> Result<()> {

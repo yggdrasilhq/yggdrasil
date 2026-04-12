@@ -1221,7 +1221,7 @@ ExecStop=/usr/local/sbin/ygg-lxc-autostop
 
 # CAVEAT 3: Keep a generous but finite timeout so broken autostarts do not
 # stall boot forever.
-TimeoutSec=2min
+TimeoutSec=10min
 
 [Install]
 WantedBy=multi-user.target

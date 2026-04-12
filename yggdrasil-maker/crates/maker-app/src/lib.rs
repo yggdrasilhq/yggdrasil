@@ -123,14 +123,16 @@ impl MakerApp {
         );
         require_runtime_sensitive_inputs(&inputs.setup_document)?;
         let source_mode = source_mode_for_inputs(&inputs);
-        build_plan_for_request(&AppBuildRequest {
+        let mut plan = build_plan_for_request(&AppBuildRequest {
             app_version: env!("CARGO_PKG_VERSION").to_owned(),
             setup_document: inputs.setup_document,
             artifacts_dir: inputs.artifacts_dir,
             source_mode,
             repo_root: inputs.repo_root,
             skip_smoke: inputs.skip_smoke,
-        })
+        })?;
+        apply_host_docker_launcher(&mut plan);
+        Ok(plan)
     }
 
     pub fn run_build<F>(&self, inputs: BuildInputs, mut on_event: F) -> Result<BuildRunResult>
@@ -169,22 +171,13 @@ impl MakerApp {
     where
         F: FnMut(BuildEvent),
     {
+        let docker_launcher = resolve_docker_launcher()?;
         on_event(BuildEvent::StageStarted {
             stage: BuildStage::Preflight,
         });
 
-        if run_command_status("docker", [OsString::from("--version")]).is_err() {
-            let event = BuildEvent::Failure {
-                code: BuildErrorCode::DockerMissing,
-                message_key: "docker_missing".to_owned(),
-                detail: "docker is required for local Linux builds".to_owned(),
-            };
-            on_event(event.clone());
-            bail!(BuildFailure { event });
-        }
-
-        if run_command_status(
-            "docker",
+        if run_launcher_command_status(
+            &docker_launcher,
             [
                 OsString::from("image"),
                 OsString::from("inspect"),
@@ -209,8 +202,12 @@ impl MakerApp {
             stage: BuildStage::DockerRun,
         });
 
-        let mut command = ProcessCommand::new("docker");
-        command.args(plan.docker_command.iter().skip(1));
+        let mut command = launcher_process_command(&docker_launcher);
+        command.args(
+            plan.docker_command
+                .iter()
+                .skip(docker_command_skip_count(&plan)),
+        );
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
         let mut child = command
@@ -279,7 +276,7 @@ impl MakerApp {
         }
 
         let manifest = match read_artifact_manifest(&plan.host_artifact_manifest_path) {
-            Ok(manifest) => manifest,
+            Ok(manifest) => normalize_manifest_paths(manifest, &plan.artifacts_dir),
             Err(error) => {
                 let event = BuildEvent::Failure {
                     code: BuildErrorCode::ArtifactMissing,
@@ -564,6 +561,23 @@ fn artifact_record(
     })
 }
 
+fn normalize_manifest_paths(
+    mut manifest: ArtifactManifest,
+    host_artifacts_dir: &Path,
+) -> ArtifactManifest {
+    for artifact in &mut manifest.artifacts {
+        if let Some(file_name) = Path::new(&artifact.path)
+            .file_name()
+            .map(|value| value.to_owned())
+        {
+            if artifact.path.starts_with("/workspace/output/") {
+                artifact.path = host_artifacts_dir.join(file_name).display().to_string();
+            }
+        }
+    }
+    manifest
+}
+
 fn verify_manifest_paths(manifest: &ArtifactManifest) -> Result<()> {
     if manifest.artifacts.is_empty() {
         bail!("artifact manifest is empty");
@@ -580,11 +594,107 @@ fn verify_manifest_paths(manifest: &ArtifactManifest) -> Result<()> {
     Ok(())
 }
 
-fn run_command_status<I>(program: &str, args: I) -> Result<()>
+fn apply_host_docker_launcher(plan: &mut BuildPlan) {
+    if plan.mode != BuildMode::LocalDocker {
+        return;
+    }
+    let Ok(launcher) = resolve_docker_launcher() else {
+        return;
+    };
+    if launcher.len() == 1 && launcher.first() == Some(&OsString::from("docker")) {
+        return;
+    }
+    plan.docker_command = prepend_docker_launcher(&launcher, &plan.docker_command);
+}
+
+fn resolve_docker_launcher() -> Result<Vec<OsString>> {
+    let candidates = [
+        vec![OsString::from("docker")],
+        vec![
+            OsString::from("sudo"),
+            OsString::from("-n"),
+            OsString::from("docker"),
+        ],
+    ];
+
+    for candidate in candidates {
+        if run_launcher_command_status(
+            &candidate,
+            [
+                OsString::from("info"),
+                OsString::from("--format"),
+                OsString::from("{{.ServerVersion}}"),
+            ],
+        )
+        .is_ok()
+        {
+            return Ok(candidate);
+        }
+    }
+
+    let event = BuildEvent::Failure {
+        code: BuildErrorCode::DockerMissing,
+        message_key: "docker_missing".to_owned(),
+        detail: "docker daemon access is required for local Linux builds (direct docker or sudo -n docker)".to_owned(),
+    };
+    bail!(BuildFailure { event });
+}
+
+fn prepend_docker_launcher(launcher: &[OsString], docker_command: &[String]) -> Vec<String> {
+    if docker_command.is_empty() {
+        return launcher
+            .iter()
+            .map(|part| part.to_string_lossy().into_owned())
+            .collect();
+    }
+
+    let mut command = launcher
+        .iter()
+        .map(|part| part.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    if docker_command.first().is_some_and(|part| part == "docker") {
+        command.extend(docker_command.iter().skip(1).cloned());
+    } else {
+        command.extend(docker_command.iter().cloned());
+    }
+    command
+}
+
+fn docker_command_skip_count(plan: &BuildPlan) -> usize {
+    if plan
+        .docker_command
+        .first()
+        .is_some_and(|part| part == "sudo")
+    {
+        3
+    } else {
+        1
+    }
+}
+
+fn launcher_process_command(launcher: &[OsString]) -> ProcessCommand {
+    let mut command = ProcessCommand::new(
+        launcher
+            .first()
+            .map(|part| part.as_os_str())
+            .unwrap_or_else(|| "docker".as_ref()),
+    );
+    if launcher.len() > 1 {
+        command.args(launcher.iter().skip(1));
+    }
+    command
+}
+
+fn run_launcher_command_status<I>(launcher: &[OsString], args: I) -> Result<()>
 where
     I: IntoIterator<Item = OsString>,
 {
-    let status = ProcessCommand::new(program)
+    let program = launcher
+        .first()
+        .and_then(|part| part.to_str())
+        .unwrap_or("docker");
+    let mut command = launcher_process_command(launcher);
+    let status = command
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -670,5 +780,45 @@ mod tests {
 
         assert!(plan.host_artifact_manifest_path.is_file());
         assert!(manifest.artifacts.len() >= 3);
+    }
+    #[test]
+    fn normalize_manifest_paths_maps_container_outputs_to_host_artifact_dir() {
+        let manifest = ArtifactManifest {
+            app_version: "0.1.0".to_owned(),
+            setup_name: "Release Gate".to_owned(),
+            build_profile: BuildProfile::Both,
+            mode: BuildMode::LocalDocker,
+            source_mode: SourceMode::RepoLocal,
+            artifacts: vec![
+                ArtifactRecord {
+                    kind: ArtifactKind::Iso,
+                    profile: Some(BuildProfile::Server),
+                    path: "/workspace/output/server-latest.iso".to_owned(),
+                    sha256: "deadbeef".to_owned(),
+                    size_bytes: 1,
+                },
+                ArtifactRecord {
+                    kind: ArtifactKind::Iso,
+                    profile: Some(BuildProfile::Kde),
+                    path: "/workspace/output/kde-latest.iso".to_owned(),
+                    sha256: "feedface".to_owned(),
+                    size_bytes: 2,
+                },
+            ],
+        };
+        let normalized = normalize_manifest_paths(manifest, Path::new("/tmp/maker-artifacts"));
+        let paths = normalized
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            vec![
+                "/tmp/maker-artifacts/server-latest.iso",
+                "/tmp/maker-artifacts/kde-latest.iso",
+            ]
+        );
     }
 }

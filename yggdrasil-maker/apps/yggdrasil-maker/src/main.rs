@@ -4,7 +4,11 @@ use maker_app::{BuildInputs, MakerApp};
 use maker_build::{BuildErrorCode, BuildEvent, BuildMode};
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, PresetId};
+#[cfg(feature = "desktop-ui")]
+use std::path::Path;
 use std::path::PathBuf;
+#[cfg(feature = "desktop-ui")]
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "desktop-ui")]
 mod app_capture;
@@ -134,6 +138,8 @@ enum AppCommand {
     SetRightPanel(AppRightPanelArgs),
     SetAppearancePanel(AppBoolArgs),
     StartBuild(TimeoutArgs),
+    WaitBuild(AppWaitBuildArgs),
+    TraceTail(AppTraceTailArgs),
     OpenBuildDetails(TimeoutArgs),
     RevealPrimaryArtifact(TimeoutArgs),
 }
@@ -243,6 +249,26 @@ struct AppRightPanelArgs {
     mode: gui::RightPanelMode,
     #[arg(long, default_value_t = 8_000)]
     timeout_ms: u64,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppWaitBuildArgs {
+    #[arg(long, default_value_t = 900_000)]
+    timeout_ms: u64,
+    #[arg(long, default_value_t = 250)]
+    poll_ms: u64,
+    #[arg(long, default_value_t = 120)]
+    trace_lines: usize,
+    #[arg(long)]
+    allow_failure: bool,
+}
+
+#[cfg(feature = "desktop-ui")]
+#[derive(Args, Debug)]
+struct AppTraceTailArgs {
+    #[arg(long, default_value_t = 120)]
+    lines: usize,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -432,6 +458,7 @@ fn run_server_app(command: AppCommand) -> Result<()> {
         AppControlCommand, active_client_instance_records, default_recording_output_path,
         default_screenshot_output_path, request_app_control, resolve_home_dir,
     };
+    use yggterm_core::{event_trace_path, read_trace_tail};
 
     let home = resolve_home_dir()?;
     match command {
@@ -593,6 +620,33 @@ fn run_server_app(command: AppCommand) -> Result<()> {
             AppControlCommand::StartBuild,
             args.timeout_ms,
         )?),
+        AppCommand::WaitBuild(args) => {
+            let payload =
+                wait_for_build_snapshot(&home, args.timeout_ms, args.poll_ms, args.trace_lines)?;
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            let failed = payload
+                .get("build")
+                .and_then(|build| build.get("failed"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let timed_out = payload
+                .get("wait")
+                .and_then(|wait| wait.get("timed_out"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            if (failed || timed_out) && !args.allow_failure {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        AppCommand::TraceTail(args) => {
+            let payload = serde_json::json!({
+                "path": event_trace_path(&home),
+                "lines": read_trace_tail(&event_trace_path(&home), args.lines),
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            Ok(())
+        }
         AppCommand::OpenBuildDetails(args) => emit_app_response(request_app_control(
             &home,
             AppControlCommand::OpenBuildDetails,
@@ -610,6 +664,105 @@ fn run_server_app(command: AppCommand) -> Result<()> {
 fn emit_app_response(response: app_control::AppControlResponse) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&response)?);
     Ok(())
+}
+
+#[cfg(feature = "desktop-ui")]
+fn wait_for_build_snapshot(
+    home: &Path,
+    timeout_ms: u64,
+    poll_ms: u64,
+    trace_lines: usize,
+) -> Result<serde_json::Value> {
+    use app_control::{AppControlCommand, request_app_control};
+    use yggterm_core::{event_trace_path, read_trace_tail};
+
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(250));
+    let poll_duration = Duration::from_millis(poll_ms.max(50));
+    let target_pid = std::env::var("YGGDRASIL_MAKER_APP_PID")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok());
+    let mut saw_running = false;
+    let mut polls = 0_u64;
+    let mut last_error: Option<String> = None;
+    loop {
+        match request_app_control(home, AppControlCommand::DescribeState, 8_000) {
+            Ok(response) => {
+                polls += 1;
+                let handled_by_pid = response.handled_by_pid;
+                let state = response.data.unwrap_or_else(|| serde_json::json!({}));
+                let build = state
+                    .get("build")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let running = build
+                    .get("running")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                let status = build
+                    .get("status")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                let success = state.get("success").is_some_and(|value| !value.is_null());
+                let failed = status.to_ascii_lowercase().contains("failed");
+                if running {
+                    saw_running = true;
+                }
+                if success || failed || (!running && saw_running) {
+                    let trace_path = event_trace_path(home);
+                    return Ok(serde_json::json!({
+                        "wait": {
+                            "timed_out": false,
+                            "saw_running": saw_running,
+                            "polls": polls,
+                            "target_pid": target_pid,
+                            "handled_by_pid": handled_by_pid,
+                            "last_error": last_error,
+                        },
+                        "build": {
+                            "running": running,
+                            "status": status,
+                            "failed": failed,
+                            "succeeded": success,
+                        },
+                        "state": state,
+                        "trace": {
+                            "path": trace_path,
+                            "lines": read_trace_tail(&trace_path, trace_lines),
+                        }
+                    }));
+                }
+            }
+            Err(error) => {
+                last_error = Some(error.to_string());
+            }
+        }
+        if Instant::now() >= deadline {
+            let trace_path = event_trace_path(home);
+            return Ok(serde_json::json!({
+                "wait": {
+                    "timed_out": true,
+                    "saw_running": saw_running,
+                    "polls": polls,
+                    "target_pid": target_pid,
+                    "handled_by_pid": serde_json::Value::Null,
+                    "last_error": last_error,
+                },
+                "build": {
+                    "running": serde_json::Value::Null,
+                    "status": "",
+                    "failed": false,
+                    "succeeded": false,
+                },
+                "state": serde_json::Value::Null,
+                "trace": {
+                    "path": trace_path,
+                    "lines": read_trace_tail(&trace_path, trace_lines),
+                }
+            }));
+        }
+        std::thread::sleep(poll_duration);
+    }
 }
 
 fn load_build_inputs(app: &MakerApp, args: BuildInputArgs) -> Result<BuildInputs> {

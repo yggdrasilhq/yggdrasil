@@ -15,6 +15,7 @@ const APP_CONTROL_RESPONSES_DIR: &str = "app-control-responses";
 const APP_CONTROL_CAPTURES_DIR: &str = "screenshots";
 const APP_CONTROL_RECORDINGS_DIR: &str = "recordings";
 const CLIENT_INSTANCES_DIR: &str = "client-instances";
+const APP_CONTROL_TARGET_PID_ENV: &str = "YGGDRASIL_MAKER_APP_PID";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -428,12 +429,22 @@ pub fn request_app_control(
 
 fn ensure_live_client_pid(home: &Path, timeout_ms: u64) -> Result<Option<u32>> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(750).max(100));
+    let targeted_pid = std::env::var(APP_CONTROL_TARGET_PID_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok());
     loop {
         let records = active_client_instance_records(home)?;
-        if let Some(record) = records.first() {
+        if let Some(pid) = targeted_pid {
+            if records.iter().any(|record| record.pid == pid) {
+                return Ok(Some(pid));
+            }
+        } else if let Some(record) = records.first() {
             return Ok(Some(record.pid));
         }
         if Instant::now() >= deadline {
+            if let Some(pid) = targeted_pid {
+                bail!("targeted Yggdrasil Maker GUI client is not live for app control: {pid}");
+            }
             bail!("no live Yggdrasil Maker GUI client is registered for app control");
         }
         thread::sleep(Duration::from_millis(40));

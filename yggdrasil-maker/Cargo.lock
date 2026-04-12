@@ -5625,6 +5625,7 @@ name = "yggdrasil-maker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cairo-rs",
  "clap",
  "dioxus",
  "dioxus-desktop",
@@ -5641,6 +5642,8 @@ dependencies = [
  "serde_json",
  "tao",
  "tokio",
+ "webkit2gtk",
+ "wry",
  "yggterm-core",
  "yggterm-platform",
  "yggui",
@@ -5649,7 +5652,7 @@ dependencies = [
 
 [[package]]
 name = "yggterm-core"
-version = "2.1.4"
+version = "2.1.5"
 dependencies = [
  "anyhow",
  "dirs",
@@ -5670,7 +5673,7 @@ dependencies = [
 
 [[package]]
 name = "yggterm-platform"
-version = "2.1.4"
+version = "2.1.5"
 dependencies = [
  "anyhow",
  "objc2",
@@ -5679,7 +5682,7 @@ dependencies = [
 
 [[package]]
 name = "yggui"
-version = "2.1.4"
+version = "2.1.5"
 dependencies = [
  "anyhow",
  "base64",
@@ -5703,7 +5706,7 @@ dependencies = [
 
 [[package]]
 name = "yggui-contract"
-version = "2.1.4"
+version = "2.1.5"
 dependencies = [
  "serde",
 ]

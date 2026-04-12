@@ -8,6 +8,7 @@ license.workspace = true
 [features]
 default = []
 desktop-ui = [
+  "dep:cairo-rs",
   "dep:dioxus",
   "dep:dioxus-desktop",
   "dep:gdk-pixbuf",
@@ -16,7 +17,9 @@ desktop-ui = [
   "dep:once_cell",
   "dep:png",
   "dep:tao",
+  "dep:webkit2gtk",
   "dep:tokio",
+  "dep:wry",
   "dep:yggterm-core",
   "dep:yggterm-platform",
   "dep:yggui-contract",
@@ -29,6 +32,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+cairo-rs = { version = "0.18.5", features = ["png"], optional = true }
 clap.workspace = true
 maker-app = { path = "../../crates/maker-app" }
 maker-build = { path = "../../crates/maker-build" }
@@ -45,6 +49,8 @@ serde.workspace = true
 serde_json.workspace = true
 tao = { version = "0.34.6", optional = true }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
+webkit2gtk = { version = "=2.0.1", features = ["v2_38"], optional = true }
+wry = { version = "0.53.5", optional = true }
 yggterm-core = { path = "../../../../yggterm/crates/yggterm-core", optional = true }
 yggterm-platform = { path = "../../../../yggterm/crates/yggterm-platform", optional = true }
 yggui-contract = { path = "../../../../yggterm/crates/yggui-contract", optional = true }

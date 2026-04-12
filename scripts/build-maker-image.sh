@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required to build the yggdrasil-maker image" >&2
+docker_cmd=()
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  docker_cmd=(docker)
+elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+  docker_cmd=(sudo -n docker)
+else
+  echo "docker daemon access is required to build the yggdrasil-maker image" >&2
   exit 1
 fi
 
@@ -24,7 +29,7 @@ fi
 
 image_ref="${1:-ghcr.io/yggdrasilhq/yggdrasil-maker-build:v${version}}"
 
-docker build \
+"${docker_cmd[@]}" build \
   -f docker/yggdrasil-maker-build.Dockerfile \
   -t "$image_ref" \
   .
