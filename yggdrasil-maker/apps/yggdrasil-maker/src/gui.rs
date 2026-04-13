@@ -861,17 +861,6 @@ fn app() -> Element {
                 }
                 "Truth"
             }
-            button {
-                style: primary_button_style(&accent),
-                disabled: snapshot.build_running,
-                onmousedown: |evt| evt.stop_propagation(),
-                ondoubleclick: |evt| evt.stop_propagation(),
-                onclick: move |_| start_build(state),
-                if snapshot.alt_overlay_active {
-                    span { style: shortcut_badge_style(), "B" }
-                }
-                if snapshot.build_running { "{launch_running_label()}" } else { "{launch_action_label()}" }
-            }
             div { style: "flex:1; min-width:14px; max-width:26px; height:28px;" }
             WindowControlsStrip {
                 palette: chrome_palette,
@@ -1000,11 +989,10 @@ fn app() -> Element {
                                                     div {
                                                         style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
                                                         span { style: "font-size:13px; font-weight:700; color:var(--maker-text-strong); text-align:left;", "{sidebar_setup_primary(&summary.name)}" }
-                                                        span { style: format!("font-size:10px; font-weight:800; color:{};", accent), "{summary.journey_stage.label()}" }
                                                     }
                                                     div {
                                                         style: "font-size:11px; color:var(--maker-muted); text-align:left;",
-                                                        "{sidebar_setup_secondary(&summary.name, &summary.slug)}"
+                                                        "{sidebar_setup_secondary(&summary.name, &summary.slug)}{sidebar_stage_suffix(summary.journey_stage)}"
                                                     }
                                                 }
                                             }
@@ -1180,7 +1168,7 @@ fn app() -> Element {
                                                 muted_color: "#7d8fa4".to_owned(),
                                             }
                                             div {
-                                                style: status_card_style(),
+                                                style: rail_status_card_style(),
                                                 div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "{snapshot.build_status}" }
                                                 div { style: "font-size:11px; color:var(--maker-status-muted);", "{build_summary(&snapshot)}" }
                                             }
@@ -1196,7 +1184,7 @@ fn app() -> Element {
                                             }
                                             if snapshot.build_log.is_empty() {
                                                 div {
-                                                    style: empty_note_style(),
+                                                    style: rail_empty_note_style(),
                                                     "Logs will appear here once the build starts."
                                                 }
                                             } else {
@@ -1537,7 +1525,7 @@ fn StudioCanvas(
                         }
                     }
                     div {
-                        style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
+                        style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:flex-end;",
                         button {
                             style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
@@ -1576,15 +1564,15 @@ fn StudioCanvas(
                             }
                         }
                         div {
-                            style: proof_stack_style(),
+                            style: info_stack_style(),
                             div { style: label_style(), "Launch" }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "OS path" } span { style: stat_value_style(), "{build_mode_label()}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Truth rail" } span { style: stat_value_style(), "Structured logs and manifest stay on the right." } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "After build" } span { style: stat_value_style(), "Dedicated success handoff with artifact actions." } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "OS path" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "Truth rail" } span { style: stat_value_style(), "Structured logs and manifest stay on the right." } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "After build" } span { style: stat_value_style(), "Dedicated success handoff with artifact actions." } }
                         }
                     }
                     div {
-                        style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
+                        style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:flex-end;",
                         button {
                             style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
@@ -2659,6 +2647,10 @@ fn sidebar_setup_secondary(name: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_owned())
 }
 
+fn sidebar_stage_suffix(stage: JourneyStage) -> String {
+    format!(" · {}", stage.label())
+}
+
 fn latest_result_summary(state: &MakerUiState) -> String {
     if let Some(success) = state.success_state.as_ref() {
         format!("{} at {}", success.artifact_name, success.output_path)
@@ -2926,7 +2918,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
             "--maker-accent:{accent};\
              --maker-accent-soft:color-mix(in srgb, {accent} 16%, transparent);\
              --maker-titlebar-text:#ecf4fb;\
-             --maker-titlebar-muted:#9db1c3;\
+             --maker-titlebar-muted:#b7c8d8;\
              --maker-titlebar-field-bg:rgba(29,37,46,0.74);\
              --maker-titlebar-field-border:rgba(123,145,165,0.32);\
              --maker-hero-title:#f3f8fc;\
@@ -2986,7 +2978,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-titlebar-field-bg:rgba(255,255,255,0.90);\
              --maker-titlebar-field-border:rgba(188,204,220,0.60);\
              --maker-hero-title:#1f3347;\
-             --maker-hero-copy:#4f6479;\
+             --maker-hero-copy:#405568;\
              --maker-section-title:#1f3346;\
              --maker-text-strong:#294158;\
              --maker-copy:#52677d;\
@@ -3185,13 +3177,13 @@ fn stage_banner_style(compact: bool) -> &'static str {
 fn stage_pill_style(active: bool, complete: bool, accent: &str) -> String {
     if active {
         format!(
-            "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 22px rgba(94,134,190,0.20);",
-            accent
+            "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:12px 12px 9px 9px; background:color-mix(in srgb, {} 14%, var(--maker-section-bg)); color:var(--maker-text-strong); font-size:11px; font-weight:800; box-shadow:inset 0 -2px 0 {}, inset 0 0 0 1px var(--maker-card-border);",
+            accent, accent
         )
     } else if complete {
-        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:var(--maker-stage-complete-bg); color:var(--maker-stage-complete-text); font-size:11px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-card-border);".to_owned()
+        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:12px 12px 9px 9px; background:var(--maker-stage-complete-bg); color:var(--maker-stage-complete-text); font-size:11px; font-weight:800; box-shadow:inset 0 -1px 0 var(--maker-card-border), inset 0 0 0 1px var(--maker-card-border);".to_owned()
     } else {
-        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:var(--maker-stage-inactive-bg); color:var(--maker-stage-inactive-text); font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-card-border);".to_owned()
+        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:12px 12px 9px 9px; background:var(--maker-stage-inactive-bg); color:var(--maker-stage-inactive-text); font-size:11px; font-weight:700; box-shadow:inset 0 -1px 0 var(--maker-card-border), inset 0 0 0 1px var(--maker-card-border);".to_owned()
     }
 }
 
@@ -3267,6 +3259,14 @@ fn proof_stack_style() -> &'static str {
     "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:18px; background:var(--maker-proof-bg); box-shadow:inset 0 0 0 1px var(--maker-proof-border);"
 }
 
+fn info_stack_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:8px; padding:10px 0 0 0;"
+}
+
+fn info_row_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:6px; padding:12px 2px 12px 2px; border-radius:0; background:transparent; box-shadow:inset 0 -1px 0 var(--maker-card-border);"
+}
+
 fn identity_preview_style() -> &'static str {
     "display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:20px; background:linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 86%, white) 0%, var(--maker-section-bg) 100%); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border);"
 }
@@ -3306,6 +3306,10 @@ fn empty_note_style() -> &'static str {
     "padding:12px 13px; border-radius:12px; background:var(--maker-empty-bg); color:var(--maker-muted); font-size:12px; line-height:1.58; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
 }
 
+fn rail_empty_note_style() -> &'static str {
+    "padding:10px 12px; border-radius:12px; background:transparent; color:var(--maker-muted); font-size:12px; line-height:1.5; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
+}
+
 fn pre_panel_style() -> &'static str {
     "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:var(--maker-panel-bg); color:var(--maker-panel-text); font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px var(--maker-panel-border);"
 }
@@ -3316,6 +3320,10 @@ fn appearance_panel_style() -> &'static str {
 
 fn status_card_style() -> &'static str {
     "display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:14px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border);"
+}
+
+fn rail_status_card_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:3px; padding:10px 12px; border-radius:12px; background:transparent; box-shadow:inset 0 0 0 1px var(--maker-status-border);"
 }
 
 fn success_stat_style() -> &'static str {
