@@ -1040,6 +1040,10 @@ fn app() -> Element {
                                         }
                                     }
                                 }
+                                div {
+                                    style: "position:absolute; left:0; right:0; bottom:0; height:30px; pointer-events:none; \
+                                        background:linear-gradient(180deg, rgba(255,255,255,0) 0%, color-mix(in srgb, var(--maker-section-bg) 82%, transparent) 100%);"
+                                }
                             }
                         }
                     }
@@ -2918,7 +2922,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
             "--maker-accent:{accent};\
              --maker-accent-soft:color-mix(in srgb, {accent} 16%, transparent);\
              --maker-titlebar-text:#ecf4fb;\
-             --maker-titlebar-muted:#b7c8d8;\
+             --maker-titlebar-muted:#c8d4e0;\
              --maker-titlebar-field-bg:rgba(29,37,46,0.74);\
              --maker-titlebar-field-border:rgba(123,145,165,0.32);\
              --maker-hero-title:#f3f8fc;\
@@ -2926,7 +2930,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-section-title:#eef5fb;\
              --maker-text-strong:#ebf3fb;\
              --maker-copy:#bacada;\
-             --maker-muted:#8fa3b7;\
+             --maker-muted:#a9b8c8;\
              --maker-note:#97abbe;\
              --maker-label:#8fa8bc;\
              --maker-stat-label:#8ca3b8;\
@@ -2952,14 +2956,14 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-panel-text:#deebf7;\
              --maker-secondary-bg:rgba(255,255,255,0.06);\
              --maker-secondary-border:rgba(161,179,196,0.24);\
-             --maker-secondary-text:#dce8f3;\
+             --maker-secondary-text:#e2edf7;\
              --maker-tertiary-bg:transparent;\
              --maker-tertiary-border:rgba(161,179,196,0.22);\
              --maker-tertiary-text:#bfd1e3;\
              --maker-stage-complete-bg:rgba(255,255,255,0.08);\
-             --maker-stage-complete-text:#dce8f3;\
-             --maker-stage-inactive-bg:rgba(255,255,255,0.04);\
-             --maker-stage-inactive-text:#9eb3c6;\
+             --maker-stage-complete-text:#e2edf7;\
+             --maker-stage-inactive-bg:rgba(255,255,255,0.08);\
+             --maker-stage-inactive-text:#d2deea;\
              --maker-rail-selected-bg:rgba(255,255,255,0.10);\
              --maker-rail-selected-border:rgba(128,154,178,0.34);\
              --maker-rail-card-bg:rgba(22,29,36,0.72);\
@@ -3073,7 +3077,7 @@ fn shell_surface_style(
 }
 
 fn left_rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; background:transparent;"
+    "display:flex; flex-direction:column; position:relative; height:100%; background:transparent; overflow:hidden;"
 }
 
 fn right_rail_container_style() -> &'static str {
@@ -3128,7 +3132,7 @@ fn utility_button_style(active: bool) -> String {
 fn titlebar_icon_button_style(active: bool) -> String {
     format!(
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
-         background:{}; color:{}; font-size:14px; font-weight:700; box-shadow:{};",
+         background:{}; color:{}; opacity:{}; font-size:15px; font-weight:800; box-shadow:{};",
         if active {
             "var(--maker-secondary-bg)"
         } else {
@@ -3143,7 +3147,8 @@ fn titlebar_icon_button_style(active: bool) -> String {
             "inset 0 0 0 1px var(--maker-secondary-border)"
         } else {
             "none"
-        }
+        },
+        if active { "1" } else { "0.92" }
     )
 }
 
@@ -3158,7 +3163,7 @@ fn titlebar_center_field_style() -> &'static str {
 fn utility_tab_style(selected: bool, accent: &str) -> String {
     if selected {
         format!(
-            "flex:1; height:30px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:700;",
+            "flex:1; height:30px; border:none; border-radius:10px; background:var(--maker-card-bg); color:var(--maker-text-strong); font-size:11px; font-weight:700; box-shadow:inset 0 -2px 0 {}, inset 0 0 0 1px var(--maker-card-border);",
             accent
         )
     } else {
@@ -3168,9 +3173,9 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
 
 fn stage_banner_style(compact: bool) -> &'static str {
     if compact {
-        "padding:16px 20px 18px 20px; border-radius:28px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "padding:20px 20px 18px 20px; border-radius:28px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
     } else {
-        "padding:20px 22px 20px 22px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "padding:24px 22px 20px 22px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
     }
 }
 
@@ -3264,7 +3269,7 @@ fn info_stack_style() -> &'static str {
 }
 
 fn info_row_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:12px 2px 12px 2px; border-radius:0; background:transparent; box-shadow:inset 0 -1px 0 var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:8px; padding:14px 2px 14px 2px; border-radius:0; background:transparent; box-shadow:inset 0 -1px 0 var(--maker-card-border);"
 }
 
 fn identity_preview_style() -> &'static str {
@@ -3323,7 +3328,7 @@ fn status_card_style() -> &'static str {
 }
 
 fn rail_status_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:3px; padding:10px 12px; border-radius:12px; background:transparent; box-shadow:inset 0 0 0 1px var(--maker-status-border);"
+    "display:flex; flex-direction:column; gap:5px; padding:12px 12px 11px 12px; border-radius:12px; background:transparent; box-shadow:inset 0 0 0 1px var(--maker-status-border);"
 }
 
 fn success_stat_style() -> &'static str {
