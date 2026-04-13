@@ -14,6 +14,7 @@ use dioxus_desktop::wry::WebViewExtUnix;
 use tao::platform::macos::WindowExtMacOS;
 #[cfg(target_os = "linux")]
 use webkit2gtk::{SnapshotOptions, SnapshotRegion, WebViewExt};
+#[cfg(target_os = "linux")]
 use yggterm_platform::capture_linux_x11_window_screenshot;
 #[cfg(target_os = "macos")]
 use yggterm_platform::{capture_macos_window_recording, capture_macos_window_screenshot};

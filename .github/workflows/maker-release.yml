@@ -28,11 +28,10 @@ jobs:
           - os: ubuntu-latest
             label: linux-x86_64
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             label: linux-aarch64
             target: aarch64-unknown-linux-gnu
-            linker: aarch64-linux-gnu-gcc
-          - os: macos-latest
+          - os: macos-15-intel
             label: macos-x86_64
             target: x86_64-apple-darwin
           - os: macos-latest
@@ -41,7 +40,7 @@ jobs:
           - os: windows-latest
             label: windows-x86_64
             target: x86_64-pc-windows-msvc
-          - os: windows-latest
+          - os: windows-11-arm
             label: windows-aarch64
             target: aarch64-pc-windows-msvc
 
@@ -98,7 +97,6 @@ jobs:
       - name: Package native release asset
         shell: bash
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
           YGGDRASIL_MAKER_CARGO_FEATURES: desktop-ui
         run: |
           ./scripts/package-maker-platform-release.sh "${{ matrix.label }}" "${{ matrix.target }}"
