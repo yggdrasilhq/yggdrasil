@@ -759,13 +759,10 @@ fn app() -> Element {
         snapshot.shell_settings.theme,
         &snapshot.shell_settings.yggui_theme,
     );
-    let chrome_palette = chrome_palette();
-    let toast_palette = ToastPalette {
-        text: "#315066",
-        muted: "#6b7b8d",
-        accent: "#5fa8ff",
-        is_dark: false,
-    };
+    let is_dark = is_dark_theme(snapshot.shell_settings.theme);
+    let chrome_palette = chrome_palette(is_dark, &accent);
+    let toast_palette = toast_palette(is_dark, &accent);
+    let theme_vars = theme_css_variables(snapshot.shell_settings.theme, &accent);
 
     let titlebar_left = rsx! {
         div {
@@ -802,11 +799,11 @@ fn app() -> Element {
                     div {
                         style: "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-width:0;",
                         span {
-                            style: "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; color:#30465d; text-align:left;",
-                            "{snapshot.current_setup.setup.name}"
+                            style: "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; color:var(--maker-titlebar-text); text-align:left;",
+                            "{sidebar_setup_primary(&snapshot.current_setup.setup.name)}"
                         }
                         span {
-                            style: "flex:0 0 auto; font-size:10px; color:#6e8398; white-space:nowrap;",
+                            style: "flex:0 0 auto; font-size:10px; color:var(--maker-titlebar-muted); white-space:nowrap;",
                             "{snapshot.current_setup.setup.preset.slug()} • {profile_title_label(snapshot.current_setup.setup.profile_override.unwrap_or_else(|| snapshot.current_setup.setup.preset.recommended_profile()))}"
                         }
                     }
@@ -825,11 +822,11 @@ fn app() -> Element {
                     "Stage: {snapshot.current_setup.journey_stage.label()}"
                 }
                 span {
-                    style: "font-size:11px; font-weight:700; color:#53687f; white-space:nowrap;",
+                    style: "font-size:11px; font-weight:700; color:var(--maker-titlebar-text); white-space:nowrap;",
                     "{snapshot.current_setup.setup.profile_override.unwrap_or_else(|| snapshot.current_setup.setup.preset.recommended_profile())}"
                 }
                 span {
-                    style: "font-size:11px; color:#6c8197; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                    style: "font-size:11px; color:var(--maker-titlebar-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
                     "{titlebar_status_text(&snapshot)}"
                 }
             }
@@ -873,11 +870,7 @@ fn app() -> Element {
                 if snapshot.alt_overlay_active {
                     span { style: shortcut_badge_style(), "B" }
                 }
-                if snapshot.build_running {
-                    "Building…"
-                } else {
-                    "Build"
-                }
+                if snapshot.build_running { "{launch_running_label()}" } else { "{launch_action_label()}" }
             }
             div { style: "flex:1; min-width:14px; max-width:26px; height:28px;" }
             WindowControlsStrip {
@@ -921,8 +914,8 @@ fn app() -> Element {
                 evt.stop_propagation();
             },
             style: format!(
-                "position:relative; width:100vw; height:100vh; overflow:hidden; background:transparent; font-family:{};",
-                UI_FONT_FAMILY,
+                "position:relative; width:100vw; height:100vh; overflow:hidden; background:transparent; font-family:{}; {};",
+                UI_FONT_FAMILY, theme_vars,
             ),
             if !snapshot.maximized {
                 WindowResizeHandles {}
@@ -996,7 +989,7 @@ fn app() -> Element {
                                             "New Setup"
                                         }
                                         div {
-                                            style: "display:flex; flex-direction:column; gap:8px;",
+                                            style: "display:flex; flex-direction:column; gap:10px;",
                                             for summary in snapshot.saved_setups.iter().cloned() {
                                                 button {
                                                     style: rail_setup_card_style(summary.setup_id == snapshot.current_setup.setup_id),
@@ -1006,12 +999,12 @@ fn app() -> Element {
                                                     },
                                                     div {
                                                         style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                                                        span { style: "font-size:13px; font-weight:700; color:#314a63; text-align:left;", "{summary.name}" }
+                                                        span { style: "font-size:13px; font-weight:700; color:var(--maker-text-strong); text-align:left;", "{sidebar_setup_primary(&summary.name)}" }
                                                         span { style: format!("font-size:10px; font-weight:800; color:{};", accent), "{summary.journey_stage.label()}" }
                                                     }
                                                     div {
-                                                        style: "font-size:11px; color:#73869a; text-align:left;",
-                                                        "{summary.slug}"
+                                                        style: "font-size:11px; color:var(--maker-muted); text-align:left;",
+                                                        "{sidebar_setup_secondary(&summary.name, &summary.slug)}"
                                                     }
                                                 }
                                             }
@@ -1030,7 +1023,7 @@ fn app() -> Element {
                                                 },
                                                 span { "Recent Artifacts" }
                                                 span {
-                                                    style: "font-size:11px; color:#70859b;",
+                                                    style: "font-size:11px; color:var(--maker-muted);",
                                                     if snapshot.recent_artifacts_expanded { "▾" } else { "▸" }
                                                 }
                                             }
@@ -1050,8 +1043,8 @@ fn app() -> Element {
                                                                     let _ = reveal_path(&path);
                                                                 }
                                                             },
-                                                            div { style: "font-size:12px; font-weight:700; color:#334d66; text-align:left;", "{artifact.title}" }
-                                                            div { style: "font-size:11px; color:#73869a; text-align:left;", "{artifact.subtitle}" }
+                                                            div { style: "font-size:12px; font-weight:700; color:var(--maker-text-strong); text-align:left;", "{artifact.title}" }
+                                                            div { style: "font-size:11px; color:var(--maker-muted); text-align:left;", "{artifact.subtitle}" }
                                                         }
                                                     }
                                                 }
@@ -1188,8 +1181,8 @@ fn app() -> Element {
                                             }
                                             div {
                                                 style: status_card_style(),
-                                                div { style: "font-size:12px; font-weight:700; color:#30475f;", "{snapshot.build_status}" }
-                                                div { style: "font-size:11px; color:#7b8da1;", "{build_summary(&snapshot)}" }
+                                                div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "{snapshot.build_status}" }
+                                                div { style: "font-size:11px; color:var(--maker-status-muted);", "{build_summary(&snapshot)}" }
                                             }
                                             if !snapshot.build_result.trim().is_empty() {
                                                 RailSectionTitle {
@@ -1303,17 +1296,17 @@ fn StudioCanvas(
                 }
                 h1 {
                     style: if hero_compact {
-                        "margin:8px 0 6px 0; font-size:30px; line-height:1.08; color:#1f3347;"
+                        "margin:8px 0 6px 0; font-size:30px; line-height:1.08; color:var(--maker-hero-title);"
                     } else {
-                        "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:#1f3347;"
+                        "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:var(--maker-hero-title);"
                     },
                     "{stage_title}"
                 }
                 p {
                     style: if hero_compact {
-                        "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:#4f6479;"
+                        "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:var(--maker-hero-copy);"
                     } else {
-                        "margin:0; max-width:720px; font-size:14px; line-height:1.7; color:#4f6479;"
+                        "margin:0; max-width:720px; font-size:14px; line-height:1.7; color:var(--maker-hero-copy);"
                     },
                     "{stage_copy}"
                 }
@@ -1350,7 +1343,7 @@ fn StudioCanvas(
                             p { style: section_copy_style(), "Pick the machine you are trying to make real. The selected intent should feel concrete before you move deeper into the build." }
                         }
                         div {
-                            style: "font-size:11px; font-weight:700; color:#6f8398;",
+                            style: "font-size:11px; font-weight:700; color:var(--maker-note);",
                             "Choose once, then tune posture and identity."
                         }
                     }
@@ -1364,11 +1357,11 @@ fn StudioCanvas(
                                 span { style: format!("font-size:10px; font-weight:800; color:{};", accent), "{selected_profile.slug()}" }
                             }
                             h3 {
-                                style: "margin:0; font-size:28px; line-height:1.04; color:#1f3347;",
+                                style: "margin:0; font-size:28px; line-height:1.04; color:var(--maker-section-title);",
                                 "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}"
                             }
                             p {
-                                style: "margin:0; font-size:14px; line-height:1.72; color:#4e647a;",
+                                style: "margin:0; font-size:14px; line-height:1.72; color:var(--maker-copy);",
                                 "{selected_preset.map(|card| card.summary).unwrap_or(\"No preset copy available.\")}"
                             }
                             div {
@@ -1391,11 +1384,11 @@ fn StudioCanvas(
                                     onclick: move |_| on_apply_preset.call(card.id),
                                     div {
                                         style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                                        span { style: "font-size:14px; font-weight:700; color:#294158;", "{card.title}" }
+                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "{card.title}" }
                                         span { style: "font-size:10px; font-weight:800; color:#7ab8ff;", "{card.recommended_profile.slug()}" }
                                     }
                                     p {
-                                        style: "margin:0; font-size:12px; line-height:1.6; color:#62788e;",
+                                        style: "margin:0; font-size:12px; line-height:1.6; color:var(--maker-copy);",
                                         "{card.summary}"
                                     }
                                 }
@@ -1487,8 +1480,8 @@ fn StudioCanvas(
                         div {
                             style: identity_preview_style(),
                             div { style: label_style(), "Identity preview" }
-                            h3 { style: "margin:0; font-size:24px; line-height:1.08; color:#1f3347;", "{state.current_setup.setup.personalization.hostname}" }
-                            p { style: "margin:0; font-size:13px; line-height:1.65; color:#5a7085;", "This is the machine identity that will carry through the emitted native config and the saved setup story." }
+                            h3 { style: "margin:0; font-size:24px; line-height:1.08; color:var(--maker-section-title);", "{state.current_setup.setup.personalization.hostname}" }
+                            p { style: "margin:0; font-size:13px; line-height:1.65; color:var(--maker-copy);", "This is the machine identity that will carry through the emitted native config and the saved setup story." }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Setup slug" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Journey" } span { style: stat_value_style(), "{current_stage.label()}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Artifacts root" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
@@ -1538,22 +1531,22 @@ fn StudioCanvas(
                             div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
                             div {
                                 style: status_card_style(),
-                                div { style: "font-size:12px; font-weight:700; color:#30475f;", "{state.build_status}" }
-                                div { style: "font-size:11px; color:#7b8da1;", "Save the setup, then continue into Build when the right rail looks truthful." }
+                                div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "{state.build_status}" }
+                                div { style: "font-size:11px; color:var(--maker-status-muted);", "Save the setup, then continue into Launch when the right rail looks truthful." }
                             }
                         }
                     }
                     div {
                         style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
                         button {
-                            style: secondary_button_style(),
+                            style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
                             "Save Setup"
                         }
                         button {
                             style: primary_button_style(&accent),
                             onclick: move |_| on_set_stage.call(JourneyStage::Build),
-                            "Continue to Build"
+                            "Continue to Launch"
                         }
                     }
                 }
@@ -1566,7 +1559,7 @@ fn StudioCanvas(
                         style: build_split_style,
                         div {
                             style: "display:flex; flex-direction:column; gap:14px;",
-                            h2 { style: section_title_style(), "Build" }
+                            h2 { style: section_title_style(), "Launch" }
                             p { style: section_copy_style(), "Launch the local Docker build on Linux, or export the truthful handoff bundle on the other platforms. Raw logs stay in Shell Truth; the main canvas stays focused on the outcome." }
                             div {
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
@@ -1577,8 +1570,8 @@ fn StudioCanvas(
                             if !state.build_result.trim().is_empty() {
                                 div {
                                     style: status_card_style(),
-                                    div { style: "font-size:12px; font-weight:700; color:#30475f;", "Latest result" }
-                                    div { style: "font-size:11px; line-height:1.6; color:#677b90;", "{latest_result_summary(&state)}" }
+                                    div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Latest result" }
+                                    div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{latest_result_summary(&state)}" }
                                 }
                             }
                         }
@@ -1593,7 +1586,7 @@ fn StudioCanvas(
                     div {
                         style: "display:flex; flex-wrap:wrap; gap:12px; align-items:center;",
                         button {
-                            style: secondary_button_style(),
+                            style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
                             "Save Setup"
                         }
@@ -1601,7 +1594,7 @@ fn StudioCanvas(
                             style: primary_button_style(&accent),
                             disabled: state.build_running,
                             onclick: move |_| on_build.call(()),
-                            if state.build_running { "Building…" } else { "Build / Export" }
+                            if state.build_running { "{launch_running_label()}" } else { "{launch_action_label()}" }
                         }
                     }
                 }
@@ -1650,14 +1643,14 @@ fn StudioCanvas(
                 style: stage_footer_bar_style(),
                 div {
                     style: "display:flex; flex-direction:column; gap:4px;",
-                    div { style: "font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#6f8498;", "Next move" }
-                    div { style: "font-size:13px; color:#52677d;", "{stage_footer_copy(current_stage)}" }
+                    div { style: "font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:var(--maker-note);", "Next move" }
+                    div { style: "font-size:13px; color:var(--maker-copy);", "{stage_footer_copy(current_stage)}" }
                 }
                 div {
                     style: "display:flex; flex-wrap:wrap; gap:10px;",
                     if let Some(stage) = previous_stage {
                         button {
-                            style: secondary_button_style(),
+                            style: tertiary_button_style(),
                             onclick: move |_| on_set_stage.call(stage),
                             "Back to {stage.label()}"
                         }
@@ -1689,7 +1682,7 @@ fn SuccessScreen(
             style: "display:flex; flex-direction:column; gap:18px; max-width:920px; margin:0 auto;",
             div {
                 style: format!(
-                    "{} padding:34px 34px 36px 34px; border-radius:30px; box-shadow:0 28px 70px rgba(82,104,130,0.19), inset 0 0 0 1px rgba(255,255,255,0.66);",
+                    "{} padding:34px 34px 36px 34px; border-radius:30px; box-shadow:0 28px 70px rgba(82,104,130,0.19), inset 0 0 0 1px var(--maker-section-border);",
                     preview_surface
                 ),
                 div {
@@ -1697,11 +1690,11 @@ fn SuccessScreen(
                     "SUCCESS"
                 }
                 h1 {
-                    style: "margin:10px 0 8px 0; font-size:42px; line-height:1.02; color:#213548;",
+                    style: "margin:10px 0 8px 0; font-size:42px; line-height:1.02; color:var(--maker-section-title);",
                     "{success.title}"
                 }
                 p {
-                    style: "margin:0 0 18px 0; max-width:700px; font-size:15px; line-height:1.7; color:#566b81;",
+                    style: "margin:0 0 18px 0; max-width:700px; font-size:15px; line-height:1.7; color:var(--maker-copy);",
                     "{success.proof}"
                 }
                 div {
@@ -1714,7 +1707,7 @@ fn SuccessScreen(
                     style: "display:flex; flex-wrap:wrap; gap:12px;",
                     button { style: primary_button_style(&accent), onclick: move |_| on_reveal.call(()), "Reveal Artifact" }
                     button { style: secondary_button_style(), onclick: move |_| on_open_details.call(()), "Open Build Details" }
-                    button { style: secondary_button_style(), onclick: move |_| on_start_another.call(()), "Start Another Setup" }
+                    button { style: tertiary_button_style(), onclick: move |_| on_start_another.call(()), "Start Another Setup" }
                 }
             }
         }
@@ -1744,7 +1737,7 @@ fn AppearancePanel(
                             "APPEARANCE"
                         }
                         div {
-                            style: "font-size:13px; color:#5d7288; line-height:1.5;",
+                            style: "font-size:13px; color:var(--maker-copy); line-height:1.5;",
                             "Keep shell controls out of the titlebar, but keep the shared Ygg look easy to reach."
                         }
                     }
@@ -2626,6 +2619,46 @@ fn build_mode_label() -> &'static str {
     }
 }
 
+fn launch_action_label() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Run Build",
+        _ => "Export Bundle",
+    }
+}
+
+fn launch_running_label() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Building…",
+        _ => "Exporting…",
+    }
+}
+
+fn split_release_suffix(name: &str) -> Option<(&str, &str)> {
+    let (prefix, suffix) = name.rsplit_once(' ')?;
+    let bytes = suffix.as_bytes();
+    if bytes.len() != 15 || bytes[8] != b'-' {
+        return None;
+    }
+    let is_digits = |slice: &[u8]| slice.iter().all(|byte| byte.is_ascii_digit());
+    if is_digits(&bytes[..8]) && is_digits(&bytes[9..]) {
+        Some((prefix, suffix))
+    } else {
+        None
+    }
+}
+
+fn sidebar_setup_primary(name: &str) -> String {
+    split_release_suffix(name)
+        .map(|(prefix, _)| prefix.to_owned())
+        .unwrap_or_else(|| name.to_owned())
+}
+
+fn sidebar_setup_secondary(name: &str, fallback: &str) -> String {
+    split_release_suffix(name)
+        .map(|(_, suffix)| suffix.to_owned())
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
 fn latest_result_summary(state: &MakerUiState) -> String {
     if let Some(success) = state.success_state.as_ref() {
         format!("{} at {}", success.artifact_name, success.output_path)
@@ -2841,15 +2874,165 @@ fn stop(color: &str, x: f32, y: f32, alpha: f32) -> YgguiThemeColorStop {
     }
 }
 
-fn chrome_palette() -> ChromePalette {
-    ChromePalette {
-        titlebar: "rgba(248,251,253,0.76)",
-        text: "#25384c",
-        muted: "#607489",
-        accent: "#5fa8ff",
-        close_hover: "#cf5d5d",
-        control_hover: "#ebf1f6",
-        is_dark: false,
+fn chrome_palette(is_dark: bool, _accent: &str) -> ChromePalette {
+    if is_dark {
+        ChromePalette {
+            titlebar: "rgba(21,28,35,0.68)",
+            text: "#edf4fb",
+            muted: "#9fb4c7",
+            accent: "#7cc8ff",
+            close_hover: "#cf5d5d",
+            control_hover: "rgba(255,255,255,0.10)",
+            is_dark: true,
+        }
+    } else {
+        ChromePalette {
+            titlebar: "rgba(248,251,253,0.76)",
+            text: "#25384c",
+            muted: "#607489",
+            accent: "#5fa8ff",
+            close_hover: "#cf5d5d",
+            control_hover: "#ebf1f6",
+            is_dark: false,
+        }
+    }
+}
+
+fn toast_palette(is_dark: bool, _accent: &str) -> ToastPalette {
+    if is_dark {
+        ToastPalette {
+            text: "#e7eff8",
+            muted: "#a3b6c8",
+            accent: "#7cc8ff",
+            is_dark: true,
+        }
+    } else {
+        ToastPalette {
+            text: "#315066",
+            muted: "#6b7b8d",
+            accent: "#5fa8ff",
+            is_dark: false,
+        }
+    }
+}
+
+fn is_dark_theme(theme: UiTheme) -> bool {
+    matches!(theme, UiTheme::ZedDark)
+}
+
+fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
+    if is_dark_theme(theme) {
+        format!(
+            "--maker-accent:{accent};\
+             --maker-accent-soft:color-mix(in srgb, {accent} 16%, transparent);\
+             --maker-titlebar-text:#ecf4fb;\
+             --maker-titlebar-muted:#9db1c3;\
+             --maker-titlebar-field-bg:rgba(29,37,46,0.74);\
+             --maker-titlebar-field-border:rgba(123,145,165,0.32);\
+             --maker-hero-title:#f3f8fc;\
+             --maker-hero-copy:#bfd0df;\
+             --maker-section-title:#eef5fb;\
+             --maker-text-strong:#ebf3fb;\
+             --maker-copy:#bacada;\
+             --maker-muted:#8fa3b7;\
+             --maker-note:#97abbe;\
+             --maker-label:#8fa8bc;\
+             --maker-stat-label:#8ca3b8;\
+             --maker-stat-value:#edf4fb;\
+             --maker-section-bg:rgba(24,31,39,0.74);\
+             --maker-section-border:rgba(255,255,255,0.08);\
+             --maker-section-shadow:0 18px 42px rgba(0,0,0,0.24);\
+             --maker-card-bg:rgba(30,39,48,0.78);\
+             --maker-card-border:rgba(137,157,177,0.22);\
+             --maker-proof-bg:rgba(23,31,39,0.58);\
+             --maker-proof-border:rgba(132,151,170,0.20);\
+             --maker-input-bg:rgba(20,26,33,0.80);\
+             --maker-input-border:rgba(133,152,170,0.24);\
+             --maker-input-text:#edf4fb;\
+             --maker-empty-bg:rgba(27,35,43,0.72);\
+             --maker-empty-border:rgba(132,151,170,0.22);\
+             --maker-status-bg:rgba(31,46,58,0.68);\
+             --maker-status-border:rgba(95,133,161,0.26);\
+             --maker-status-text:#edf4fb;\
+             --maker-status-muted:#adc0d1;\
+             --maker-panel-bg:rgba(23,31,39,0.82);\
+             --maker-panel-border:rgba(132,151,170,0.26);\
+             --maker-panel-text:#deebf7;\
+             --maker-secondary-bg:rgba(255,255,255,0.06);\
+             --maker-secondary-border:rgba(161,179,196,0.24);\
+             --maker-secondary-text:#dce8f3;\
+             --maker-tertiary-bg:transparent;\
+             --maker-tertiary-border:rgba(161,179,196,0.22);\
+             --maker-tertiary-text:#bfd1e3;\
+             --maker-stage-complete-bg:rgba(255,255,255,0.08);\
+             --maker-stage-complete-text:#dce8f3;\
+             --maker-stage-inactive-bg:rgba(255,255,255,0.04);\
+             --maker-stage-inactive-text:#9eb3c6;\
+             --maker-rail-selected-bg:rgba(255,255,255,0.10);\
+             --maker-rail-selected-border:rgba(128,154,178,0.34);\
+             --maker-rail-card-bg:rgba(22,29,36,0.72);\
+             --maker-rail-card-border:rgba(128,154,178,0.20);\
+             --maker-rail-meta-bg:rgba(22,29,36,0.62);\
+             --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(33,43,53,0.18) 14%, rgba(22,29,36,0.58) 100%);\
+             --maker-footer-bg:rgba(23,31,39,0.74);\
+             --maker-footer-border:rgba(255,255,255,0.08);"
+        )
+    } else {
+        format!(
+            "--maker-accent:{accent};\
+             --maker-accent-soft:color-mix(in srgb, {accent} 14%, transparent);\
+             --maker-titlebar-text:#30465d;\
+             --maker-titlebar-muted:#6e8398;\
+             --maker-titlebar-field-bg:rgba(255,255,255,0.90);\
+             --maker-titlebar-field-border:rgba(188,204,220,0.60);\
+             --maker-hero-title:#1f3347;\
+             --maker-hero-copy:#4f6479;\
+             --maker-section-title:#1f3346;\
+             --maker-text-strong:#294158;\
+             --maker-copy:#52677d;\
+             --maker-muted:#73869a;\
+             --maker-note:#6f8398;\
+             --maker-label:#61758b;\
+             --maker-stat-label:#667b90;\
+             --maker-stat-value:#243a50;\
+             --maker-section-bg:rgba(250,252,254,0.92);\
+             --maker-section-border:rgba(255,255,255,0.76);\
+             --maker-section-shadow:0 18px 42px rgba(88,107,129,0.09);\
+             --maker-card-bg:rgba(255,255,255,0.90);\
+             --maker-card-border:rgba(192,206,220,0.54);\
+             --maker-proof-bg:rgba(255,255,255,0.68);\
+             --maker-proof-border:rgba(198,210,222,0.42);\
+             --maker-input-bg:rgba(255,255,255,0.96);\
+             --maker-input-border:rgba(194,206,218,0.60);\
+             --maker-input-text:#30475f;\
+             --maker-empty-bg:rgba(255,255,255,0.84);\
+             --maker-empty-border:rgba(194,206,220,0.50);\
+             --maker-status-bg:rgba(241,247,252,0.96);\
+             --maker-status-border:rgba(186,203,219,0.58);\
+             --maker-status-text:#30475f;\
+             --maker-status-muted:#7b8da1;\
+             --maker-panel-bg:rgba(255,255,255,0.95);\
+             --maker-panel-border:rgba(190,204,218,0.62);\
+             --maker-panel-text:#33495f;\
+             --maker-secondary-bg:rgba(255,255,255,0.86);\
+             --maker-secondary-border:rgba(188,203,217,0.52);\
+             --maker-secondary-text:#35516a;\
+             --maker-tertiary-bg:transparent;\
+             --maker-tertiary-border:rgba(188,203,217,0.48);\
+             --maker-tertiary-text:#4d657d;\
+             --maker-stage-complete-bg:rgba(236,243,249,0.96);\
+             --maker-stage-complete-text:#39546c;\
+             --maker-stage-inactive-bg:rgba(255,255,255,0.82);\
+             --maker-stage-inactive-text:#5d7187;\
+             --maker-rail-selected-bg:rgba(232,240,248,0.98);\
+             --maker-rail-selected-border:rgba(159,186,215,0.54);\
+             --maker-rail-card-bg:rgba(255,255,255,0.90);\
+             --maker-rail-card-border:rgba(198,210,222,0.52);\
+             --maker-rail-meta-bg:rgba(255,255,255,0.80);\
+             --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(245,249,253,0.38) 16%, rgba(245,249,253,0.76) 100%);\
+             --maker-footer-bg:rgba(250,252,254,0.94);\
+             --maker-footer-border:rgba(255,255,255,0.76);"
+        )
     }
 }
 
@@ -2903,8 +3086,7 @@ fn left_rail_container_style() -> &'static str {
 
 fn right_rail_container_style() -> &'static str {
     "display:flex; flex-direction:column; height:100%; margin-left:8px; padding-left:6px; border-radius:24px 0 0 24px; \
-     background:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(245,249,253,0.38) 16%, rgba(245,249,253,0.76) 100%); \
-     box-shadow:inset 18px 0 28px rgba(255,255,255,0.14);"
+     background:var(--maker-rail-gradient); box-shadow:inset 18px 0 28px rgba(255,255,255,0.10);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
@@ -2914,7 +3096,7 @@ fn stage_chip_style(selected: bool, accent: &str) -> String {
             accent
         )
     } else {
-        "height:24px; padding:0 10px; border:none; border-radius:999px; background:rgba(255,255,255,0.74); color:#5a6d81; font-size:10px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(196,208,220,0.52);".to_owned()
+        "height:24px; padding:0 10px; border:none; border-radius:999px; background:var(--maker-stage-inactive-bg); color:var(--maker-stage-inactive-text); font-size:10px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-card-border);".to_owned()
     }
 }
 
@@ -2934,13 +3116,17 @@ fn utility_button_style(active: bool) -> String {
         "display:inline-flex; align-items:center; gap:8px; height:28px; padding:0 11px; border:none; border-radius:10px; \
          background:{}; color:{}; font-size:11px; font-weight:700; white-space:nowrap; box-shadow:{};",
         if active {
-            "rgba(255,255,255,0.84)"
+            "var(--maker-secondary-bg)"
         } else {
             "transparent"
         },
-        if active { "#4c86d6" } else { "#6c8197" },
         if active {
-            "inset 0 0 0 1px rgba(188,205,222,0.52)"
+            "var(--maker-accent)"
+        } else {
+            "var(--maker-titlebar-muted)"
+        },
+        if active {
+            "inset 0 0 0 1px var(--maker-secondary-border)"
         } else {
             "none"
         }
@@ -2952,13 +3138,17 @@ fn titlebar_icon_button_style(active: bool) -> String {
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
          background:{}; color:{}; font-size:14px; font-weight:700; box-shadow:{};",
         if active {
-            "rgba(255,255,255,0.84)"
+            "var(--maker-secondary-bg)"
         } else {
             "transparent"
         },
-        if active { "#4c86d6" } else { "#6c8197" },
         if active {
-            "inset 0 0 0 1px rgba(188,205,222,0.52)"
+            "var(--maker-accent)"
+        } else {
+            "var(--maker-titlebar-muted)"
+        },
+        if active {
+            "inset 0 0 0 1px var(--maker-secondary-border)"
         } else {
             "none"
         }
@@ -2966,11 +3156,11 @@ fn titlebar_icon_button_style(active: bool) -> String {
 }
 
 fn titlebar_setup_button_style() -> &'static str {
-    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:rgba(255,255,255,0.92); box-shadow:inset 0 0 0 1px rgba(188,204,220,0.64);"
+    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border);"
 }
 
 fn titlebar_center_field_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.90); box-shadow:inset 0 0 0 1px rgba(188,204,220,0.58); overflow:hidden;"
+    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border); overflow:hidden;"
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
@@ -2980,7 +3170,7 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
             accent
         )
     } else {
-        "flex:1; height:30px; border:none; border-radius:10px; background:rgba(255,255,255,0.78); color:#5c7287; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.48);".to_owned()
+        "flex:1; height:30px; border:none; border-radius:10px; background:var(--maker-secondary-bg); color:var(--maker-secondary-text); font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-secondary-border);".to_owned()
     }
 }
 
@@ -2999,86 +3189,90 @@ fn stage_pill_style(active: bool, complete: bool, accent: &str) -> String {
             accent
         )
     } else if complete {
-        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:rgba(236,243,249,0.96); color:#39546c; font-size:11px; font-weight:800; box-shadow:inset 0 0 0 1px rgba(190,206,220,0.52);".to_owned()
+        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:var(--maker-stage-complete-bg); color:var(--maker-stage-complete-text); font-size:11px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-card-border);".to_owned()
     } else {
-        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:rgba(255,255,255,0.82); color:#5d7187; font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.50);".to_owned()
+        "display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 14px; border:none; border-radius:999px; background:var(--maker-stage-inactive-bg); color:var(--maker-stage-inactive-text); font-size:11px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-card-border);".to_owned()
     }
 }
 
 fn shortcut_badge_style() -> &'static str {
-    "display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:6px; background:rgba(95,168,255,0.14); color:#2667a9; font-size:9px; font-weight:800;"
+    "display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:6px; background:color-mix(in srgb, var(--maker-accent) 16%, transparent); color:var(--maker-accent); font-size:9px; font-weight:800;"
 }
 
 fn primary_button_style(accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 12px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 8px 18px rgba(94,134,190,0.18);",
-        accent
+        "display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; border:none; border-radius:11px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 22px color-mix(in srgb, {} 32%, transparent);",
+        accent, accent
     )
 }
 
 fn secondary_button_style() -> &'static str {
-    "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:rgba(255,255,255,0.86); color:#35516a; font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px rgba(188,203,217,0.52);"
+    "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:var(--maker-secondary-bg); color:var(--maker-secondary-text); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-secondary-border);"
+}
+
+fn tertiary_button_style() -> &'static str {
+    "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:var(--maker-tertiary-bg); color:var(--maker-tertiary-text); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-tertiary-border);"
 }
 
 fn stage_footer_bar_style() -> &'static str {
-    "display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; padding:12px 16px; border-radius:18px; background:rgba(250,252,254,0.94); box-shadow:0 12px 28px rgba(88,107,129,0.08), inset 0 0 0 1px rgba(255,255,255,0.76);"
+    "display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; padding:12px 16px; border-radius:18px; background:var(--maker-footer-bg); box-shadow:0 12px 28px rgba(88,107,129,0.08), inset 0 0 0 1px var(--maker-footer-border);"
 }
 
 fn primary_rail_button_style(accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; gap:8px; justify-content:center; width:100%; height:38px; border:none; border-radius:12px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px rgba(94,134,190,0.24);",
-        accent
+        "display:inline-flex; align-items:center; gap:8px; justify-content:center; width:100%; height:38px; border:none; border-radius:12px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px color-mix(in srgb, {} 36%, transparent);",
+        accent, accent
     )
 }
 
 fn rail_setup_card_style(selected: bool) -> String {
     if selected {
-        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:rgba(232,240,248,0.98); box-shadow:inset 0 0 0 1px rgba(159,186,215,0.54), 0 10px 24px rgba(91,118,151,0.10);".to_owned()
+        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:var(--maker-rail-selected-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-selected-border), 0 10px 24px rgba(91,118,151,0.10);".to_owned()
     } else {
-        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:rgba(255,255,255,0.90); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.52);".to_owned()
+        "display:flex; flex-direction:column; gap:6px; width:100%; border:none; border-radius:14px; padding:12px 12px; background:var(--maker-rail-card-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);".to_owned()
     }
 }
 
 fn rail_meta_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:4px; width:100%; border:none; border-radius:12px; padding:10px 11px; background:rgba(255,255,255,0.80); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.50);"
+    "display:flex; flex-direction:column; gap:4px; width:100%; border:none; border-radius:12px; padding:10px 11px; background:var(--maker-rail-meta-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);"
 }
 
 fn section_toggle_style(expanded: bool) -> String {
     if expanded {
-        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:12px; padding:10px 12px; background:rgba(238,244,249,0.94); color:#324a62; font-size:12px; font-weight:800;".to_owned()
+        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:12px; padding:10px 12px; background:var(--maker-rail-selected-bg); color:var(--maker-text-strong); font-size:12px; font-weight:800;".to_owned()
     } else {
-        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:12px; padding:10px 12px; background:rgba(255,255,255,0.80); color:#324a62; font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.48);".to_owned()
+        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:12px; padding:10px 12px; background:var(--maker-rail-meta-bg); color:var(--maker-text-strong); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);".to_owned()
     }
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:22px; background:rgba(250,252,254,0.92); box-shadow:0 18px 42px rgba(88,107,129,0.09), inset 0 0 0 1px rgba(255,255,255,0.76); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
+    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:22px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
 }
 
 fn selected_intent_card_style(accent: &str) -> String {
     format!(
         "display:flex; flex-direction:column; gap:14px; padding:18px 18px 18px 18px; border-radius:22px; \
          background:radial-gradient(circle at top right, color-mix(in srgb, {} 14%, white) 0%, rgba(255,255,255,0) 36%), \
-         linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(244,249,253,0.92) 100%); \
-         box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.42), inset 0 1px 0 rgba(255,255,255,0.86);",
+         linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 82%, white) 0%, var(--maker-section-bg) 100%); \
+         box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border), inset 0 1px 0 rgba(255,255,255,0.16);",
         accent,
     )
 }
 
 fn secondary_preset_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:8px; padding:14px 14px 15px 14px; border:none; border-radius:18px; background:rgba(255,255,255,0.72); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.46); text-align:left;"
+    "display:flex; flex-direction:column; gap:8px; padding:14px 14px 15px 14px; border:none; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border); text-align:left;"
 }
 
 fn proof_stack_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:18px; background:rgba(255,255,255,0.62); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.42);"
+    "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:18px; background:var(--maker-proof-bg); box-shadow:inset 0 0 0 1px var(--maker-proof-border);"
 }
 
 fn identity_preview_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:20px; background:linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(245,249,253,0.90) 100%); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px rgba(184,204,224,0.44);"
+    "display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:20px; background:linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 86%, white) 0%, var(--maker-section-bg) 100%); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn proof_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:15px; background:rgba(255,255,255,0.90); box-shadow:inset 0 0 0 1px rgba(192,206,220,0.54);"
+    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:15px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn option_button_style(selected: bool, accent: &str) -> String {
@@ -3088,50 +3282,50 @@ fn option_button_style(selected: bool, accent: &str) -> String {
             accent
         )
     } else {
-        "height:34px; padding:0 14px; border:none; border-radius:11px; background:rgba(255,255,255,0.86); color:#51677e; font-size:12px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.50);".to_owned()
+        "height:34px; padding:0 14px; border:none; border-radius:11px; background:var(--maker-secondary-bg); color:var(--maker-secondary-text); font-size:12px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-secondary-border);".to_owned()
     }
 }
 
 fn input_style() -> &'static str {
-    "height:40px; padding:0 12px; border:none; border-radius:12px; background:rgba(255,255,255,0.96); color:#30475f; font-size:13px; box-shadow:inset 0 0 0 1px rgba(194,206,218,0.60);"
+    "height:40px; padding:0 12px; border:none; border-radius:12px; background:var(--maker-input-bg); color:var(--maker-input-text); font-size:13px; box-shadow:inset 0 0 0 1px var(--maker-input-border);"
 }
 
 fn label_style() -> &'static str {
-    "font-size:11px; font-weight:800; letter-spacing:0.05em; color:#61758b; text-transform:uppercase;"
+    "font-size:11px; font-weight:800; letter-spacing:0.05em; color:var(--maker-label); text-transform:uppercase;"
 }
 
 fn section_title_style() -> &'static str {
-    "margin:0; font-size:24px; line-height:1.08; font-weight:800; color:#1f3346;"
+    "margin:0; font-size:24px; line-height:1.08; font-weight:800; color:var(--maker-section-title);"
 }
 
 fn section_copy_style() -> &'static str {
-    "margin:0; font-size:13px; line-height:1.58; color:#52677d;"
+    "margin:0; font-size:13px; line-height:1.58; color:var(--maker-copy);"
 }
 
 fn empty_note_style() -> &'static str {
-    "padding:12px 13px; border-radius:12px; background:rgba(255,255,255,0.84); color:#62778d; font-size:12px; line-height:1.58; box-shadow:inset 0 0 0 1px rgba(194,206,220,0.50);"
+    "padding:12px 13px; border-radius:12px; background:var(--maker-empty-bg); color:var(--maker-muted); font-size:12px; line-height:1.58; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
 }
 
 fn pre_panel_style() -> &'static str {
-    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:rgba(255,255,255,0.95); color:#33495f; font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px rgba(190,204,218,0.62);"
+    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:var(--maker-panel-bg); color:var(--maker-panel-text); font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px var(--maker-panel-border);"
 }
 
 fn appearance_panel_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:14px; padding:16px; border-radius:18px; background:rgba(252,253,254,0.96); box-shadow:0 18px 48px rgba(69,87,108,0.14), inset 0 0 0 1px rgba(255,255,255,0.76); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);"
+    "display:flex; flex-direction:column; gap:14px; padding:16px; border-radius:18px; background:var(--maker-section-bg); box-shadow:0 18px 48px rgba(69,87,108,0.14), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);"
 }
 
 fn status_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:4px; padding:12px 13px; border-radius:14px; background:rgba(241,247,252,0.96); box-shadow:inset 0 0 0 1px rgba(186,203,219,0.58);"
+    "display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:14px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border);"
 }
 
 fn success_stat_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:14px 15px; border-radius:16px; background:rgba(255,255,255,0.94); box-shadow:inset 0 0 0 1px rgba(198,210,222,0.60);"
+    "display:flex; flex-direction:column; gap:6px; padding:14px 15px; border-radius:16px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn stat_label_style() -> &'static str {
-    "font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#667b90;"
+    "font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:var(--maker-stat-label);"
 }
 
 fn stat_value_style() -> &'static str {
-    "font-size:13px; font-weight:700; line-height:1.45; color:#243a50; overflow-wrap:anywhere;"
+    "font-size:13px; font-weight:700; line-height:1.45; color:var(--maker-stat-value); overflow-wrap:anywhere;"
 }
