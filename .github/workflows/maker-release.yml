@@ -1,9 +1,19 @@
 name: maker-release
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      include_container_build:
+        description: "Also build the maker build container during this manual run"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -38,18 +48,30 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Checkout sibling yggterm workspace
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: yggdrasilhq/yggterm
           path: .deps/yggterm
 
-      - name: Link sibling yggterm path for local workspace deps
+      - name: Link sibling yggterm path for Unix runners
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           ln -sfn "$GITHUB_WORKSPACE/.deps/yggterm" "$GITHUB_WORKSPACE/../yggterm"
+
+      - name: Link sibling yggterm path for Windows runners
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE ".deps/yggterm"
+          $link = Join-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) "yggterm"
+          if (Test-Path $link) {
+            Remove-Item $link -Force -Recurse
+          }
+          New-Item -ItemType Junction -Path $link -Target $target | Out-Null
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -88,29 +110,13 @@ jobs:
           path: |
             dist/yggdrasil-maker-${{ matrix.label }}*
 
-  build-container:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login to GHCR
-        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Build and push version-matched build container
-        run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/yggdrasil-maker-build:${{ github.ref_name }}"
-          docker build -f docker/yggdrasil-maker-build.Dockerfile -t "$IMAGE" .
-          docker push "$IMAGE"
-
-  publish-release:
+  assemble-native-manifest:
     runs-on: ubuntu-latest
     needs:
       - build-native
-      - build-container
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download packaged assets
         uses: actions/download-artifact@v4
@@ -122,13 +128,57 @@ jobs:
       - name: Generate release manifest
         run: ./scripts/package-maker-release-manifest.sh
 
+      - name: Upload assembled release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: maker-release-bundle
+          path: |
+            dist/*
+
+  build-container:
+    if: github.event_name == 'push' || inputs.include_container_build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Login to GHCR
+        if: github.event_name == 'push'
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build version-matched build container
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/yggdrasil-maker-build:${{ github.ref_name }}"
+          docker build -f docker/yggdrasil-maker-build.Dockerfile -t "$IMAGE" .
+
+      - name: Push version-matched build container
+        if: github.event_name == 'push'
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/yggdrasil-maker-build:${{ github.ref_name }}"
+          docker push "$IMAGE"
+
+  publish-release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs:
+      - assemble-native-manifest
+      - build-container
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download assembled release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: maker-release-bundle
+          path: dist
+
       - name: Extract curated release notes
         id: notes
         run: |
           python3 - <<'PY' > release-notes.txt
           import pathlib
           import re
-          import sys
 
           changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
           tag = "${{ github.ref_name }}".lstrip("v")
