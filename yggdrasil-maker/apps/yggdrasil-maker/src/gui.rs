@@ -4,6 +4,7 @@ use dioxus::desktop::{
 };
 use dioxus::document;
 use dioxus::prelude::*;
+use dioxus_core::schedule_update;
 use dioxus_desktop::DesktopContext;
 use dioxus_desktop::UserWindowEvent;
 #[cfg(target_os = "linux")]
@@ -19,6 +20,7 @@ use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -224,6 +226,7 @@ struct MakerUiState {
     build_running: bool,
     right_panel_mode: RightPanelMode,
     sidebar_open: bool,
+    collapsed_tree_nodes: BTreeSet<String>,
     utility_pane_open: bool,
     recent_artifacts: Vec<RecentArtifactSummary>,
     recent_artifacts_expanded: bool,
@@ -260,6 +263,7 @@ impl MakerUiState {
             build_running: false,
             right_panel_mode: RightPanelMode::Config,
             sidebar_open: true,
+            collapsed_tree_nodes: BTreeSet::new(),
             utility_pane_open: true,
             recent_artifacts: Vec::new(),
             recent_artifacts_expanded: false,
@@ -295,6 +299,7 @@ impl MakerUiState {
         state.utility_pane_open = bootstrap.shell_settings.utility_pane_open;
         state.right_panel_mode = bootstrap.shell_settings.right_panel_mode;
         state.sidebar_open = bootstrap.shell_settings.sidebar_open;
+        state.collapsed_tree_nodes = BTreeSet::new();
         state.theme_editor_draft = clamp_theme_spec(&state.shell_settings.yggui_theme);
         state.sync_truth_surface_for_stage();
         state
@@ -304,6 +309,12 @@ impl MakerUiState {
         if let Ok(mut setups) = self.app.setup_store().list() {
             setups.sort_by(|left, right| right.modified_unix_secs.cmp(&left.modified_unix_secs));
             self.saved_setups = setups;
+        }
+    }
+
+    fn toggle_tree_folder(&mut self, key: &str) {
+        if !self.collapsed_tree_nodes.insert(key.to_owned()) {
+            self.collapsed_tree_nodes.remove(key);
         }
     }
 
@@ -522,6 +533,7 @@ impl MakerUiState {
         self.appearance_panel_open = true;
         self.right_panel_mode = RightPanelMode::Appearance;
         self.utility_pane_open = true;
+        self.shell_settings.right_panel_mode = RightPanelMode::Appearance;
         self.shell_settings.utility_pane_open = true;
         self.theme_editor_draft = clamp_theme_spec(&self.shell_settings.yggui_theme);
         self.theme_editor_selected_stop = self.theme_editor_draft.colors.first().map(|_| 0);
@@ -532,6 +544,7 @@ impl MakerUiState {
     fn close_appearance_sidebar(&mut self) {
         self.appearance_panel_open = false;
         self.right_panel_mode = default_truth_mode_for_stage(self.current_setup.journey_stage);
+        self.shell_settings.right_panel_mode = self.right_panel_mode;
         self.theme_editor_drag_stop = None;
     }
 
@@ -709,12 +722,12 @@ enum SidebarTreeRow {
         key: String,
         label: String,
         depth: usize,
+        expanded: bool,
     },
     Setup {
         key: String,
         setup_id: String,
-        title: String,
-        subtitle: String,
+        label: String,
         depth: usize,
         selected: bool,
     },
@@ -787,6 +800,7 @@ fn app() -> Element {
     let mut state = use_signal(|| MakerUiState::from_bootstrap(bootstrap));
     let mount_generation = use_hook(|| APP_MOUNT_GENERATION.fetch_add(1, Ordering::Relaxed) + 1);
     let desktop = use_window();
+    let schedule_ui_update = schedule_update();
     let now_ms = use_signal(current_millis);
     let window_icon_applied =
         use_hook(|| Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
@@ -869,24 +883,33 @@ fn app() -> Element {
     {
         let desktop = desktop.clone();
         let trace_root = state.read().trace_root.clone();
+        let wake_app_control = desktop.poll_waker();
+        let schedule_ui_update = schedule_ui_update.clone();
         use_future(move || {
             let desktop = desktop.clone();
             let trace_root = trace_root.clone();
+            let wake_app_control = wake_app_control.clone();
+            let schedule_ui_update = schedule_ui_update.clone();
             async move {
                 let _ = register_client_instance(&trace_root);
                 loop {
                     if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
                         break;
                     }
-                    if let Err(error) =
-                        process_pending_app_control_requests(&trace_root, &desktop, state).await
-                    {
-                        trace_ui(
-                            &trace_root,
-                            "app-control",
-                            "request_error",
-                            json!({ "error": error.to_string() }),
-                        );
+                    match process_pending_app_control_requests(&trace_root, &desktop, state).await {
+                        Ok(true) => {
+                            wake_app_control();
+                            schedule_ui_update();
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            trace_ui(
+                                &trace_root,
+                                "app-control",
+                                "request_error",
+                                json!({ "error": error.to_string() }),
+                            );
+                        }
                     }
                     sleep(Duration::from_millis(80)).await;
                 }
@@ -1140,27 +1163,25 @@ fn app() -> Element {
                                             style: "display:flex; flex-direction:column; gap:7px;",
                                             for row in sidebar_tree_rows.iter().cloned() {
                                                 match row {
-                                                    SidebarTreeRow::Folder { key, label, depth } => rsx! {
-                                                        div {
+                                                    SidebarTreeRow::Folder { key, label, depth, expanded } => rsx! {
+                                                        button {
                                                             key: "{key}",
                                                             style: tree_folder_row_style(depth),
-                                                            span { style: tree_chevron_style(), "▾" }
+                                                            onclick: {
+                                                                let folder_key = key.clone();
+                                                                move |_| state.with_mut(|ui| ui.toggle_tree_folder(&folder_key))
+                                                            },
+                                                            FolderTreeIcon { expanded }
                                                             span { style: tree_folder_label_style(), "{label}" }
                                                         }
                                                     },
-                                                    SidebarTreeRow::Setup { key, setup_id, title, subtitle, depth, selected } => rsx! {
+                                                    SidebarTreeRow::Setup { key, setup_id, label, depth, selected } => rsx! {
                                                         button {
                                                             key: "{key}",
                                                             style: rail_setup_card_style(selected, depth),
                                                             onclick: move |_| state.with_mut(|ui| ui.select_setup(&setup_id)),
-                                                            div {
-                                                                style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                                                                span { style: "font-size:13px; font-weight:700; color:var(--maker-text-strong); text-align:left;", "{title}" }
-                                                            }
-                                                            div {
-                                                                style: "font-size:11px; line-height:1.45; color:var(--maker-muted); text-align:left;",
-                                                                "{subtitle}"
-                                                            }
+                                                            ReleaseLeafIcon { selected }
+                                                            span { style: rail_setup_label_style(selected), "{label}" }
                                                         }
                                                     },
                                                 }
@@ -2255,6 +2276,48 @@ fn ResizeHandle(style: String, direction: ResizeDirection) -> Element {
     }
 }
 
+#[component]
+fn FolderTreeIcon(expanded: bool) -> Element {
+    rsx! {
+        svg {
+            width: "15",
+            height: "15",
+            view_box: "0 0 16 16",
+            fill: if expanded { "currentColor" } else { "none" },
+            xmlns: "http://www.w3.org/2000/svg",
+            path {
+                d: "M2.1 4.1C2.1 3.27 2.77 2.6 3.6 2.6H6.3L7.45 3.75H12.4C13.23 3.75 13.9 4.42 13.9 5.25V11.2C13.9 12.03 13.23 12.7 12.4 12.7H3.6C2.77 12.7 2.1 12.03 2.1 11.2V4.1Z",
+                stroke: "currentColor",
+                stroke_width: "1.1",
+                stroke_linejoin: "round",
+                fill_opacity: if expanded { "0.94" } else { "0" },
+            }
+        }
+    }
+}
+
+#[component]
+fn ReleaseLeafIcon(selected: bool) -> Element {
+    rsx! {
+        span {
+            style: format!(
+                "display:inline-flex; flex:0 0 auto; width:8px; height:8px; border-radius:999px; background:{}; \
+                 box-shadow:0 0 0 1px color-mix(in srgb, {} 26%, transparent);",
+                if selected {
+                    "var(--maker-accent)"
+                } else {
+                    "color-mix(in srgb, var(--maker-muted) 74%, transparent)"
+                },
+                if selected {
+                    "var(--maker-accent)"
+                } else {
+                    "var(--maker-muted)"
+                }
+            ),
+        }
+    }
+}
+
 fn start_build(mut state: Signal<MakerUiState>) {
     if state.read().build_running {
         return;
@@ -3073,8 +3136,13 @@ fn sidebar_setup_secondary(name: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_owned())
 }
 
-fn sidebar_stage_suffix(stage: JourneyStage) -> String {
-    format!(" · {}", stage.label())
+fn sidebar_setup_leaf_label(name: &str, fallback: &str) -> String {
+    let secondary = sidebar_setup_secondary(name, fallback);
+    if secondary == fallback {
+        sidebar_setup_primary(name)
+    } else {
+        secondary
+    }
 }
 
 fn build_sidebar_tree_rows(state: &MakerUiState) -> Vec<SidebarTreeRow> {
@@ -3110,12 +3178,7 @@ fn build_sidebar_tree_rows(state: &MakerUiState) -> Vec<SidebarTreeRow> {
             path,
             summary.modified_unix_secs,
             summary.setup_id.clone(),
-            sidebar_setup_primary(&summary.name),
-            format!(
-                "{}{}",
-                sidebar_setup_secondary(&summary.name, &summary.slug),
-                sidebar_stage_suffix(summary.journey_stage)
-            ),
+            sidebar_setup_leaf_label(&summary.name, &summary.slug),
             summary.setup_id == state.current_setup.setup_id,
         ));
     }
@@ -3128,31 +3191,45 @@ fn build_sidebar_tree_rows(state: &MakerUiState) -> Vec<SidebarTreeRow> {
 
     let mut rows = Vec::new();
     let mut previous_path: Vec<String> = Vec::new();
-    for (path, _modified, setup_id, title, subtitle, selected) in entries {
+    for (path, _modified, setup_id, label, selected) in entries {
         let shared = previous_path
             .iter()
             .zip(path.iter())
             .take_while(|(left, right)| left == right)
             .count();
         for depth in shared..path.len() {
+            if has_collapsed_ancestor(&state.collapsed_tree_nodes, &path, depth) {
+                break;
+            }
             let folder_path = path[..=depth].join("/");
             rows.push(SidebarTreeRow::Folder {
                 key: format!("folder:{folder_path}"),
                 label: path[depth].clone(),
                 depth,
+                expanded: !state.collapsed_tree_nodes.contains(&folder_path),
             });
+        }
+        if has_collapsed_ancestor(&state.collapsed_tree_nodes, &path, path.len()) {
+            previous_path = path;
+            continue;
         }
         rows.push(SidebarTreeRow::Setup {
             key: format!("setup:{setup_id}"),
             setup_id,
-            title,
-            subtitle,
+            label,
             depth: path.len(),
             selected,
         });
         previous_path = path;
     }
     rows
+}
+
+fn has_collapsed_ancestor(collapsed: &BTreeSet<String>, path: &[String], depth: usize) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    (0..depth).any(|index| collapsed.contains(&path[..=index].join("/")))
 }
 
 fn latest_result_summary(state: &MakerUiState) -> String {
@@ -3468,8 +3545,8 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-stage-complete-text:#e2edf7;\
              --maker-stage-inactive-bg:rgba(255,255,255,0.08);\
              --maker-stage-inactive-text:#dce7f1;\
-             --maker-rail-selected-bg:rgba(255,255,255,0.10);\
-             --maker-rail-selected-border:rgba(128,154,178,0.34);\
+             --maker-rail-selected-bg:color-mix(in srgb, {accent} 26%, rgba(24,31,39,0.78));\
+             --maker-rail-selected-border:color-mix(in srgb, {accent} 70%, rgba(128,154,178,0.20));\
              --maker-rail-card-bg:rgba(22,29,36,0.72);\
              --maker-rail-card-border:rgba(128,154,178,0.20);\
              --maker-rail-meta-bg:rgba(22,29,36,0.62);\
@@ -3524,8 +3601,8 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-stage-complete-text:#39546c;\
              --maker-stage-inactive-bg:rgba(255,255,255,0.82);\
              --maker-stage-inactive-text:#5d7187;\
-             --maker-rail-selected-bg:rgba(232,240,248,0.98);\
-             --maker-rail-selected-border:rgba(159,186,215,0.54);\
+             --maker-rail-selected-bg:color-mix(in srgb, {accent} 22%, rgba(255,255,255,0.98));\
+             --maker-rail-selected-border:color-mix(in srgb, {accent} 68%, rgba(159,186,215,0.34));\
              --maker-rail-card-bg:rgba(255,255,255,0.90);\
              --maker-rail-card-border:rgba(198,210,222,0.52);\
              --maker-rail-meta-bg:rgba(255,255,255,0.80);\
@@ -3581,7 +3658,8 @@ fn shell_surface_style(
 }
 
 fn left_rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; position:relative; height:100%; background:transparent; overflow:hidden;"
+    "display:flex; flex-direction:column; position:relative; height:100%; overflow:hidden; \
+     background:linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 26%, transparent) 0%, transparent 72%);"
 }
 
 fn right_rail_container_style() -> &'static str {
@@ -3750,34 +3828,43 @@ fn primary_rail_button_style(accent: &str) -> String {
 }
 
 fn rail_setup_card_style(selected: bool, depth: usize) -> String {
-    let indent = 10 + depth.saturating_sub(1) * 12;
+    let indent = 12 + depth.saturating_sub(1) * 14;
     if selected {
         format!(
-            "display:flex; flex-direction:column; gap:8px; width:100%; border:none; border-radius:10px; padding:11px 12px 12px {}px; background:var(--maker-rail-selected-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-selected-border), 0 10px 24px rgba(91,118,151,0.10);",
+            "display:flex; align-items:center; gap:9px; width:100%; min-height:34px; border:none; border-radius:11px; \
+             padding:0 12px 0 {}px; background:var(--maker-rail-selected-bg); color:var(--maker-accent); \
+             box-shadow:inset 0 0 0 1px var(--maker-rail-selected-border), 0 12px 24px color-mix(in srgb, var(--maker-accent) 16%, transparent);",
             indent
         )
     } else {
         format!(
-            "display:flex; flex-direction:column; gap:8px; width:100%; border:none; border-radius:10px; padding:11px 12px 12px {}px; background:var(--maker-rail-card-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);",
+            "display:flex; align-items:center; gap:9px; width:100%; min-height:34px; border:none; border-radius:11px; \
+             padding:0 12px 0 {}px; background:var(--maker-rail-card-bg); color:var(--maker-text-strong); \
+             box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);",
             indent
         )
     }
 }
 
 fn tree_folder_row_style(depth: usize) -> String {
-    let indent = 4 + depth * 12;
+    let indent = 6 + depth * 14;
     format!(
-        "display:flex; align-items:center; gap:7px; min-height:20px; padding-left:{}px; color:var(--maker-note); font-size:11px; font-weight:700; letter-spacing:0.01em; text-transform:none;",
+        "display:flex; align-items:center; gap:8px; width:100%; min-height:24px; border:none; background:transparent; \
+         padding:0 6px 0 {}px; color:var(--maker-note); font-size:11px; font-weight:700; text-transform:none;",
         indent
     )
 }
 
-fn tree_chevron_style() -> &'static str {
-    "display:inline-flex; align-items:center; justify-content:center; width:12px; color:var(--maker-muted); font-size:10px;"
+fn tree_folder_label_style() -> &'static str {
+    "color:var(--maker-note); font-size:11px; font-weight:700; text-transform:none;"
 }
 
-fn tree_folder_label_style() -> &'static str {
-    "color:var(--maker-note); font-size:11px; font-weight:700;"
+fn rail_setup_label_style(selected: bool) -> &'static str {
+    if selected {
+        "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:800; color:var(--maker-text-strong); text-align:left;"
+    } else {
+        "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; color:var(--maker-text-strong); text-align:left;"
+    }
 }
 
 fn rail_meta_card_style() -> &'static str {
