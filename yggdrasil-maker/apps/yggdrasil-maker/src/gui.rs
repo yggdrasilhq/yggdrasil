@@ -976,12 +976,12 @@ fn app() -> Element {
 
     let titlebar_center = rsx! {
         div {
-            style: "display:flex; align-items:center; justify-content:center; gap:8px; min-width:0; width:min(520px, 100%);",
+            style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; width:min(520px, 100%);",
             div {
                 style: titlebar_center_field_style(),
                 span {
-                    style: stage_chip_style(true, &accent),
-                    "Stage: {snapshot.current_setup.journey_stage.label()}"
+                    style: "font-size:11px; font-weight:800; letter-spacing:0.08em; color:var(--maker-titlebar-muted); white-space:nowrap;",
+                    "{snapshot.current_setup.journey_stage.label()}"
                 }
                 span {
                     style: "font-size:11px; font-weight:700; color:var(--maker-titlebar-text); white-space:nowrap;",
@@ -1274,7 +1274,6 @@ fn app() -> Element {
                                 StudioCanvas {
                                     state: snapshot.clone(),
                                     accent: accent.clone(),
-                                    preview_surface: preview_surface.clone(),
                                     on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.set_journey_stage(stage)),
                                     on_update_setup_name: move |value: String| update_setup_name(state, value),
                                     on_update_hostname: move |value: String| update_hostname(state, value),
@@ -1292,7 +1291,6 @@ fn app() -> Element {
                             StudioCanvas {
                                 state: snapshot.clone(),
                                 accent: accent.clone(),
-                                preview_surface: preview_surface.clone(),
                                 on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.set_journey_stage(stage)),
                                 on_update_setup_name: move |value: String| update_setup_name(state, value),
                                 on_update_hostname: move |value: String| update_hostname(state, value),
@@ -1490,7 +1488,6 @@ fn app() -> Element {
 fn StudioCanvas(
     state: MakerUiState,
     accent: String,
-    preview_surface: String,
     on_set_stage: EventHandler<JourneyStage>,
     on_update_setup_name: EventHandler<String>,
     on_update_hostname: EventHandler<String>,
@@ -1519,7 +1516,6 @@ fn StudioCanvas(
     let next_stage = next_journey_stage(current_stage);
     let (stage_title, stage_copy) = stage_headline(current_stage);
     let hero_compact = current_stage != JourneyStage::Outcome;
-    let show_stage_banner = current_stage != JourneyStage::Build;
     let outcome_grid_style = if compact_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1539,42 +1535,36 @@ fn StudioCanvas(
     rsx! {
         div {
             style: "display:flex; flex-direction:column; gap:14px; max-width:920px; margin:0 auto;",
-            if show_stage_banner {
+            div {
+                style: viewport_header_style(hero_compact),
+                div {
+                    style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                    "{current_stage.label()} STAGE"
+                }
+                h1 {
+                    style: if hero_compact {
+                        "margin:6px 0 4px 0; font-size:28px; line-height:1.08; color:var(--maker-hero-title);"
+                    } else {
+                        "margin:8px 0 6px 0; font-size:38px; line-height:1.04; color:var(--maker-hero-title);"
+                    },
+                    "{stage_title}"
+                }
+                p {
+                    style: if hero_compact {
+                        "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:var(--maker-hero-copy);"
+                    } else {
+                        "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
+                    },
+                    "{stage_copy}"
+                }
                 div {
                     style: format!(
-                        "{} {};",
-                        preview_surface,
-                        stage_banner_style(hero_compact)
+                        "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
+                        if hero_compact { 12 } else { 16 }
                     ),
-                    div {
-                        style: format!("font-size:12px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                        "{current_stage.label()} STAGE"
-                    }
-                    h1 {
-                        style: if hero_compact {
-                            "margin:8px 0 6px 0; font-size:30px; line-height:1.08; color:var(--maker-hero-title);"
-                        } else {
-                            "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:var(--maker-hero-title);"
-                        },
-                        "{stage_title}"
-                    }
-                    p {
-                        style: if hero_compact {
-                            "margin:0; max-width:760px; font-size:15px; line-height:1.65; color:var(--maker-hero-copy);"
-                        } else {
-                            "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
-                        },
-                        "{stage_copy}"
-                    }
-                    div {
-                        style: format!(
-                            "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
-                            if hero_compact { 14 } else { 18 }
-                        ),
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
-                        div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
-                    }
+                    div { style: header_meta_chip_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
+                    div { style: header_meta_chip_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                    div { style: header_meta_chip_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
                 }
             }
 
@@ -3658,25 +3648,11 @@ fn shell_surface_style(
 }
 
 fn left_rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; position:relative; height:100%; overflow:hidden; \
-     background:linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 26%, transparent) 0%, transparent 72%);"
+    "display:flex; flex-direction:column; position:relative; height:100%; overflow:hidden; background:transparent;"
 }
 
 fn right_rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; margin-left:10px; padding-left:6px; \
-     background:linear-gradient(90deg, rgba(255,255,255,0.00) 0%, color-mix(in srgb, var(--maker-section-bg) 64%, transparent) 16%, color-mix(in srgb, var(--maker-section-bg) 88%, transparent) 100%); \
-     box-shadow:inset 1px 0 0 var(--maker-card-border);"
-}
-
-fn stage_chip_style(selected: bool, accent: &str) -> String {
-    if selected {
-        format!(
-            "height:24px; padding:0 10px; border:none; border-radius:999px; background:{}; color:white; font-size:10px; font-weight:700;",
-            accent
-        )
-    } else {
-        "height:24px; padding:0 10px; border:none; border-radius:999px; background:var(--maker-stage-inactive-bg); color:var(--maker-stage-inactive-text); font-size:10px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-card-border);".to_owned()
-    }
+    "display:flex; flex-direction:column; height:100%; margin-left:0; padding-left:0; background:transparent; box-shadow:none;"
 }
 
 fn small_chip_style(selected: bool, accent: &str) -> String {
@@ -3717,7 +3693,7 @@ fn utility_icon_button_style(active: bool) -> String {
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
          background:{}; color:{}; box-shadow:{};",
         if active {
-            "var(--maker-secondary-bg)"
+            "color-mix(in srgb, var(--maker-accent) 10%, transparent)"
         } else {
             "transparent"
         },
@@ -3739,7 +3715,7 @@ fn titlebar_icon_button_style(active: bool) -> String {
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
          background:{}; color:{}; opacity:{}; font-size:15px; font-weight:800; box-shadow:{};",
         if active {
-            "var(--maker-secondary-bg)"
+            "color-mix(in srgb, var(--maker-accent) 10%, transparent)"
         } else {
             "transparent"
         },
@@ -3758,11 +3734,11 @@ fn titlebar_icon_button_style(active: bool) -> String {
 }
 
 fn titlebar_setup_button_style() -> &'static str {
-    "display:flex; align-items:center; width:min(360px, 100%); min-width:0; height:32px; padding:0 12px; border:none; border-radius:8px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border);"
+    "display:flex; align-items:center; width:min(360px, 100%); min-width:0; height:32px; padding:0 4px; border:none; border-radius:0; background:transparent; box-shadow:none;"
 }
 
 fn titlebar_center_field_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:8px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border); overflow:hidden;"
+    "display:flex; align-items:center; justify-content:center; gap:10px; width:100%; min-width:0; height:32px; padding:0 8px; border-radius:0; background:transparent; box-shadow:none; overflow:hidden;"
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
@@ -3776,12 +3752,16 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
     }
 }
 
-fn stage_banner_style(compact: bool) -> &'static str {
+fn viewport_header_style(compact: bool) -> &'static str {
     if compact {
-        "padding:18px 20px 18px 20px; border-radius:20px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "display:flex; flex-direction:column; gap:0; padding:4px 4px 2px 4px;"
     } else {
-        "padding:22px 22px 20px 22px; border-radius:20px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "display:flex; flex-direction:column; gap:0; padding:6px 4px 4px 4px;"
     }
+}
+
+fn header_meta_chip_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:3px; min-width:110px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--maker-card-bg) 66%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 78%, transparent);"
 }
 
 fn stage_pill_style(active: bool, complete: bool, accent: &str) -> String {
