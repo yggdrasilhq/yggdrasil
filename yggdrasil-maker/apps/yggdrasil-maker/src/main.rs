@@ -238,6 +238,7 @@ struct AppProfileArgs {
 #[cfg(feature = "desktop-ui")]
 #[derive(Args, Debug)]
 struct AppBoolArgs {
+    #[arg(action = clap::ArgAction::Set)]
     open: bool,
     #[arg(long, default_value_t = 8_000)]
     timeout_ms: u64,

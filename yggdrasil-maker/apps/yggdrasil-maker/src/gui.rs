@@ -35,9 +35,9 @@ use tokio::time::sleep;
 use yggterm_core::append_trace_event;
 use yggui::{
     ChromePalette, HoveredChromeControl, RailHeader, RailScrollBody, RailSectionTitle,
-    SideRailShell, TOAST_CSS, TitlebarChrome, ToastItem, ToastPalette, ToastTone, ToastViewport,
-    WindowControlsStrip, default_theme_editor_spec, dominant_accent, gradient_css,
-    preview_surface_css, shell_tint,
+    SideRailShell, THEME_EDITOR_SWATCHES, TOAST_CSS, TitlebarChrome, ToastItem, ToastPalette,
+    ToastTone, ToastViewport, WindowControlsStrip, append_theme_stop, clamp_theme_spec,
+    default_theme_editor_spec, dominant_accent, gradient_css, preview_surface_css, shell_tint,
 };
 use yggui_contract::{UiTheme, YgguiThemeColorStop, YgguiThemeSpec};
 
@@ -59,9 +59,10 @@ static BOOTSTRAP: Lazy<Mutex<Option<MakerBootstrap>>> = Lazy::new(|| Mutex::new(
 static APP_MOUNT_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 const LEFT_RAIL_WIDTH: usize = 248;
-const RIGHT_RAIL_WIDTH: usize = 276;
+const RIGHT_RAIL_WIDTH: usize = 318;
 const EDGE_RESIZE_HANDLE: usize = 5;
 const CORNER_RESIZE_HANDLE: usize = 10;
+const THEME_EDITOR_PAD_SIZE: f64 = 208.0;
 const UI_FONT_FAMILY: &str = "\"Inter Variable\", \"Inter\", system-ui, sans-serif";
 
 fn set_bootstrap(bootstrap: MakerBootstrap) {
@@ -231,6 +232,9 @@ struct MakerUiState {
     next_notification_id: u64,
     alt_overlay_active: bool,
     appearance_panel_open: bool,
+    theme_editor_draft: YgguiThemeSpec,
+    theme_editor_selected_stop: Option<usize>,
+    theme_editor_drag_stop: Option<usize>,
     hovered_control: Option<HoveredChromeControl>,
     maximized: bool,
     always_on_top: bool,
@@ -239,6 +243,7 @@ struct MakerUiState {
 
 impl MakerUiState {
     fn new(app: MakerApp, trace_root: PathBuf, shell_settings: MakerShellSettings) -> Self {
+        let theme_editor_draft = clamp_theme_spec(&shell_settings.yggui_theme);
         Self {
             app,
             trace_root,
@@ -263,6 +268,9 @@ impl MakerUiState {
             next_notification_id: 1,
             alt_overlay_active: false,
             appearance_panel_open: false,
+            theme_editor_draft,
+            theme_editor_selected_stop: None,
+            theme_editor_drag_stop: None,
             hovered_control: None,
             maximized: false,
             always_on_top: false,
@@ -287,6 +295,7 @@ impl MakerUiState {
         state.utility_pane_open = bootstrap.shell_settings.utility_pane_open;
         state.right_panel_mode = bootstrap.shell_settings.right_panel_mode;
         state.sidebar_open = bootstrap.shell_settings.sidebar_open;
+        state.theme_editor_draft = clamp_theme_spec(&state.shell_settings.yggui_theme);
         state.sync_truth_surface_for_stage();
         state
     }
@@ -428,6 +437,7 @@ impl MakerUiState {
 
     fn open_build_details(&mut self) {
         self.success_state = None;
+        self.appearance_panel_open = false;
         self.right_panel_mode = RightPanelMode::Build;
         self.utility_pane_open = true;
     }
@@ -499,6 +509,7 @@ impl MakerUiState {
     }
 
     fn sync_truth_surface_for_stage(&mut self) {
+        self.appearance_panel_open = false;
         let mode = default_truth_mode_for_stage(self.current_setup.journey_stage);
         self.right_panel_mode = mode;
         self.utility_pane_open = true;
@@ -506,11 +517,130 @@ impl MakerUiState {
         self.shell_settings.utility_pane_open = true;
         self.persist_shell_settings();
     }
+
+    fn open_appearance_sidebar(&mut self) {
+        self.appearance_panel_open = true;
+        self.right_panel_mode = RightPanelMode::Appearance;
+        self.utility_pane_open = true;
+        self.shell_settings.utility_pane_open = true;
+        self.theme_editor_draft = clamp_theme_spec(&self.shell_settings.yggui_theme);
+        self.theme_editor_selected_stop = self.theme_editor_draft.colors.first().map(|_| 0);
+        self.theme_editor_drag_stop = None;
+        self.persist_shell_settings();
+    }
+
+    fn close_appearance_sidebar(&mut self) {
+        self.appearance_panel_open = false;
+        self.right_panel_mode = default_truth_mode_for_stage(self.current_setup.journey_stage);
+        self.theme_editor_drag_stop = None;
+    }
+
+    fn save_theme_editor(&mut self) {
+        self.shell_settings.yggui_theme = clamp_theme_spec(&self.theme_editor_draft);
+        self.theme_editor_drag_stop = None;
+        self.persist_shell_settings();
+        self.push_notification(
+            ToastTone::Success,
+            "Theme Updated",
+            "Yggui shell theme applied.".to_owned(),
+        );
+    }
+
+    fn reset_theme_editor(&mut self) {
+        self.theme_editor_draft = default_theme_editor_spec();
+        self.theme_editor_selected_stop = self.theme_editor_draft.colors.first().map(|_| 0);
+        self.theme_editor_drag_stop = None;
+    }
+
+    fn seed_theme_editor(&mut self) {
+        self.theme_editor_draft = default_theme_editor_spec();
+        self.theme_editor_selected_stop = self.theme_editor_draft.colors.first().map(|_| 0);
+        self.theme_editor_drag_stop = None;
+    }
+
+    fn add_theme_stop(&mut self, color: Option<&str>) {
+        let next = append_theme_stop(&self.theme_editor_draft, color);
+        if next.colors.len() == self.theme_editor_draft.colors.len() {
+            return;
+        }
+        self.theme_editor_draft = next;
+        self.theme_editor_selected_stop = self.theme_editor_draft.colors.len().checked_sub(1);
+    }
+
+    fn add_theme_stop_at(&mut self, x: f32, y: f32) {
+        self.add_theme_stop(None);
+        if let Some(index) = self.theme_editor_selected_stop
+            && let Some(stop) = self.theme_editor_draft.colors.get_mut(index)
+        {
+            stop.x = x.clamp(0.0, 1.0);
+            stop.y = y.clamp(0.0, 1.0);
+        }
+        self.theme_editor_draft = clamp_theme_spec(&self.theme_editor_draft);
+    }
+
+    fn select_theme_stop(&mut self, index: usize) {
+        if index < self.theme_editor_draft.colors.len() {
+            self.theme_editor_selected_stop = Some(index);
+        }
+    }
+
+    fn begin_theme_drag(&mut self, index: usize) {
+        self.select_theme_stop(index);
+        self.theme_editor_drag_stop = Some(index);
+    }
+
+    fn move_theme_stop(&mut self, x: f32, y: f32) {
+        let Some(index) = self.theme_editor_drag_stop else {
+            return;
+        };
+        if let Some(stop) = self.theme_editor_draft.colors.get_mut(index) {
+            stop.x = x.clamp(0.0, 1.0);
+            stop.y = y.clamp(0.0, 1.0);
+        }
+    }
+
+    fn end_theme_drag(&mut self) {
+        self.theme_editor_drag_stop = None;
+    }
+
+    fn remove_selected_theme_stop(&mut self) {
+        let Some(index) = self.theme_editor_selected_stop else {
+            return;
+        };
+        if index >= self.theme_editor_draft.colors.len() {
+            return;
+        }
+        self.theme_editor_draft.colors.remove(index);
+        self.theme_editor_selected_stop = if self.theme_editor_draft.colors.is_empty() {
+            None
+        } else {
+            Some(index.min(self.theme_editor_draft.colors.len() - 1))
+        };
+    }
+
+    fn update_selected_theme_color(&mut self, color: String) {
+        let Some(index) = self.theme_editor_selected_stop else {
+            return;
+        };
+        if let Some(stop) = self.theme_editor_draft.colors.get_mut(index) {
+            stop.color = color;
+        }
+        self.theme_editor_draft = clamp_theme_spec(&self.theme_editor_draft);
+    }
+
+    fn update_theme_brightness(&mut self, value: f32) {
+        self.theme_editor_draft.brightness = value.clamp(0.0, 1.0);
+    }
+
+    fn update_theme_grain(&mut self, value: f32) {
+        self.theme_editor_draft.grain = value.clamp(0.0, 1.0);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum RightPanelMode {
+    Appearance,
     Config,
     Plan,
     Build,
@@ -519,6 +649,7 @@ pub(crate) enum RightPanelMode {
 impl RightPanelMode {
     fn label(self) -> &'static str {
         match self {
+            Self::Appearance => "Appearance",
             Self::Config => "Config",
             Self::Plan => "Plan",
             Self::Build => "Build",
@@ -535,6 +666,7 @@ impl FromStr for RightPanelMode {
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
         match value {
+            "appearance" => Ok(Self::Appearance),
             "config" => Ok(Self::Config),
             "plan" => Ok(Self::Plan),
             "build" => Ok(Self::Build),
@@ -569,6 +701,23 @@ struct BuildSuccessState {
     artifact_path: String,
     profile_label: String,
     output_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SidebarTreeRow {
+    Folder {
+        key: String,
+        label: String,
+        depth: usize,
+    },
+    Setup {
+        key: String,
+        setup_id: String,
+        title: String,
+        subtitle: String,
+        depth: usize,
+        selected: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -746,23 +895,20 @@ fn app() -> Element {
     }
 
     let snapshot = state.read().clone();
-    let accent = dominant_accent(&snapshot.shell_settings.yggui_theme, "#72bef7");
-    let shell_gradient = gradient_css(
-        snapshot.shell_settings.theme,
-        &snapshot.shell_settings.yggui_theme,
-    );
-    let shell_tint_fill = shell_tint(
-        snapshot.shell_settings.theme,
-        &snapshot.shell_settings.yggui_theme,
-    );
-    let preview_surface = preview_surface_css(
-        snapshot.shell_settings.theme,
-        &snapshot.shell_settings.yggui_theme,
-    );
+    let active_theme_spec = if snapshot.appearance_panel_open {
+        clamp_theme_spec(&snapshot.theme_editor_draft)
+    } else {
+        clamp_theme_spec(&snapshot.shell_settings.yggui_theme)
+    };
+    let accent = dominant_accent(&active_theme_spec, "#72bef7");
+    let shell_gradient = gradient_css(snapshot.shell_settings.theme, &active_theme_spec);
+    let shell_tint_fill = shell_tint(snapshot.shell_settings.theme, &active_theme_spec);
+    let preview_surface = preview_surface_css(snapshot.shell_settings.theme, &active_theme_spec);
     let is_dark = is_dark_theme(snapshot.shell_settings.theme);
     let chrome_palette = chrome_palette(is_dark, &accent);
     let toast_palette = toast_palette(is_dark, &accent);
     let theme_vars = theme_css_variables(snapshot.shell_settings.theme, &accent);
+    let sidebar_tree_rows = build_sidebar_tree_rows(&snapshot);
 
     let titlebar_left = rsx! {
         div {
@@ -830,29 +976,69 @@ fn app() -> Element {
         div {
             style: "display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; width:100%;",
             button {
-                style: utility_button_style(snapshot.appearance_panel_open),
-                onmousedown: |evt| evt.stop_propagation(),
-                ondoubleclick: |evt| evt.stop_propagation(),
-                onclick: move |_| {
-                    state.with_mut(|ui| ui.appearance_panel_open = !ui.appearance_panel_open);
-                },
-                "Appearance"
-            }
-            button {
-                style: utility_button_style(snapshot.utility_pane_open),
+                title: "Appearance",
+                style: utility_icon_button_style(snapshot.right_panel_mode == RightPanelMode::Appearance),
                 onmousedown: |evt| evt.stop_propagation(),
                 ondoubleclick: |evt| evt.stop_propagation(),
                 onclick: move |_| {
                     state.with_mut(|ui| {
-                        ui.utility_pane_open = !ui.utility_pane_open;
-                        ui.shell_settings.utility_pane_open = ui.utility_pane_open;
+                        if ui.appearance_panel_open && ui.utility_pane_open {
+                            ui.utility_pane_open = false;
+                            ui.shell_settings.utility_pane_open = false;
+                            ui.close_appearance_sidebar();
+                            ui.persist_shell_settings();
+                        } else {
+                            ui.open_appearance_sidebar();
+                        }
+                    });
+                },
+                svg {
+                    width: "14",
+                    height: "14",
+                    view_box: "0 0 14 14",
+                    fill: "none",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    path { d: "M7 2.2C4.24 2.2 2 4.44 2 7.2C2 9.42 3.47 10.86 5.37 10.86H6.22C6.82 10.86 7.3 11.34 7.3 11.94C7.3 12.24 7.55 12.5 7.86 12.5H8.2C10.96 12.5 13.2 10.26 13.2 7.5C13.2 4.54 10.91 2.2 7.95 2.2H7Z", stroke: "currentColor", stroke_width: "1.05", stroke_linejoin: "round" }
+                    circle { cx: "4.5", cy: "6.1", r: "0.7", fill: "currentColor" }
+                    circle { cx: "6.9", cy: "4.8", r: "0.7", fill: "currentColor" }
+                    circle { cx: "9.4", cy: "5.9", r: "0.7", fill: "currentColor" }
+                }
+            }
+            button {
+                title: "Shell Truth",
+                style: utility_icon_button_style(snapshot.utility_pane_open && snapshot.right_panel_mode != RightPanelMode::Appearance),
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
+                onclick: move |_| {
+                    state.with_mut(|ui| {
+                        if ui.utility_pane_open && !ui.appearance_panel_open {
+                            ui.utility_pane_open = false;
+                            ui.shell_settings.utility_pane_open = false;
+                        } else {
+                            ui.utility_pane_open = true;
+                            ui.shell_settings.utility_pane_open = true;
+                            ui.appearance_panel_open = false;
+                            ui.right_panel_mode = default_truth_mode_for_stage(ui.current_setup.journey_stage);
+                            ui.shell_settings.right_panel_mode = ui.right_panel_mode;
+                        }
                         ui.persist_shell_settings();
                     });
                 },
                 if snapshot.alt_overlay_active {
                     span { style: shortcut_badge_style(), "T" }
                 }
-                "Truth"
+                svg {
+                    width: "14",
+                    height: "14",
+                    view_box: "0 0 14 14",
+                    fill: "none",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    rect { x: "2.3", y: "2.5", width: "9.4", height: "8.9", rx: "1.6", stroke: "currentColor", stroke_width: "1.05" }
+                    path { d: "M5 2.7V11.2", stroke: "currentColor", stroke_width: "1.05" }
+                    path { d: "M6.7 5.2H10.3", stroke: "currentColor", stroke_width: "1.05", stroke_linecap: "round" }
+                    path { d: "M6.7 7.1H9.7", stroke: "currentColor", stroke_width: "1.05", stroke_linecap: "round" }
+                    path { d: "M6.7 9H10", stroke: "currentColor", stroke_width: "1.05", stroke_linecap: "round" }
+                }
             }
             div { style: "flex:1; min-width:14px; max-width:26px; height:28px;" }
             WindowControlsStrip {
@@ -917,33 +1103,6 @@ fn app() -> Element {
                     right: titlebar_right,
                     on_toggle_maximized: move |_| toggle_maximized(state),
                 }
-                if snapshot.appearance_panel_open {
-                    AppearancePanel {
-                        accent: accent.clone(),
-                        shell_settings: snapshot.shell_settings.clone(),
-                        on_select_preset: move |preset: ThemePreset| {
-                            state.with_mut(|ui| {
-                                ui.shell_settings.yggui_theme = theme_spec_for_preset(preset);
-                                ui.persist_shell_settings();
-                            });
-                        },
-                        on_select_finish: move |finish: ShellFinish| {
-                            state.with_mut(|ui| {
-                                ui.shell_settings.finish = finish;
-                                ui.persist_shell_settings();
-                            });
-                        },
-                        on_select_theme: move |theme: UiTheme| {
-                            state.with_mut(|ui| {
-                                ui.shell_settings.theme = theme;
-                                ui.persist_shell_settings();
-                            });
-                        },
-                        on_close: move |_| {
-                            state.with_mut(|ui| ui.appearance_panel_open = false);
-                        },
-                    }
-                }
                 div {
                     style: "display:flex; flex:1; min-height:0; overflow:hidden;",
                     SideRailShell {
@@ -978,22 +1137,32 @@ fn app() -> Element {
                                             }
                                         }
                                         div {
-                                            style: "display:flex; flex-direction:column; gap:14px;",
-                                            for summary in snapshot.saved_setups.iter().cloned() {
-                                                button {
-                                                    style: rail_setup_card_style(summary.setup_id == snapshot.current_setup.setup_id),
-                                                    onclick: {
-                                                        let setup_id = summary.setup_id.clone();
-                                                        move |_| state.with_mut(|ui| ui.select_setup(&setup_id))
+                                            style: "display:flex; flex-direction:column; gap:7px;",
+                                            for row in sidebar_tree_rows.iter().cloned() {
+                                                match row {
+                                                    SidebarTreeRow::Folder { key, label, depth } => rsx! {
+                                                        div {
+                                                            key: "{key}",
+                                                            style: tree_folder_row_style(depth),
+                                                            span { style: tree_chevron_style(), "▾" }
+                                                            span { style: tree_folder_label_style(), "{label}" }
+                                                        }
                                                     },
-                                                    div {
-                                                        style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                                                        span { style: "font-size:13px; font-weight:700; color:var(--maker-text-strong); text-align:left;", "{sidebar_setup_primary(&summary.name)}" }
-                                                    }
-                                                    div {
-                                                        style: "font-size:11px; line-height:1.45; color:var(--maker-muted); text-align:left;",
-                                                        "{sidebar_setup_secondary(&summary.name, &summary.slug)}{sidebar_stage_suffix(summary.journey_stage)}"
-                                                    }
+                                                    SidebarTreeRow::Setup { key, setup_id, title, subtitle, depth, selected } => rsx! {
+                                                        button {
+                                                            key: "{key}",
+                                                            style: rail_setup_card_style(selected, depth),
+                                                            onclick: move |_| state.with_mut(|ui| ui.select_setup(&setup_id)),
+                                                            div {
+                                                                style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
+                                                                span { style: "font-size:13px; font-weight:700; color:var(--maker-text-strong); text-align:left;", "{title}" }
+                                                            }
+                                                            div {
+                                                                style: "font-size:11px; line-height:1.45; color:var(--maker-muted); text-align:left;",
+                                                                "{subtitle}"
+                                                            }
+                                                        }
+                                                    },
                                                 }
                                             }
                                         }
@@ -1124,77 +1293,82 @@ fn app() -> Element {
                         body: rsx! {
                             div {
                                 style: right_rail_container_style(),
-                                RailHeader {
-                                    title: "Shell Truth".to_owned(),
-                                    color: if is_dark {
-                                        "#cbd9e6".to_owned()
-                                    } else {
-                                        "#657b92".to_owned()
-                                    },
-                                }
-                                div {
-                                    style: "display:flex; gap:8px; padding:0 16px 8px 16px;",
-                                    for mode in RightPanelMode::all() {
-                                        button {
-                                            style: utility_tab_style(snapshot.right_panel_mode == mode, &accent),
-                                            onclick: move |_| {
-                                                state.with_mut(|ui| {
-                                                    ui.right_panel_mode = mode;
-                                                    ui.shell_settings.right_panel_mode = mode;
+                                if snapshot.right_panel_mode == RightPanelMode::Appearance {
+                                    RailHeader {
+                                        title: "Appearance".to_owned(),
+                                        color: if is_dark {
+                                            "#cbd9e6".to_owned()
+                                        } else {
+                                            "#657b92".to_owned()
+                                        },
+                                    }
+                                    RailScrollBody {
+                                        content: rsx! {
+                                            AppearanceSidebar {
+                                                accent: accent.clone(),
+                                                shell_settings: snapshot.shell_settings.clone(),
+                                                theme_draft: snapshot.theme_editor_draft.clone(),
+                                                selected_stop: snapshot.theme_editor_selected_stop,
+                                                preview_surface: preview_surface.clone(),
+                                                on_select_preset: move |preset: ThemePreset| state.with_mut(|ui| {
+                                                    ui.theme_editor_draft = theme_spec_for_preset(preset);
+                                                    ui.theme_editor_selected_stop = ui.theme_editor_draft.colors.first().map(|_| 0);
+                                                }),
+                                                on_select_finish: move |finish: ShellFinish| state.with_mut(|ui| {
+                                                    ui.shell_settings.finish = finish;
                                                     ui.persist_shell_settings();
-                                                });
-                                            },
-                                            "{mode.label()}"
+                                                }),
+                                                on_select_theme: move |theme: UiTheme| state.with_mut(|ui| {
+                                                    ui.shell_settings.theme = theme;
+                                                    ui.persist_shell_settings();
+                                                }),
+                                                on_begin_drag_stop: move |index: usize| state.with_mut(|ui| ui.begin_theme_drag(index)),
+                                                on_drag_stop: move |(x, y): (f32, f32)| state.with_mut(|ui| ui.move_theme_stop(x, y)),
+                                                on_end_drag_stop: move |_| state.with_mut(|ui| ui.end_theme_drag()),
+                                                on_double_click_pad: move |(x, y): (f32, f32)| state.with_mut(|ui| ui.add_theme_stop_at(x, y)),
+                                                on_pick_stop: move |index: usize| state.with_mut(|ui| ui.select_theme_stop(index)),
+                                                on_pick_swatch: move |color: String| state.with_mut(|ui| ui.update_selected_theme_color(color)),
+                                                on_update_stop_color: move |color: String| state.with_mut(|ui| ui.update_selected_theme_color(color)),
+                                                on_set_brightness: move |value: f32| state.with_mut(|ui| ui.update_theme_brightness(value)),
+                                                on_set_grain: move |value: f32| state.with_mut(|ui| ui.update_theme_grain(value)),
+                                                on_add_stop: move |_| state.with_mut(|ui| ui.add_theme_stop(None)),
+                                                on_remove_stop: move |_| state.with_mut(|ui| ui.remove_selected_theme_stop()),
+                                                on_reset: move |_| state.with_mut(|ui| ui.reset_theme_editor()),
+                                                on_seed: move |_| state.with_mut(|ui| ui.seed_theme_editor()),
+                                                on_save: move |_| state.with_mut(|ui| ui.save_theme_editor()),
+                                            }
                                         }
                                     }
-                                }
-                                RailScrollBody {
-                                    content: rsx! {
-                                        if snapshot.right_panel_mode == RightPanelMode::Config {
-                                            RailSectionTitle {
-                                                title: "Native Config".to_owned(),
-                                                muted_color: if is_dark {
-                                                    "#afc0d1".to_owned()
-                                                } else {
-                                                    "#75889c".to_owned()
+                                } else {
+                                    RailHeader {
+                                        title: "Shell Truth".to_owned(),
+                                        color: if is_dark {
+                                            "#cbd9e6".to_owned()
+                                        } else {
+                                            "#657b92".to_owned()
+                                        },
+                                    }
+                                    div {
+                                        style: "display:flex; gap:12px; padding:0 16px 8px 16px; border-bottom:1px solid var(--maker-card-border);",
+                                        for mode in RightPanelMode::all() {
+                                            button {
+                                                style: utility_tab_style(snapshot.right_panel_mode == mode, &accent),
+                                                onclick: move |_| {
+                                                    state.with_mut(|ui| {
+                                                        ui.right_panel_mode = mode;
+                                                        ui.shell_settings.right_panel_mode = mode;
+                                                        ui.persist_shell_settings();
+                                                    });
                                                 },
-                                            }
-                                            pre {
-                                                style: pre_panel_style(),
-                                                "{snapshot.config_preview}"
+                                                "{mode.label()}"
                                             }
                                         }
-                                        if snapshot.right_panel_mode == RightPanelMode::Plan {
-                                            RailSectionTitle {
-                                                title: "Build Plan".to_owned(),
-                                                muted_color: if is_dark {
-                                                    "#afc0d1".to_owned()
-                                                } else {
-                                                    "#75889c".to_owned()
-                                                },
-                                            }
-                                            pre {
-                                                style: pre_panel_style(),
-                                                "{snapshot.plan_preview}"
-                                            }
-                                        }
-                                        if snapshot.right_panel_mode == RightPanelMode::Build {
-                                            RailSectionTitle {
-                                                title: "Build Stream".to_owned(),
-                                                muted_color: if is_dark {
-                                                    "#afc0d1".to_owned()
-                                                } else {
-                                                    "#75889c".to_owned()
-                                                },
-                                            }
-                                            div {
-                                                style: rail_status_card_style(),
-                                                div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "{snapshot.build_status}" }
-                                                div { style: "font-size:11px; line-height:1.5; color:var(--maker-status-muted);", "{build_summary(&snapshot)}" }
-                                            }
-                                            if !snapshot.build_result.trim().is_empty() {
+                                    }
+                                    RailScrollBody {
+                                        content: rsx! {
+                                            if snapshot.right_panel_mode == RightPanelMode::Config {
                                                 RailSectionTitle {
-                                                    title: "Artifact Manifest".to_owned(),
+                                                    title: "Native Config".to_owned(),
                                                     muted_color: if is_dark {
                                                         "#afc0d1".to_owned()
                                                     } else {
@@ -1203,22 +1377,69 @@ fn app() -> Element {
                                                 }
                                                 pre {
                                                     style: pre_panel_style(),
-                                                    "{snapshot.build_result}"
+                                                    "{snapshot.config_preview}"
                                                 }
                                             }
-                                            if snapshot.build_log.is_empty() {
-                                                div {
-                                                    style: rail_empty_note_style(),
-                                                    "Logs will appear here once the build starts."
-                                                }
-                                            } else {
+                                            if snapshot.right_panel_mode == RightPanelMode::Plan {
                                                 RailSectionTitle {
-                                                    title: "Live Output".to_owned(),
-                                                    muted_color: "#7d8fa4".to_owned(),
+                                                    title: "Build Plan".to_owned(),
+                                                    muted_color: if is_dark {
+                                                        "#afc0d1".to_owned()
+                                                    } else {
+                                                        "#75889c".to_owned()
+                                                    },
                                                 }
                                                 pre {
                                                     style: pre_panel_style(),
-                                                    "{snapshot.build_log.join(\"\\n\")}"
+                                                    "{snapshot.plan_preview}"
+                                                }
+                                            }
+                                            if snapshot.right_panel_mode == RightPanelMode::Build {
+                                                RailSectionTitle {
+                                                    title: "Build Stream".to_owned(),
+                                                    muted_color: if is_dark {
+                                                        "#afc0d1".to_owned()
+                                                    } else {
+                                                        "#75889c".to_owned()
+                                                    },
+                                                }
+                                                div {
+                                                    style: rail_status_card_style(),
+                                                    div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "{snapshot.build_status}" }
+                                                    div { style: "font-size:11px; line-height:1.5; color:var(--maker-status-muted);", "{build_summary(&snapshot)}" }
+                                                }
+                                                if !snapshot.build_result.trim().is_empty() {
+                                                    RailSectionTitle {
+                                                        title: "Artifact Manifest".to_owned(),
+                                                        muted_color: if is_dark {
+                                                            "#afc0d1".to_owned()
+                                                        } else {
+                                                            "#75889c".to_owned()
+                                                        },
+                                                    }
+                                                    pre {
+                                                        style: pre_panel_style(),
+                                                        "{snapshot.build_result}"
+                                                    }
+                                                }
+                                                if snapshot.build_log.is_empty() {
+                                                    div {
+                                                        style: rail_empty_note_style(),
+                                                        "Logs will appear here once the build starts."
+                                                    }
+                                                } else {
+                                                    RailSectionTitle {
+                                                        title: "Live Output".to_owned(),
+                                                        muted_color: if is_dark {
+                                                            "#afc0d1".to_owned()
+                                                        } else {
+                                                            "#75889c".to_owned()
+                                                        },
+                                                    }
+                                                    pre {
+                                                        style: pre_panel_style(),
+                                                        "{snapshot.build_log.join(\"\\n\")}"
+                                                    }
                                                 }
                                             }
                                         }
@@ -1277,6 +1498,7 @@ fn StudioCanvas(
     let next_stage = next_journey_stage(current_stage);
     let (stage_title, stage_copy) = stage_headline(current_stage);
     let hero_compact = current_stage != JourneyStage::Outcome;
+    let show_stage_banner = current_stage != JourneyStage::Build;
     let outcome_grid_style = if compact_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1296,40 +1518,42 @@ fn StudioCanvas(
     rsx! {
         div {
             style: "display:flex; flex-direction:column; gap:14px; max-width:920px; margin:0 auto;",
-            div {
-                style: format!(
-                    "{} {};",
-                    preview_surface,
-                    stage_banner_style(hero_compact)
-                ),
-                div {
-                    style: format!("font-size:12px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                    "{current_stage.label()} STAGE"
-                }
-                h1 {
-                    style: if hero_compact {
-                        "margin:8px 0 6px 0; font-size:30px; line-height:1.08; color:var(--maker-hero-title);"
-                    } else {
-                        "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:var(--maker-hero-title);"
-                    },
-                    "{stage_title}"
-                }
-                p {
-                    style: if hero_compact {
-                        "margin:0; max-width:760px; font-size:15px; line-height:1.65; color:var(--maker-hero-copy);"
-                    } else {
-                        "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
-                    },
-                    "{stage_copy}"
-                }
+            if show_stage_banner {
                 div {
                     style: format!(
-                        "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
-                        if hero_compact { 14 } else { 18 }
+                        "{} {};",
+                        preview_surface,
+                        stage_banner_style(hero_compact)
                     ),
-                    div { style: success_stat_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
-                    div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
-                    div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                    div {
+                        style: format!("font-size:12px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                        "{current_stage.label()} STAGE"
+                    }
+                    h1 {
+                        style: if hero_compact {
+                            "margin:8px 0 6px 0; font-size:30px; line-height:1.08; color:var(--maker-hero-title);"
+                        } else {
+                            "margin:10px 0 8px 0; font-size:40px; line-height:1.05; color:var(--maker-hero-title);"
+                        },
+                        "{stage_title}"
+                    }
+                    p {
+                        style: if hero_compact {
+                            "margin:0; max-width:760px; font-size:15px; line-height:1.65; color:var(--maker-hero-copy);"
+                        } else {
+                            "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
+                        },
+                        "{stage_copy}"
+                    }
+                    div {
+                        style: format!(
+                            "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
+                            if hero_compact { 14 } else { 18 }
+                        ),
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                        div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                    }
                 }
             }
 
@@ -1730,19 +1954,39 @@ fn SuccessScreen(
 }
 
 #[component]
-fn AppearancePanel(
+fn AppearanceSidebar(
     accent: String,
     shell_settings: MakerShellSettings,
+    theme_draft: YgguiThemeSpec,
+    selected_stop: Option<usize>,
+    preview_surface: String,
     on_select_preset: EventHandler<ThemePreset>,
     on_select_finish: EventHandler<ShellFinish>,
     on_select_theme: EventHandler<UiTheme>,
-    on_close: EventHandler<()>,
+    on_begin_drag_stop: EventHandler<usize>,
+    on_drag_stop: EventHandler<(f32, f32)>,
+    on_end_drag_stop: EventHandler<MouseEvent>,
+    on_double_click_pad: EventHandler<(f32, f32)>,
+    on_pick_stop: EventHandler<usize>,
+    on_pick_swatch: EventHandler<String>,
+    on_update_stop_color: EventHandler<String>,
+    on_set_brightness: EventHandler<f32>,
+    on_set_grain: EventHandler<f32>,
+    on_add_stop: EventHandler<MouseEvent>,
+    on_remove_stop: EventHandler<MouseEvent>,
+    on_reset: EventHandler<MouseEvent>,
+    on_seed: EventHandler<MouseEvent>,
+    on_save: EventHandler<MouseEvent>,
 ) -> Element {
+    let active_stop = selected_stop.and_then(|index| theme_draft.colors.get(index).cloned());
+    let brightness_percent = (theme_draft.brightness * 100.0).round() as i32;
+    let grain_percent = (theme_draft.grain * 100.0).round() as i32;
+    let preview_has_stops = !theme_draft.colors.is_empty();
     rsx! {
         div {
-            style: "position:absolute; top:54px; right:14px; width:320px; z-index:70;",
+            style: "display:flex; flex-direction:column; gap:14px; min-width:0;",
             div {
-                style: appearance_panel_style(),
+                style: appearance_sidebar_card_style(),
                 div {
                     style: "display:flex; align-items:center; justify-content:space-between; gap:12px;",
                     div {
@@ -1753,13 +1997,8 @@ fn AppearancePanel(
                         }
                         div {
                             style: "font-size:13px; color:var(--maker-copy); line-height:1.5;",
-                            "Keep shell controls out of the titlebar, but keep the shared Ygg look easy to reach."
+                            "Shape the shared shell gradient, brightness, and finish from the right rail without leaving the build studio."
                         }
-                    }
-                    button {
-                        style: utility_button_style(false),
-                        onclick: move |_| on_close.call(()),
-                        "Done"
                     }
                 }
                 div {
@@ -1794,18 +2033,170 @@ fn AppearancePanel(
                     style: "display:flex; flex-direction:column; gap:8px;",
                     div { style: label_style(), "Shell Mode" }
                     div {
-                        style: "display:flex; flex-wrap:wrap; gap:8px;",
+                        style: appearance_segment_style(),
                         button {
-                            style: small_chip_style(shell_settings.theme == UiTheme::ZedLight, &accent),
+                            style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedLight),
                             onclick: move |_| on_select_theme.call(UiTheme::ZedLight),
                             "Light"
                         }
                         button {
-                            style: small_chip_style(shell_settings.theme == UiTheme::ZedDark, &accent),
+                            style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedDark),
                             onclick: move |_| on_select_theme.call(UiTheme::ZedDark),
                             "Dark"
                         }
                     }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:10px;",
+                    div { style: label_style(), "Gradient Pad" }
+                    div {
+                        style: format!(
+                            "position:relative; width:100%; aspect-ratio:1 / 1; border-radius:18px; overflow:hidden; background:{}; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.46), 0 18px 38px rgba(84,113,137,0.12);",
+                            preview_surface
+                        ),
+                        onmousemove: move |evt| {
+                            let point = evt.element_coordinates();
+                            on_drag_stop.call((
+                                normalize_theme_editor_axis(point.x),
+                                normalize_theme_editor_axis(point.y),
+                            ));
+                        },
+                        onmouseup: move |evt| on_end_drag_stop.call(evt),
+                        onmouseleave: move |evt| on_end_drag_stop.call(evt),
+                        ondoubleclick: move |evt| {
+                            let point = evt.element_coordinates();
+                            on_double_click_pad.call((
+                                normalize_theme_editor_axis(point.x),
+                                normalize_theme_editor_axis(point.y),
+                            ));
+                        },
+                        div {
+                            style: "position:absolute; inset:0; background-image: linear-gradient(rgba(144,173,199,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(144,173,199,0.18) 1px, transparent 1px); background-size: 18px 18px; opacity:0.72; pointer-events:none;",
+                        }
+                        div {
+                            style: "position:absolute; inset:0; background-image: linear-gradient(rgba(255,255,255,0.24) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.24) 1px, transparent 1px); background-size: 72px 72px; opacity:0.46; pointer-events:none;",
+                        }
+                        if !preview_has_stops {
+                            div {
+                                style: "position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:18px; text-align:center; font-size:12px; font-weight:700; line-height:1.6; color:var(--maker-text-strong);",
+                                "Double-click to add a color stop"
+                            }
+                        }
+                        for (index, stop) in theme_draft.colors.iter().enumerate() {
+                            button {
+                                key: "maker-theme-stop-{index}",
+                                style: format!(
+                                    "position:absolute; left:calc({:.2}% - 10px); top:calc({:.2}% - 10px); width:20px; height:20px; border-radius:999px; border:{}; background:{}; box-shadow:0 8px 18px rgba(42,67,88,0.16);",
+                                    stop.x * 100.0,
+                                    stop.y * 100.0,
+                                    if selected_stop == Some(index) {
+                                        format!("3px solid {}", accent)
+                                    } else {
+                                        "2px solid rgba(255,255,255,0.88)".to_string()
+                                    },
+                                    stop.color
+                                ),
+                                onmousedown: move |evt| {
+                                    evt.stop_propagation();
+                                    on_begin_drag_stop.call(index);
+                                },
+                                onclick: move |_| on_pick_stop.call(index),
+                            }
+                        }
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div { style: label_style(), "Color Library" }
+                    div {
+                        style: "display:flex; flex-wrap:wrap; gap:8px;",
+                        for swatch in THEME_EDITOR_SWATCHES {
+                            button {
+                                key: "maker-theme-swatch-{swatch}",
+                                style: format!(
+                                    "width:22px; height:22px; border-radius:999px; border:2px solid rgba(255,255,255,0.92); background:{}; box-shadow:0 8px 16px rgba(45,67,88,0.12);",
+                                    swatch
+                                ),
+                                onclick: move |_| on_pick_swatch.call(swatch.to_string()),
+                            }
+                        }
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div { style: label_style(), "Selected Color" }
+                    input {
+                        r#type: "color",
+                        value: active_stop.as_ref().map(|stop| stop.color.clone()).unwrap_or_else(|| accent.clone()),
+                        style: "width:100%; height:40px; border:none; border-radius:12px; background:transparent;",
+                        oninput: move |evt| on_update_stop_color.call(evt.value()),
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div {
+                        style: "display:flex; align-items:center; justify-content:space-between; gap:10px;",
+                        div { style: label_style(), "Brightness" }
+                        div { style: format!("font-size:11px; font-weight:700; color:{};", accent), "{brightness_percent}" }
+                    }
+                    input {
+                        r#type: "range",
+                        min: "0",
+                        max: "100",
+                        value: "{brightness_percent}",
+                        style: appearance_range_style(),
+                        oninput: move |evt| {
+                            let value = evt.value().parse::<f32>().unwrap_or(56.0) / 100.0;
+                            on_set_brightness.call(value);
+                        },
+                    }
+                }
+                div {
+                    style: "display:flex; flex-direction:column; gap:8px;",
+                    div {
+                        style: "display:flex; align-items:center; justify-content:space-between; gap:10px;",
+                        div { style: label_style(), "Grain" }
+                        div { style: format!("font-size:11px; font-weight:700; color:{};", accent), "{grain_percent}" }
+                    }
+                    input {
+                        r#type: "range",
+                        min: "0",
+                        max: "100",
+                        value: "{grain_percent}",
+                        style: appearance_range_style(),
+                        oninput: move |evt| {
+                            let value = evt.value().parse::<f32>().unwrap_or(12.0) / 100.0;
+                            on_set_grain.call(value);
+                        },
+                    }
+                }
+                div {
+                    style: "display:flex; flex-wrap:wrap; gap:8px;",
+                    button {
+                        style: tertiary_button_style(),
+                        onclick: move |evt| on_add_stop.call(evt),
+                        "+ Stop"
+                    }
+                    button {
+                        style: tertiary_button_style(),
+                        onclick: move |evt| on_remove_stop.call(evt),
+                        "Remove"
+                    }
+                    button {
+                        style: tertiary_button_style(),
+                        onclick: move |evt| on_reset.call(evt),
+                        "Reset"
+                    }
+                    button {
+                        style: tertiary_button_style(),
+                        onclick: move |evt| on_seed.call(evt),
+                        "Starter"
+                    }
+                }
+                button {
+                    style: primary_rail_button_style(&accent),
+                    onclick: move |evt| on_save.call(evt),
+                    "Apply Theme"
                 }
             }
         }
@@ -1877,6 +2268,7 @@ fn start_build(mut state: Signal<MakerUiState>) {
             ui.build_result.clear();
             ui.build_status = "Building…".to_owned();
             ui.success_state = None;
+            ui.appearance_panel_open = false;
             ui.right_panel_mode = RightPanelMode::Build;
             ui.utility_pane_open = true;
             ui.shell_settings.utility_pane_open = true;
@@ -2203,6 +2595,7 @@ async fn process_pending_app_control_requests(
         }
         AppControlCommand::SetRightPanelMode { mode } => {
             state.with_mut(|ui| {
+                ui.appearance_panel_open = false;
                 ui.right_panel_mode = mode;
                 ui.shell_settings.right_panel_mode = mode;
                 ui.persist_shell_settings();
@@ -2210,7 +2603,13 @@ async fn process_pending_app_control_requests(
             snapshot_response(&request, &state.read(), desktop)
         }
         AppControlCommand::SetAppearancePanelOpen { open } => {
-            state.with_mut(|ui| ui.appearance_panel_open = open);
+            state.with_mut(|ui| {
+                if open {
+                    ui.open_appearance_sidebar();
+                } else {
+                    ui.close_appearance_sidebar();
+                }
+            });
             snapshot_response(&request, &state.read(), desktop)
         }
         AppControlCommand::StartBuild => {
@@ -2678,6 +3077,84 @@ fn sidebar_stage_suffix(stage: JourneyStage) -> String {
     format!(" · {}", stage.label())
 }
 
+fn build_sidebar_tree_rows(state: &MakerUiState) -> Vec<SidebarTreeRow> {
+    let mut entries = Vec::new();
+    for summary in state.saved_setups.iter().cloned() {
+        let Ok(document) = state.app.setup_store().load(&summary.setup_id) else {
+            continue;
+        };
+        let effective_profile = document
+            .setup
+            .profile_override
+            .unwrap_or_else(|| document.setup.preset.recommended_profile());
+        let mut path = vec![
+            document.setup.preset.slug().to_owned(),
+            effective_profile.slug().to_owned(),
+        ];
+        let mut flags = Vec::new();
+        if document.setup.hardware.with_nvidia {
+            flags.push("with-nvidia".to_owned());
+        }
+        if document.setup.hardware.enable_intel_arc_sriov {
+            flags.push("arc-sriov".to_owned());
+        }
+        if document.setup.hardware.with_lts {
+            flags.push("lts".to_owned());
+        }
+        if flags.is_empty() {
+            path.push("base".to_owned());
+        } else {
+            path.extend(flags);
+        }
+        entries.push((
+            path,
+            summary.modified_unix_secs,
+            summary.setup_id.clone(),
+            sidebar_setup_primary(&summary.name),
+            format!(
+                "{}{}",
+                sidebar_setup_secondary(&summary.name, &summary.slug),
+                sidebar_stage_suffix(summary.journey_stage)
+            ),
+            summary.setup_id == state.current_setup.setup_id,
+        ));
+    }
+    entries.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+
+    let mut rows = Vec::new();
+    let mut previous_path: Vec<String> = Vec::new();
+    for (path, _modified, setup_id, title, subtitle, selected) in entries {
+        let shared = previous_path
+            .iter()
+            .zip(path.iter())
+            .take_while(|(left, right)| left == right)
+            .count();
+        for depth in shared..path.len() {
+            let folder_path = path[..=depth].join("/");
+            rows.push(SidebarTreeRow::Folder {
+                key: format!("folder:{folder_path}"),
+                label: path[depth].clone(),
+                depth,
+            });
+        }
+        rows.push(SidebarTreeRow::Setup {
+            key: format!("setup:{setup_id}"),
+            setup_id,
+            title,
+            subtitle,
+            depth: path.len(),
+            selected,
+        });
+        previous_path = path;
+    }
+    rows
+}
+
 fn latest_result_summary(state: &MakerUiState) -> String {
     if let Some(success) = state.success_state.as_ref() {
         format!("{} at {}", success.artifact_name, success.output_path)
@@ -2893,6 +3370,10 @@ fn stop(color: &str, x: f32, y: f32, alpha: f32) -> YgguiThemeColorStop {
     }
 }
 
+fn normalize_theme_editor_axis(value: f64) -> f32 {
+    ((value / THEME_EDITOR_PAD_SIZE).clamp(0.0, 1.0)) as f32
+}
+
 fn chrome_palette(is_dark: bool, _accent: &str) -> ChromePalette {
     if is_dark {
         ChromePalette {
@@ -3061,7 +3542,7 @@ fn shell_surface_style(
     shell_tint_fill: &str,
     shell_gradient: &str,
 ) -> String {
-    let radius = if maximized { 0 } else { 16 };
+    let radius = if maximized { 0 } else { 10 };
     let blur = match finish {
         ShellFinish::Sleek => 10,
         ShellFinish::Crisp => 0,
@@ -3089,7 +3570,7 @@ fn shell_surface_style(
         "position:absolute; inset:{}px; display:flex; flex-direction:column; overflow:hidden; \
          border-radius:{}px; background-color:{}; background-image:{}; box-shadow:{}; \
          backdrop-filter:{}; -webkit-backdrop-filter:{};",
-        if maximized { 0 } else { 6 },
+        if maximized { 0 } else { 8 },
         radius,
         shell_tint_fill,
         shell_gradient,
@@ -3104,8 +3585,9 @@ fn left_rail_container_style() -> &'static str {
 }
 
 fn right_rail_container_style() -> &'static str {
-    "display:flex; flex-direction:column; height:100%; margin-left:8px; padding-left:6px; border-radius:24px 0 0 24px; \
-     background:var(--maker-rail-gradient); box-shadow:inset 18px 0 28px rgba(255,255,255,0.10);"
+    "display:flex; flex-direction:column; height:100%; margin-left:10px; padding-left:6px; \
+     background:linear-gradient(90deg, rgba(255,255,255,0.00) 0%, color-mix(in srgb, var(--maker-section-bg) 64%, transparent) 16%, color-mix(in srgb, var(--maker-section-bg) 88%, transparent) 100%); \
+     box-shadow:inset 1px 0 0 var(--maker-card-border);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
@@ -3152,6 +3634,28 @@ fn utility_button_style(active: bool) -> String {
     )
 }
 
+fn utility_icon_button_style(active: bool) -> String {
+    format!(
+        "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
+         background:{}; color:{}; box-shadow:{};",
+        if active {
+            "var(--maker-secondary-bg)"
+        } else {
+            "transparent"
+        },
+        if active {
+            "var(--maker-accent)"
+        } else {
+            "var(--maker-titlebar-muted)"
+        },
+        if active {
+            "inset 0 0 0 1px var(--maker-secondary-border)"
+        } else {
+            "none"
+        }
+    )
+}
+
 fn titlebar_icon_button_style(active: bool) -> String {
     format!(
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
@@ -3176,11 +3680,11 @@ fn titlebar_icon_button_style(active: bool) -> String {
 }
 
 fn titlebar_setup_button_style() -> &'static str {
-    "display:flex; align-items:center; width:min(360px, 100%); min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border);"
+    "display:flex; align-items:center; width:min(360px, 100%); min-width:0; height:32px; padding:0 12px; border:none; border-radius:8px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border);"
 }
 
 fn titlebar_center_field_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border); overflow:hidden;"
+    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:8px; background:var(--maker-titlebar-field-bg); box-shadow:inset 0 0 0 1px var(--maker-titlebar-field-border); overflow:hidden;"
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
@@ -3196,9 +3700,9 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
 
 fn stage_banner_style(compact: bool) -> &'static str {
     if compact {
-        "padding:20px 20px 18px 20px; border-radius:28px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "padding:18px 20px 18px 20px; border-radius:20px; box-shadow:0 18px 42px rgba(83,105,130,0.13), inset 0 0 0 1px rgba(255,255,255,0.72);"
     } else {
-        "padding:24px 22px 20px 22px; border-radius:28px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
+        "padding:22px 22px 20px 22px; border-radius:20px; box-shadow:0 22px 56px rgba(83,105,130,0.16), inset 0 0 0 1px rgba(255,255,255,0.72);"
     }
 }
 
@@ -3221,7 +3725,7 @@ fn shortcut_badge_style() -> &'static str {
 
 fn primary_button_style(accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; border:none; border-radius:11px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 22px color-mix(in srgb, {} 32%, transparent);",
+        "display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 22px color-mix(in srgb, {} 32%, transparent);",
         accent, accent
     )
 }
@@ -3231,7 +3735,7 @@ fn secondary_button_style() -> &'static str {
 }
 
 fn tertiary_button_style() -> &'static str {
-    "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:var(--maker-tertiary-bg); color:var(--maker-tertiary-text); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-tertiary-border);"
+    "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:10px; background:var(--maker-tertiary-bg); color:var(--maker-tertiary-text); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-tertiary-border);"
 }
 
 fn stage_footer_bar_style() -> &'static str {
@@ -3240,17 +3744,40 @@ fn stage_footer_bar_style() -> &'static str {
 
 fn primary_rail_button_style(accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; gap:8px; justify-content:center; width:100%; height:38px; border:none; border-radius:12px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px color-mix(in srgb, {} 36%, transparent);",
+        "display:inline-flex; align-items:center; gap:8px; justify-content:center; width:100%; height:38px; border:none; border-radius:10px; background:{}; color:white; font-size:12px; font-weight:800; box-shadow:0 10px 26px color-mix(in srgb, {} 36%, transparent);",
         accent, accent
     )
 }
 
-fn rail_setup_card_style(selected: bool) -> String {
+fn rail_setup_card_style(selected: bool, depth: usize) -> String {
+    let indent = 10 + depth.saturating_sub(1) * 12;
     if selected {
-        "display:flex; flex-direction:column; gap:8px; width:100%; border:none; border-radius:14px; padding:12px 12px 13px 12px; background:var(--maker-rail-selected-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-selected-border), 0 10px 24px rgba(91,118,151,0.10);".to_owned()
+        format!(
+            "display:flex; flex-direction:column; gap:8px; width:100%; border:none; border-radius:10px; padding:11px 12px 12px {}px; background:var(--maker-rail-selected-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-selected-border), 0 10px 24px rgba(91,118,151,0.10);",
+            indent
+        )
     } else {
-        "display:flex; flex-direction:column; gap:8px; width:100%; border:none; border-radius:14px; padding:12px 12px 13px 12px; background:var(--maker-rail-card-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);".to_owned()
+        format!(
+            "display:flex; flex-direction:column; gap:8px; width:100%; border:none; border-radius:10px; padding:11px 12px 12px {}px; background:var(--maker-rail-card-bg); box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);",
+            indent
+        )
     }
+}
+
+fn tree_folder_row_style(depth: usize) -> String {
+    let indent = 4 + depth * 12;
+    format!(
+        "display:flex; align-items:center; gap:7px; min-height:20px; padding-left:{}px; color:var(--maker-note); font-size:11px; font-weight:700; letter-spacing:0.01em; text-transform:none;",
+        indent
+    )
+}
+
+fn tree_chevron_style() -> &'static str {
+    "display:inline-flex; align-items:center; justify-content:center; width:12px; color:var(--maker-muted); font-size:10px;"
+}
+
+fn tree_folder_label_style() -> &'static str {
+    "color:var(--maker-note); font-size:11px; font-weight:700;"
 }
 
 fn rail_meta_card_style() -> &'static str {
@@ -3259,19 +3786,19 @@ fn rail_meta_card_style() -> &'static str {
 
 fn section_toggle_style(expanded: bool) -> String {
     if expanded {
-        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:12px; padding:10px 12px; background:var(--maker-rail-selected-bg); color:var(--maker-text-strong); font-size:12px; font-weight:800;".to_owned()
+        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:10px; padding:10px 12px; background:var(--maker-rail-selected-bg); color:var(--maker-text-strong); font-size:12px; font-weight:800;".to_owned()
     } else {
-        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:12px; padding:10px 12px; background:var(--maker-rail-meta-bg); color:var(--maker-text-strong); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);".to_owned()
+        "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:none; border-radius:10px; padding:10px 12px; background:var(--maker-rail-meta-bg); color:var(--maker-text-strong); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);".to_owned()
     }
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:22px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
+    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
 }
 
 fn selected_intent_card_style(accent: &str) -> String {
     format!(
-        "display:flex; flex-direction:column; gap:14px; padding:18px 18px 18px 18px; border-radius:22px; \
+        "display:flex; flex-direction:column; gap:14px; padding:18px 18px 18px 18px; border-radius:18px; \
          background:radial-gradient(circle at top right, color-mix(in srgb, {} 14%, white) 0%, rgba(255,255,255,0) 36%), \
          linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 82%, white) 0%, var(--maker-section-bg) 100%); \
          box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border), inset 0 1px 0 rgba(255,255,255,0.16);",
@@ -3280,11 +3807,11 @@ fn selected_intent_card_style(accent: &str) -> String {
 }
 
 fn secondary_preset_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:8px; padding:14px 14px 15px 14px; border:none; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border); text-align:left;"
+    "display:flex; flex-direction:column; gap:8px; padding:14px 14px 15px 14px; border:none; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border); text-align:left;"
 }
 
 fn proof_stack_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:18px; background:var(--maker-proof-bg); box-shadow:inset 0 0 0 1px var(--maker-proof-border);"
+    "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:14px; background:var(--maker-proof-bg); box-shadow:inset 0 0 0 1px var(--maker-proof-border);"
 }
 
 fn info_stack_style() -> &'static str {
@@ -3296,11 +3823,11 @@ fn info_row_style() -> &'static str {
 }
 
 fn identity_preview_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:20px; background:linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 86%, white) 0%, var(--maker-section-bg) 100%); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:16px; background:linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 86%, white) 0%, var(--maker-section-bg) 100%); box-shadow:0 18px 42px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn proof_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:15px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:12px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn option_button_style(selected: bool, accent: &str) -> String {
@@ -3315,7 +3842,7 @@ fn option_button_style(selected: bool, accent: &str) -> String {
 }
 
 fn input_style() -> &'static str {
-    "height:40px; padding:0 12px; border:none; border-radius:12px; background:var(--maker-input-bg); color:var(--maker-input-text); font-size:13px; box-shadow:inset 0 0 0 1px var(--maker-input-border);"
+    "height:40px; padding:0 12px; border:none; border-radius:10px; background:var(--maker-input-bg); color:var(--maker-input-text); font-size:13px; box-shadow:inset 0 0 0 1px var(--maker-input-border);"
 }
 
 fn label_style() -> &'static str {
@@ -3331,31 +3858,47 @@ fn section_copy_style() -> &'static str {
 }
 
 fn empty_note_style() -> &'static str {
-    "padding:12px 13px; border-radius:12px; background:var(--maker-empty-bg); color:var(--maker-muted); font-size:12px; line-height:1.58; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
+    "padding:12px 13px; border-radius:10px; background:var(--maker-empty-bg); color:var(--maker-muted); font-size:12px; line-height:1.58; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
 }
 
 fn rail_empty_note_style() -> &'static str {
-    "padding:10px 12px; border-radius:12px; background:transparent; color:var(--maker-muted); font-size:12px; line-height:1.5; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
+    "padding:10px 12px; border-radius:10px; background:transparent; color:var(--maker-muted); font-size:12px; line-height:1.5; box-shadow:inset 0 0 0 1px var(--maker-empty-border);"
 }
 
 fn pre_panel_style() -> &'static str {
-    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:var(--maker-panel-bg); color:var(--maker-panel-text); font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px var(--maker-panel-border);"
+    "margin:0; padding:14px 16px 16px 16px; border-radius:12px; background:var(--maker-panel-bg); color:var(--maker-panel-text); font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px var(--maker-panel-border);"
 }
 
-fn appearance_panel_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:14px; padding:16px; border-radius:18px; background:var(--maker-section-bg); box-shadow:0 18px 48px rgba(69,87,108,0.14), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);"
+fn appearance_sidebar_card_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:14px; padding:2px 0 0 0;"
+}
+
+fn appearance_segment_style() -> &'static str {
+    "display:flex; align-items:center; gap:4px; padding:4px; border:none; border-radius:999px; background:var(--maker-secondary-bg); box-shadow: inset 0 0 0 1px var(--maker-secondary-border);"
+}
+
+fn appearance_segment_button_style(selected: bool) -> &'static str {
+    if selected {
+        "flex:1; height:26px; border:none; border-radius:999px; background:var(--maker-card-bg); color:var(--maker-text-strong); font-size:11px; font-weight:700; box-shadow: inset 0 0 0 1px var(--maker-card-border);"
+    } else {
+        "flex:1; height:26px; border:none; border-radius:999px; background:transparent; color:var(--maker-muted); font-size:11px; font-weight:700;"
+    }
+}
+
+fn appearance_range_style() -> &'static str {
+    "width:100%; height:34px; appearance:none; background:transparent;"
 }
 
 fn status_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:14px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border);"
+    "display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:12px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border);"
 }
 
 fn rail_status_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:12px 12px 12px 12px; border-radius:12px; background:transparent; box-shadow:inset 0 0 0 1px var(--maker-status-border);"
+    "display:flex; flex-direction:column; gap:6px; padding:12px 12px 12px 12px; border-radius:10px; background:transparent; box-shadow:inset 0 0 0 1px var(--maker-status-border);"
 }
 
 fn success_stat_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:14px 15px; border-radius:16px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:6px; padding:14px 15px; border-radius:12px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn stat_label_style() -> &'static str {
