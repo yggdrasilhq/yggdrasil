@@ -2871,7 +2871,7 @@ fn shell_surface_style(
     let frame_outline = if maximized {
         "none"
     } else {
-        "inset 0 0 0 1px rgba(214,222,232,0.72)"
+        "inset 0 0 0 1px rgba(204,214,226,0.84)"
     };
     let shadow = if maximized {
         "0 24px 52px rgba(72,102,118,0.16)".to_owned()
@@ -2903,8 +2903,8 @@ fn left_rail_container_style() -> &'static str {
 
 fn right_rail_container_style() -> &'static str {
     "display:flex; flex-direction:column; height:100%; margin-left:8px; padding-left:6px; border-radius:24px 0 0 24px; \
-     background:linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(248,251,254,0.34) 18%, rgba(248,251,254,0.64) 100%); \
-     box-shadow:inset 18px 0 28px rgba(255,255,255,0.18);"
+     background:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(245,249,253,0.38) 16%, rgba(245,249,253,0.76) 100%); \
+     box-shadow:inset 18px 0 28px rgba(255,255,255,0.14);"
 }
 
 fn stage_chip_style(selected: bool, accent: &str) -> String {
@@ -2966,11 +2966,11 @@ fn titlebar_icon_button_style(active: bool) -> String {
 }
 
 fn titlebar_setup_button_style() -> &'static str {
-    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:rgba(255,255,255,0.86); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.56);"
+    "display:flex; align-items:center; width:100%; min-width:0; height:32px; padding:0 12px; border:none; border-radius:10px; background:rgba(255,255,255,0.92); box-shadow:inset 0 0 0 1px rgba(188,204,220,0.64);"
 }
 
 fn titlebar_center_field_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.84); box-shadow:inset 0 0 0 1px rgba(190,206,222,0.50); overflow:hidden;"
+    "display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-width:0; height:32px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.90); box-shadow:inset 0 0 0 1px rgba(188,204,220,0.58); overflow:hidden;"
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
@@ -3052,7 +3052,7 @@ fn section_toggle_style(expanded: bool) -> String {
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:22px; background:rgba(250,252,254,0.88); box-shadow:0 18px 42px rgba(88,107,129,0.09), inset 0 0 0 1px rgba(255,255,255,0.72); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
+    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:22px; background:rgba(250,252,254,0.92); box-shadow:0 18px 42px rgba(88,107,129,0.09), inset 0 0 0 1px rgba(255,255,255,0.76); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
 }
 
 fn selected_intent_card_style(accent: &str) -> String {
@@ -3078,7 +3078,7 @@ fn identity_preview_style() -> &'static str {
 }
 
 fn proof_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:15px; background:rgba(255,255,255,0.82); box-shadow:inset 0 0 0 1px rgba(196,210,224,0.48);"
+    "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:15px; background:rgba(255,255,255,0.90); box-shadow:inset 0 0 0 1px rgba(192,206,220,0.54);"
 }
 
 fn option_button_style(selected: bool, accent: &str) -> String {
@@ -3097,23 +3097,23 @@ fn input_style() -> &'static str {
 }
 
 fn label_style() -> &'static str {
-    "font-size:11px; font-weight:800; letter-spacing:0.05em; color:#70849a; text-transform:uppercase;"
+    "font-size:11px; font-weight:800; letter-spacing:0.05em; color:#61758b; text-transform:uppercase;"
 }
 
 fn section_title_style() -> &'static str {
-    "margin:0; font-size:24px; line-height:1.1; color:#26394b;"
+    "margin:0; font-size:24px; line-height:1.08; font-weight:800; color:#1f3346;"
 }
 
 fn section_copy_style() -> &'static str {
-    "margin:0; font-size:13px; line-height:1.65; color:#5e7288;"
+    "margin:0; font-size:13px; line-height:1.58; color:#52677d;"
 }
 
 fn empty_note_style() -> &'static str {
-    "padding:12px 13px; border-radius:12px; background:rgba(255,255,255,0.76); color:#71859a; font-size:12px; line-height:1.6; box-shadow:inset 0 0 0 1px rgba(198,210,222,0.46);"
+    "padding:12px 13px; border-radius:12px; background:rgba(255,255,255,0.84); color:#62778d; font-size:12px; line-height:1.58; box-shadow:inset 0 0 0 1px rgba(194,206,220,0.50);"
 }
 
 fn pre_panel_style() -> &'static str {
-    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:rgba(255,255,255,0.92); color:#42596f; font-size:11px; line-height:1.62; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px rgba(196,210,224,0.56);"
+    "margin:0; padding:14px 16px 16px 16px; border-radius:16px; background:rgba(255,255,255,0.95); color:#33495f; font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px rgba(190,204,218,0.62);"
 }
 
 fn appearance_panel_style() -> &'static str {
@@ -3129,9 +3129,9 @@ fn success_stat_style() -> &'static str {
 }
 
 fn stat_label_style() -> &'static str {
-    "font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#75889d;"
+    "font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#667b90;"
 }
 
 fn stat_value_style() -> &'static str {
-    "font-size:13px; font-weight:700; line-height:1.5; color:#2c4259; overflow-wrap:anywhere;"
+    "font-size:13px; font-weight:700; line-height:1.45; color:#243a50; overflow-wrap:anywhere;"
 }
