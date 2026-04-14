@@ -950,9 +950,10 @@ fn app() -> Element {
     let shell_tint_fill = shell_tint(snapshot.shell_settings.theme, &active_theme_spec);
     let preview_surface = preview_surface_css(snapshot.shell_settings.theme, &active_theme_spec);
     let is_dark = is_dark_theme(snapshot.shell_settings.theme);
+    let blur_supported = supports_live_blur();
     let chrome_palette = chrome_palette(is_dark, &accent);
     let toast_palette = toast_palette(is_dark, &accent);
-    let theme_vars = theme_css_variables(snapshot.shell_settings.theme, &accent);
+    let theme_vars = theme_css_variables(snapshot.shell_settings.theme, &accent, blur_supported);
     let sidebar_tree_rows = build_sidebar_tree_rows(&snapshot);
 
     let titlebar_left = rsx! {
@@ -1140,6 +1141,7 @@ fn app() -> Element {
                     snapshot.shell_settings.finish,
                     &shell_tint_fill,
                     &shell_gradient,
+                    blur_supported,
                 ),
                 TitlebarChrome {
                     background: "transparent".to_owned(),
@@ -3669,8 +3671,39 @@ fn is_dark_theme(theme: UiTheme) -> bool {
     matches!(theme, UiTheme::ZedDark)
 }
 
-fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
+fn supports_live_blur() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY")
+        .and_then(|value| (!value.is_empty()).then_some(value))
+        .is_some()
+}
+
+fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> String {
     if is_dark_theme(theme) {
+        let section_bg = if blur_supported {
+            "rgba(24,31,39,0.74)"
+        } else {
+            "rgba(18,24,31,0.92)"
+        };
+        let card_bg = if blur_supported {
+            "rgba(30,39,48,0.78)"
+        } else {
+            "rgba(29,38,47,0.94)"
+        };
+        let proof_bg = if blur_supported {
+            "rgba(23,31,39,0.58)"
+        } else {
+            "rgba(23,31,39,0.88)"
+        };
+        let panel_bg = if blur_supported {
+            "rgba(23,31,39,0.82)"
+        } else {
+            "rgba(20,28,35,0.96)"
+        };
+        let footer_bg = if blur_supported {
+            "rgba(23,31,39,0.74)"
+        } else {
+            "rgba(19,27,34,0.94)"
+        };
         format!(
             "--maker-accent:{accent};\
              --maker-accent-soft:color-mix(in srgb, {accent} 16%, transparent);\
@@ -3688,12 +3721,12 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-label:#8fa8bc;\
              --maker-stat-label:#8ca3b8;\
              --maker-stat-value:#edf4fb;\
-             --maker-section-bg:rgba(24,31,39,0.74);\
+             --maker-section-bg:{section_bg};\
              --maker-section-border:rgba(255,255,255,0.08);\
              --maker-section-shadow:0 18px 42px rgba(0,0,0,0.24);\
-             --maker-card-bg:rgba(30,39,48,0.78);\
+             --maker-card-bg:{card_bg};\
              --maker-card-border:rgba(137,157,177,0.22);\
-             --maker-proof-bg:rgba(23,31,39,0.58);\
+             --maker-proof-bg:{proof_bg};\
              --maker-proof-border:rgba(132,151,170,0.20);\
              --maker-input-bg:rgba(20,26,33,0.80);\
              --maker-input-border:rgba(133,152,170,0.24);\
@@ -3704,7 +3737,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-status-border:rgba(95,133,161,0.26);\
              --maker-status-text:#edf4fb;\
              --maker-status-muted:#adc0d1;\
-             --maker-panel-bg:rgba(23,31,39,0.82);\
+             --maker-panel-bg:{panel_bg};\
              --maker-panel-border:rgba(132,151,170,0.26);\
              --maker-panel-text:#deebf7;\
              --maker-secondary-bg:rgba(255,255,255,0.06);\
@@ -3723,10 +3756,35 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-rail-card-border:rgba(128,154,178,0.20);\
              --maker-rail-meta-bg:rgba(22,29,36,0.62);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(33,43,53,0.18) 14%, rgba(22,29,36,0.58) 100%);\
-             --maker-footer-bg:rgba(23,31,39,0.74);\
+             --maker-footer-bg:{footer_bg};\
              --maker-footer-border:rgba(255,255,255,0.08);"
         )
     } else {
+        let section_bg = if blur_supported {
+            "rgba(250,252,254,0.92)"
+        } else {
+            "rgba(248,250,252,0.98)"
+        };
+        let card_bg = if blur_supported {
+            "rgba(255,255,255,0.90)"
+        } else {
+            "rgba(255,255,255,0.98)"
+        };
+        let proof_bg = if blur_supported {
+            "rgba(255,255,255,0.68)"
+        } else {
+            "rgba(250,252,254,0.94)"
+        };
+        let panel_bg = if blur_supported {
+            "rgba(255,255,255,0.95)"
+        } else {
+            "rgba(252,253,254,0.99)"
+        };
+        let footer_bg = if blur_supported {
+            "rgba(250,252,254,0.94)"
+        } else {
+            "rgba(248,250,252,0.99)"
+        };
         format!(
             "--maker-accent:{accent};\
              --maker-accent-soft:color-mix(in srgb, {accent} 14%, transparent);\
@@ -3744,12 +3802,12 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-label:#61758b;\
              --maker-stat-label:#667b90;\
              --maker-stat-value:#243a50;\
-             --maker-section-bg:rgba(250,252,254,0.92);\
+             --maker-section-bg:{section_bg};\
              --maker-section-border:rgba(255,255,255,0.76);\
              --maker-section-shadow:0 18px 42px rgba(88,107,129,0.09);\
-             --maker-card-bg:rgba(255,255,255,0.90);\
+             --maker-card-bg:{card_bg};\
              --maker-card-border:rgba(192,206,220,0.54);\
-             --maker-proof-bg:rgba(255,255,255,0.68);\
+             --maker-proof-bg:{proof_bg};\
              --maker-proof-border:rgba(198,210,222,0.42);\
              --maker-input-bg:rgba(255,255,255,0.96);\
              --maker-input-border:rgba(194,206,218,0.60);\
@@ -3760,7 +3818,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-status-border:rgba(186,203,219,0.58);\
              --maker-status-text:#30475f;\
              --maker-status-muted:#7b8da1;\
-             --maker-panel-bg:rgba(255,255,255,0.95);\
+             --maker-panel-bg:{panel_bg};\
              --maker-panel-border:rgba(190,204,218,0.62);\
              --maker-panel-text:#33495f;\
              --maker-secondary-bg:rgba(255,255,255,0.86);\
@@ -3779,7 +3837,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str) -> String {
              --maker-rail-card-border:rgba(198,210,222,0.52);\
              --maker-rail-meta-bg:rgba(255,255,255,0.80);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(245,249,253,0.38) 16%, rgba(245,249,253,0.76) 100%);\
-             --maker-footer-bg:rgba(250,252,254,0.94);\
+             --maker-footer-bg:{footer_bg};\
              --maker-footer-border:rgba(255,255,255,0.76);"
         )
     }
@@ -3790,11 +3848,13 @@ fn shell_surface_style(
     finish: ShellFinish,
     shell_tint_fill: &str,
     shell_gradient: &str,
+    blur_supported: bool,
 ) -> String {
     let radius = if maximized { 0 } else { 10 };
     let blur = match finish {
-        ShellFinish::Sleek => 10,
+        ShellFinish::Sleek if blur_supported => 10,
         ShellFinish::Crisp => 0,
+        ShellFinish::Sleek => 0,
     };
     let saturation = match finish {
         ShellFinish::Sleek => 135,
