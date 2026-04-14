@@ -66,6 +66,21 @@ const EDGE_RESIZE_HANDLE: usize = 5;
 const CORNER_RESIZE_HANDLE: usize = 10;
 const THEME_EDITOR_PAD_SIZE: f64 = 208.0;
 const UI_FONT_FAMILY: &str = "\"Inter Variable\", \"Inter\", system-ui, sans-serif";
+const MAKER_MOTION_CSS: &str = r#"
+@keyframes makerPulseGlow {
+  0%, 100% { box-shadow: 0 10px 26px color-mix(in srgb, var(--maker-accent) 28%, transparent); }
+  50% { box-shadow: 0 14px 34px color-mix(in srgb, var(--maker-accent) 42%, transparent); }
+}
+@keyframes makerFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes makerProgressSweep {
+  0% { transform: scaleX(0.92); opacity: 0.74; }
+  50% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(0.92); opacity: 0.74; }
+}
+"#;
 
 fn set_bootstrap(bootstrap: MakerBootstrap) {
     if let Ok(mut guard) = BOOTSTRAP.lock() {
@@ -301,7 +316,14 @@ impl MakerUiState {
         state.sidebar_open = bootstrap.shell_settings.sidebar_open;
         state.collapsed_tree_nodes = BTreeSet::new();
         state.theme_editor_draft = clamp_theme_spec(&state.shell_settings.yggui_theme);
-        state.sync_truth_surface_for_stage();
+        if bootstrap.shell_settings.right_panel_mode == RightPanelMode::Appearance {
+            state.appearance_panel_open = true;
+            state.right_panel_mode = RightPanelMode::Appearance;
+            state.utility_pane_open = bootstrap.shell_settings.utility_pane_open;
+            state.theme_editor_selected_stop = state.theme_editor_draft.colors.first().map(|_| 0);
+        } else {
+            state.sync_truth_surface_for_stage();
+        }
         state
     }
 
@@ -1094,6 +1116,7 @@ fn app() -> Element {
 
     rsx! {
         style { "{TOAST_CSS}" }
+        style { "{MAKER_MOTION_CSS}" }
         style { {format!("html, body, #main {{ margin:0; width:100%; height:100%; background:transparent !important; overflow:hidden; }} body {{ overscroll-behavior:none; font-family:{}; }}", UI_FONT_FAMILY)} }
         div {
             id: "maker-shell-root",
@@ -1515,6 +1538,8 @@ fn StudioCanvas(
     let previous_stage = previous_journey_stage(current_stage);
     let next_stage = next_journey_stage(current_stage);
     let (stage_title, stage_copy) = stage_headline(current_stage);
+    let stage_index = journey_stage_index(current_stage) + 1;
+    let stage_total = journey_stages().len();
     let hero_compact = current_stage != JourneyStage::Outcome;
     let header_split_style = if compact_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
@@ -1547,8 +1572,15 @@ fn StudioCanvas(
                     div {
                         style: "display:flex; flex-direction:column; gap:0;",
                         div {
-                            style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                            "{current_stage.label()} STAGE"
+                            style: "display:flex; align-items:center; gap:10px; flex-wrap:wrap;",
+                            div {
+                                style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                                "{current_stage.label()} STAGE"
+                            }
+                            div {
+                                style: "display:inline-flex; align-items:center; gap:8px; padding:5px 9px; border-radius:999px; background:color-mix(in srgb, var(--maker-card-bg) 62%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 82%, transparent); font-size:11px; font-weight:700; color:var(--maker-copy);",
+                                "Step {stage_index} of {stage_total}"
+                            }
                         }
                         h1 {
                             style: if hero_compact {
@@ -1565,6 +1597,13 @@ fn StudioCanvas(
                                 "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
                             },
                             "{stage_copy}"
+                        }
+                        div {
+                            style: "display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; font-weight:700; color:var(--maker-copy);",
+                            span {
+                                style: format!("display:inline-flex; width:8px; height:8px; border-radius:999px; background:{}; box-shadow:0 0 0 6px color-mix(in srgb, {} 12%, transparent); animation:makerProgressSweep 2.6s ease-in-out infinite; transform-origin:center;", accent, accent),
+                            }
+                            "{stage_reassurance_copy(current_stage)}"
                         }
                         div {
                             style: format!(
@@ -1913,6 +1952,25 @@ fn StudioCanvas(
                     div { style: "font-size:13px; color:var(--maker-copy);", "{stage_footer_copy(current_stage)}" }
                 }
                 div {
+                    style: "display:flex; flex-direction:column; gap:6px; min-width:180px; flex:1 1 180px; max-width:260px;",
+                    div {
+                        style: "display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:11px; color:var(--maker-note);",
+                        span { "Guided progress" }
+                        span { "{stage_index}/{stage_total}" }
+                    }
+                    div {
+                        style: "position:relative; height:8px; border-radius:999px; overflow:hidden; background:color-mix(in srgb, var(--maker-card-bg) 72%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 82%, transparent);",
+                        div {
+                            style: format!(
+                                "height:100%; width:{:.2}%; border-radius:999px; background:linear-gradient(90deg, color-mix(in srgb, {} 80%, white) 0%, {} 100%); animation:makerProgressSweep 2.6s ease-in-out infinite; transform-origin:left center;",
+                                journey_stage_progress_percent(current_stage),
+                                accent,
+                                accent
+                            ),
+                        }
+                    }
+                }
+                div {
                     style: "display:flex; flex-wrap:wrap; gap:10px;",
                     if let Some(stage) = previous_stage {
                         button {
@@ -1923,9 +1981,9 @@ fn StudioCanvas(
                     }
                     if let Some(stage) = next_stage {
                         button {
-                            style: primary_button_style(&accent),
+                            style: guided_primary_button_style(&accent),
                             onclick: move |_| on_set_stage.call(stage),
-                            "Next: {stage.label()}"
+                            "Continue to {stage.label()}"
                         }
                     }
                 }
@@ -2329,7 +2387,7 @@ fn StageCartoon(stage: JourneyStage, accent: String, compact: bool) -> Element {
     let frame_style = if compact {
         "display:none;"
     } else {
-        "display:flex; align-items:center; justify-content:center; min-height:150px; padding:10px 0 0 0;"
+        "display:flex; align-items:center; justify-content:center; min-height:150px; padding:10px 0 0 0; animation:makerFloat 4.6s ease-in-out infinite;"
     };
     let stroke = if matches!(stage, JourneyStage::Build | JourneyStage::Boot) {
         "rgba(239,247,253,0.72)"
@@ -3098,8 +3156,8 @@ fn stage_precedes(candidate: JourneyStage, current: JourneyStage) -> bool {
 fn stage_headline(stage: JourneyStage) -> (&'static str, &'static str) {
     match stage {
         JourneyStage::Outcome => (
-            "Choose the machine intent.",
-            "Start with the thing you are actually trying to make. The preset is the honest first move because it sets the tone for the rest of the build studio.",
+            "What do you want to build?",
+            "Start with the thing you are actually trying to make. This first choice is not permanent, it just gives the build studio the right posture before you tune the details.",
         ),
         JourneyStage::Profile => (
             "Set the build posture.",
@@ -3124,27 +3182,60 @@ fn stage_headline(stage: JourneyStage) -> (&'static str, &'static str) {
     }
 }
 
+fn stage_reassurance_copy(stage: JourneyStage) -> &'static str {
+    match stage {
+        JourneyStage::Outcome => {
+            "Start simple. You can change the intent, profile, and hardware choices later."
+        }
+        JourneyStage::Profile => {
+            "You are only choosing the landing posture here. The emitted config will stay visible on the right."
+        }
+        JourneyStage::Personalize => {
+            "Give the machine a stable name now, then review the exact inputs before you launch anything."
+        }
+        JourneyStage::Review => {
+            "This is the calm truth check. If it looks honest here, the build step becomes straightforward."
+        }
+        JourneyStage::Build => {
+            "This is the launch moment. The next screen is the handoff, not another maze of settings."
+        }
+        JourneyStage::Boot => {
+            "You made the artifact. From here the app should help you reveal it and move on cleanly."
+        }
+    }
+}
+
 fn stage_footer_copy(stage: JourneyStage) -> &'static str {
     match stage {
         JourneyStage::Outcome => {
-            "Pick the machine intent first, then continue into the build posture."
+            "Pick the goal first, then continue into posture. Nothing is locked yet."
         }
         JourneyStage::Profile => {
-            "Set the artifact profile clearly before moving into identity and naming."
+            "Set the artifact profile clearly, then move into identity and naming."
         }
         JourneyStage::Personalize => {
-            "Keep the setup and hostname clean, then move into the truthful review."
+            "Keep the setup and hostname clean, then review the exact emitted inputs."
         }
-        JourneyStage::Review => {
-            "Save if needed, then continue into Build when the right rail looks honest."
-        }
+        JourneyStage::Review => "Save if needed, then continue when the right rail looks honest.",
         JourneyStage::Build => {
-            "This is the final launch step before the dedicated success handoff."
+            "Run the build when ready. After that, the app should switch into artifact handoff."
         }
         JourneyStage::Boot => {
             "Boot is the handoff moment. Return to Build if you need to inspect or regenerate the output."
         }
     }
+}
+
+fn journey_stage_index(stage: JourneyStage) -> usize {
+    journey_stages()
+        .iter()
+        .position(|candidate| *candidate == stage)
+        .unwrap_or(0)
+}
+
+fn journey_stage_progress_percent(stage: JourneyStage) -> f32 {
+    let total = journey_stages().len().max(1) as f32;
+    ((journey_stage_index(stage) as f32 + 1.0) / total) * 100.0
 }
 
 fn hardware_summary(state: &MakerUiState) -> String {
@@ -3875,6 +3966,13 @@ fn shortcut_badge_style() -> &'static str {
 fn primary_button_style(accent: &str) -> String {
     format!(
         "display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 22px color-mix(in srgb, {} 32%, transparent);",
+        accent, accent
+    )
+}
+
+fn guided_primary_button_style(accent: &str) -> String {
+    format!(
+        "display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 16px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 26px color-mix(in srgb, {} 30%, transparent); animation:makerPulseGlow 2.6s ease-in-out infinite;",
         accent, accent
     )
 }
