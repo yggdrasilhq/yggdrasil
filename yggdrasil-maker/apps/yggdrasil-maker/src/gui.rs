@@ -1350,6 +1350,7 @@ fn app() -> Element {
                                         content: rsx! {
                                             AppearanceSidebar {
                                                 accent: accent.clone(),
+                                                blur_supported: blur_supported,
                                                 shell_settings: snapshot.shell_settings.clone(),
                                                 theme_draft: snapshot.theme_editor_draft.clone(),
                                                 selected_stop: snapshot.theme_editor_selected_stop,
@@ -2043,6 +2044,7 @@ fn SuccessScreen(
 #[component]
 fn AppearanceSidebar(
     accent: String,
+    blur_supported: bool,
     shell_settings: MakerShellSettings,
     theme_draft: YgguiThemeSpec,
     selected_stop: Option<usize>,
@@ -2113,6 +2115,16 @@ fn AppearanceSidebar(
                                 onclick: move |_| on_select_finish.call(finish),
                                 "{finish.label()}"
                             }
+                        }
+                    }
+                    if !blur_supported {
+                        div {
+                            style: "padding:10px 12px; border-radius:12px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border); font-size:12px; line-height:1.55; color:var(--maker-status-muted);",
+                            strong {
+                                style: "display:block; margin-bottom:4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--maker-status-text);",
+                                "X11 Clarity Mode"
+                            }
+                            "Live glass blur is not dependable on this display backend, so Maker uses stronger surface fills here to keep the text readable."
                         }
                     }
                 }
@@ -3707,6 +3719,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
         format!(
             "--maker-accent:{accent};\
              --maker-accent-soft:color-mix(in srgb, {accent} 16%, transparent);\
+             --maker-surface-backdrop:{};\
              --maker-titlebar-text:#ecf4fb;\
              --maker-titlebar-muted:#d6e2ee;\
              --maker-titlebar-field-bg:rgba(29,37,46,0.74);\
@@ -3757,7 +3770,8 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-rail-meta-bg:rgba(22,29,36,0.62);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(33,43,53,0.18) 14%, rgba(22,29,36,0.58) 100%);\
              --maker-footer-bg:{footer_bg};\
-             --maker-footer-border:rgba(255,255,255,0.08);"
+             --maker-footer-border:rgba(255,255,255,0.08);",
+            if blur_supported { "blur(10px)" } else { "none" }
         )
     } else {
         let section_bg = if blur_supported {
@@ -3788,6 +3802,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
         format!(
             "--maker-accent:{accent};\
              --maker-accent-soft:color-mix(in srgb, {accent} 14%, transparent);\
+             --maker-surface-backdrop:{};\
              --maker-titlebar-text:#30465d;\
              --maker-titlebar-muted:#768ba0;\
              --maker-titlebar-field-bg:rgba(255,255,255,0.90);\
@@ -3838,7 +3853,8 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-rail-meta-bg:rgba(255,255,255,0.80);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(245,249,253,0.38) 16%, rgba(245,249,253,0.76) 100%);\
              --maker-footer-bg:{footer_bg};\
-             --maker-footer-border:rgba(255,255,255,0.76);"
+             --maker-footer-border:rgba(255,255,255,0.76);",
+            if blur_supported { "blur(10px)" } else { "none" }
         )
     }
 }
@@ -4110,7 +4126,7 @@ fn section_toggle_style(expanded: bool) -> String {
 }
 
 fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);"
+    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:var(--maker-surface-backdrop); -webkit-backdrop-filter:var(--maker-surface-backdrop);"
 }
 
 fn selected_intent_card_style(accent: &str) -> String {
