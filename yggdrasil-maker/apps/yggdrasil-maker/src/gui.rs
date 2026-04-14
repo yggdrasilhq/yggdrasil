@@ -3769,6 +3769,9 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-rail-card-border:rgba(128,154,178,0.20);\
              --maker-rail-meta-bg:rgba(22,29,36,0.62);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(33,43,53,0.18) 14%, rgba(22,29,36,0.58) 100%);\
+             --yggui-scrollbar-thumb:color-mix(in srgb, {accent} 28%, rgba(222,235,247,0.20));\
+             --yggui-scrollbar-thumb-hover:color-mix(in srgb, {accent} 40%, rgba(236,244,251,0.28));\
+             --yggui-scrollbar-track:rgba(255,255,255,0.03);\
              --maker-footer-bg:{footer_bg};\
              --maker-footer-border:rgba(255,255,255,0.08);",
             if blur_supported { "blur(10px)" } else { "none" }
@@ -3852,6 +3855,9 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-rail-card-border:rgba(198,210,222,0.52);\
              --maker-rail-meta-bg:rgba(255,255,255,0.80);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(245,249,253,0.38) 16%, rgba(245,249,253,0.76) 100%);\
+             --yggui-scrollbar-thumb:color-mix(in srgb, {accent} 34%, rgba(96,122,148,0.20));\
+             --yggui-scrollbar-thumb-hover:color-mix(in srgb, {accent} 46%, rgba(88,113,139,0.28));\
+             --yggui-scrollbar-track:rgba(61,88,114,0.06);\
              --maker-footer-bg:{footer_bg};\
              --maker-footer-border:rgba(255,255,255,0.76);",
             if blur_supported { "blur(10px)" } else { "none" }
