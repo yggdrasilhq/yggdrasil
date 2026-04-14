@@ -3753,6 +3753,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-panel-bg:{panel_bg};\
              --maker-panel-border:rgba(132,151,170,0.26);\
              --maker-panel-text:#deebf7;\
+             --maker-shell-clarity-fill:color-mix(in srgb, {accent} 14%, rgba(26,32,39,0.96));\
              --maker-secondary-bg:rgba(255,255,255,0.06);\
              --maker-secondary-border:rgba(161,179,196,0.24);\
              --maker-secondary-text:#e2edf7;\
@@ -3839,6 +3840,7 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-panel-bg:{panel_bg};\
              --maker-panel-border:rgba(190,204,218,0.62);\
              --maker-panel-text:#33495f;\
+             --maker-shell-clarity-fill:color-mix(in srgb, {accent} 10%, rgba(248,250,252,0.98));\
              --maker-secondary-bg:rgba(255,255,255,0.86);\
              --maker-secondary-border:rgba(188,203,217,0.52);\
              --maker-secondary-text:#35516a;\
@@ -3887,6 +3889,11 @@ fn shell_surface_style(
     } else {
         "inset 0 0 0 1px rgba(204,214,226,0.84)"
     };
+    let effective_fill = if blur_supported {
+        shell_tint_fill.to_owned()
+    } else {
+        "var(--maker-shell-clarity-fill)".to_owned()
+    };
     let shadow = if maximized {
         "0 24px 52px rgba(72,102,118,0.16)".to_owned()
     } else {
@@ -3903,7 +3910,7 @@ fn shell_surface_style(
          backdrop-filter:{}; -webkit-backdrop-filter:{};",
         if maximized { 0 } else { 8 },
         radius,
-        shell_tint_fill,
+        effective_fill,
         shell_gradient,
         shadow,
         backdrop,
