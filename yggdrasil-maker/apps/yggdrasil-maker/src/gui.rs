@@ -1516,6 +1516,11 @@ fn StudioCanvas(
     let next_stage = next_journey_stage(current_stage);
     let (stage_title, stage_copy) = stage_headline(current_stage);
     let hero_compact = current_stage != JourneyStage::Outcome;
+    let header_split_style = if compact_studio {
+        "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
+    } else {
+        "display:grid; grid-template-columns:minmax(0, 1.15fr) minmax(220px, 0.85fr); gap:18px; align-items:center;"
+    };
     let outcome_grid_style = if compact_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1538,33 +1543,44 @@ fn StudioCanvas(
             div {
                 style: viewport_header_style(hero_compact),
                 div {
-                    style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                    "{current_stage.label()} STAGE"
-                }
-                h1 {
-                    style: if hero_compact {
-                        "margin:6px 0 4px 0; font-size:28px; line-height:1.08; color:var(--maker-hero-title);"
-                    } else {
-                        "margin:8px 0 6px 0; font-size:38px; line-height:1.04; color:var(--maker-hero-title);"
-                    },
-                    "{stage_title}"
-                }
-                p {
-                    style: if hero_compact {
-                        "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:var(--maker-hero-copy);"
-                    } else {
-                        "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
-                    },
-                    "{stage_copy}"
-                }
-                div {
-                    style: format!(
-                        "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
-                        if hero_compact { 12 } else { 16 }
-                    ),
-                    div { style: header_meta_chip_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
-                    div { style: header_meta_chip_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
-                    div { style: header_meta_chip_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                    style: header_split_style,
+                    div {
+                        style: "display:flex; flex-direction:column; gap:0;",
+                        div {
+                            style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
+                            "{current_stage.label()} STAGE"
+                        }
+                        h1 {
+                            style: if hero_compact {
+                                "margin:6px 0 4px 0; font-size:28px; line-height:1.08; color:var(--maker-hero-title);"
+                            } else {
+                                "margin:8px 0 6px 0; font-size:38px; line-height:1.04; color:var(--maker-hero-title);"
+                            },
+                            "{stage_title}"
+                        }
+                        p {
+                            style: if hero_compact {
+                                "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:var(--maker-hero-copy);"
+                            } else {
+                                "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
+                            },
+                            "{stage_copy}"
+                        }
+                        div {
+                            style: format!(
+                                "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
+                                if hero_compact { 12 } else { 16 }
+                            ),
+                            div { style: header_meta_chip_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
+                            div { style: header_meta_chip_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                            div { style: header_meta_chip_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
+                        }
+                    }
+                    StageCartoon {
+                        stage: current_stage,
+                        accent: accent.clone(),
+                        compact: compact_studio,
+                    }
                 }
             }
 
@@ -2291,19 +2307,86 @@ fn ReleaseLeafIcon(selected: bool) -> Element {
     rsx! {
         span {
             style: format!(
-                "display:inline-flex; flex:0 0 auto; width:8px; height:8px; border-radius:999px; background:{}; \
-                 box-shadow:0 0 0 1px color-mix(in srgb, {} 26%, transparent);",
+                "display:inline-flex; flex:0 0 auto; width:7px; height:7px; border-radius:999px; background:{}; \
+                 box-shadow:0 0 0 1px color-mix(in srgb, {} 22%, transparent);",
                 if selected {
                     "var(--maker-accent)"
                 } else {
-                    "color-mix(in srgb, var(--maker-muted) 74%, transparent)"
+                    "color-mix(in srgb, var(--maker-note) 76%, transparent)"
                 },
                 if selected {
                     "var(--maker-accent)"
                 } else {
-                    "var(--maker-muted)"
+                    "var(--maker-note)"
                 }
             ),
+        }
+    }
+}
+
+#[component]
+fn StageCartoon(stage: JourneyStage, accent: String, compact: bool) -> Element {
+    let frame_style = if compact {
+        "display:none;"
+    } else {
+        "display:flex; align-items:center; justify-content:center; min-height:150px; padding:10px 0 0 0;"
+    };
+    let stroke = if matches!(stage, JourneyStage::Build | JourneyStage::Boot) {
+        "rgba(239,247,253,0.72)"
+    } else {
+        "rgba(228,239,247,0.66)"
+    };
+    rsx! {
+        div {
+            style: frame_style,
+            svg {
+                width: "250",
+                height: "160",
+                view_box: "0 0 250 160",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                ellipse { cx: "126", cy: "136", rx: "84", ry: "18", fill: "rgba(12,18,26,0.12)" }
+                rect { x: "44", y: "34", width: "162", height: "78", rx: "18", fill: "rgba(255,255,255,0.08)", stroke: "{stroke}", stroke_width: "1.2" }
+                match stage {
+                    JourneyStage::Outcome => rsx! {
+                        rect { x: "64", y: "54", width: "50", height: "38", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        rect { x: "124", y: "54", width: "62", height: "38", rx: "12", fill: "color-mix(in srgb, {accent} 18%, rgba(255,255,255,0.06))", stroke: "{accent}", stroke_width: "1.4" }
+                        circle { cx: "156", cy: "73", r: "10", fill: "{accent}" }
+                        path { d: "M152 73L155 76L161 69", stroke: "white", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
+                    },
+                    JourneyStage::Profile => rsx! {
+                        rect { x: "60", y: "56", width: "40", height: "34", rx: "10", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        rect { x: "108", y: "48", width: "40", height: "42", rx: "10", fill: "color-mix(in srgb, {accent} 16%, rgba(255,255,255,0.08))", stroke: "{accent}", stroke_width: "1.4" }
+                        rect { x: "156", y: "60", width: "34", height: "30", rx: "10", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        path { d: "M128 118V94", stroke: "{accent}", stroke_width: "2", stroke_linecap: "round" }
+                        path { d: "M118 109L128 119L138 109", stroke: "{accent}", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round" }
+                    },
+                    JourneyStage::Personalize => rsx! {
+                        rect { x: "64", y: "54", width: "122", height: "34", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        path { d: "M80 72H142", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                        circle { cx: "166", cy: "71", r: "10", fill: "color-mix(in srgb, {accent} 20%, rgba(255,255,255,0.08))", stroke: "{accent}", stroke_width: "1.3" }
+                        path { d: "M166 64V78", stroke: "{accent}", stroke_width: "1.8", stroke_linecap: "round" }
+                        path { d: "M159 71H173", stroke: "{accent}", stroke_width: "1.8", stroke_linecap: "round" }
+                    },
+                    JourneyStage::Review => rsx! {
+                        rect { x: "66", y: "50", width: "112", height: "50", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        path { d: "M82 66H144", stroke: "rgba(255,255,255,0.62)", stroke_width: "1.8", stroke_linecap: "round" }
+                        path { d: "M82 78H138", stroke: "rgba(255,255,255,0.48)", stroke_width: "1.8", stroke_linecap: "round" }
+                        path { d: "M188 62L198 72L214 54", stroke: "{accent}", stroke_width: "3", stroke_linecap: "round", stroke_linejoin: "round" }
+                    },
+                    JourneyStage::Build => rsx! {
+                        rect { x: "60", y: "56", width: "70", height: "36", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        rect { x: "142", y: "56", width: "46", height: "36", rx: "12", fill: "color-mix(in srgb, {accent} 14%, rgba(255,255,255,0.08))", stroke: "{accent}", stroke_width: "1.4" }
+                        path { d: "M116 74H142", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                        path { d: "M134 66L142 74L134 82", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
+                    },
+                    JourneyStage::Boot => rsx! {
+                        rect { x: "72", y: "48", width: "98", height: "56", rx: "14", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
+                        rect { x: "98", y: "104", width: "46", height: "10", rx: "5", fill: "{accent}" }
+                        path { d: "M182 70L192 80L208 62", stroke: "{accent}", stroke_width: "3", stroke_linecap: "round", stroke_linejoin: "round" }
+                    },
+                }
+            }
         }
     }
 }
@@ -3137,6 +3220,7 @@ fn sidebar_setup_leaf_label(name: &str, fallback: &str) -> String {
 
 fn build_sidebar_tree_rows(state: &MakerUiState) -> Vec<SidebarTreeRow> {
     let mut entries = Vec::new();
+    let mut visible_per_path = std::collections::BTreeMap::<String, usize>::new();
     for summary in state.saved_setups.iter().cloned() {
         let Ok(document) = state.app.setup_store().load(&summary.setup_id) else {
             continue;
@@ -3164,12 +3248,19 @@ fn build_sidebar_tree_rows(state: &MakerUiState) -> Vec<SidebarTreeRow> {
         } else {
             path.extend(flags);
         }
+        let path_key = path.join("/");
+        let selected = summary.setup_id == state.current_setup.setup_id;
+        let visible_count = visible_per_path.entry(path_key).or_insert(0);
+        if !selected && *visible_count >= 3 {
+            continue;
+        }
+        *visible_count += 1;
         entries.push((
             path,
             summary.modified_unix_secs,
             summary.setup_id.clone(),
             sidebar_setup_leaf_label(&summary.name, &summary.slug),
-            summary.setup_id == state.current_setup.setup_id,
+            selected,
         ));
     }
     entries.sort_by(|left, right| {
@@ -3811,16 +3902,16 @@ fn rail_setup_card_style(selected: bool, depth: usize) -> String {
     let indent = 12 + depth.saturating_sub(1) * 14;
     if selected {
         format!(
-            "display:flex; align-items:center; gap:9px; width:100%; min-height:34px; border:none; border-radius:11px; \
-             padding:0 12px 0 {}px; background:var(--maker-rail-selected-bg); color:var(--maker-accent); \
-             box-shadow:inset 0 0 0 1px var(--maker-rail-selected-border), 0 12px 24px color-mix(in srgb, var(--maker-accent) 16%, transparent);",
+            "appearance:none; -webkit-appearance:none; display:flex; align-items:center; gap:8px; width:100%; min-height:24px; \
+             border:none; border-radius:0; padding:0 10px 0 {}px; background:transparent; color:var(--maker-accent); \
+             box-shadow:none; outline:none;",
             indent
         )
     } else {
         format!(
-            "display:flex; align-items:center; gap:9px; width:100%; min-height:34px; border:none; border-radius:11px; \
-             padding:0 12px 0 {}px; background:var(--maker-rail-card-bg); color:var(--maker-text-strong); \
-             box-shadow:inset 0 0 0 1px var(--maker-rail-card-border);",
+            "appearance:none; -webkit-appearance:none; display:flex; align-items:center; gap:8px; width:100%; min-height:24px; \
+             border:none; border-radius:0; padding:0 10px 0 {}px; background:transparent; color:var(--maker-note); \
+             box-shadow:none; outline:none;",
             indent
         )
     }
@@ -3829,8 +3920,9 @@ fn rail_setup_card_style(selected: bool, depth: usize) -> String {
 fn tree_folder_row_style(depth: usize) -> String {
     let indent = 6 + depth * 14;
     format!(
-        "display:flex; align-items:center; gap:8px; width:100%; min-height:24px; border:none; background:transparent; \
-         padding:0 6px 0 {}px; color:var(--maker-note); font-size:11px; font-weight:700; text-transform:none;",
+        "appearance:none; -webkit-appearance:none; display:flex; align-items:center; gap:8px; width:100%; min-height:24px; \
+         border:none; border-radius:0; background:transparent; padding:0 6px 0 {}px; color:var(--maker-note); \
+         font-size:11px; font-weight:700; text-transform:none; box-shadow:none; outline:none;",
         indent
     )
 }
@@ -3841,9 +3933,9 @@ fn tree_folder_label_style() -> &'static str {
 
 fn rail_setup_label_style(selected: bool) -> &'static str {
     if selected {
-        "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:800; color:var(--maker-text-strong); text-align:left;"
+        "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:700; color:var(--maker-accent); text-align:left;"
     } else {
-        "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; color:var(--maker-text-strong); text-align:left;"
+        "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:700; color:var(--maker-note); text-align:left;"
     }
 }
 
