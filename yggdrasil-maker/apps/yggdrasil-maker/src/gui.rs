@@ -2177,7 +2177,7 @@ fn StudioCanvas(
 
             if current_stage == JourneyStage::Build {
                 div {
-                    style: "display:flex; flex-direction:column; gap:16px;",
+                    style: "display:flex; flex-direction:column; gap:12px;",
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "Build" }
@@ -2210,7 +2210,7 @@ fn StudioCanvas(
                         }
                     }
                     div {
-                        style: "display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; align-items:center; justify-content:flex-end;",
+                        style: "display:flex; flex-wrap:wrap; gap:12px; margin-top:4px; align-items:center; justify-content:flex-end;",
                         button {
                             style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
@@ -4561,19 +4561,19 @@ fn floating_group_style() -> &'static str {
 }
 
 fn build_storybook_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:16px; padding:18px 18px 14px 18px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
+    "display:flex; flex-direction:column; gap:12px; padding:14px 16px 12px 16px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
 fn story_scene_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; justify-content:center; min-height:270px; padding:18px; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:10px; justify-content:center; min-height:220px; padding:14px; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn story_note_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:8px; min-height:122px; padding:14px 15px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:8px; min-height:100px; padding:12px 13px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn story_footer_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; padding-top:10px; border-top:1px solid color-mix(in srgb, var(--maker-section-border) 70%, transparent);"
+    "display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--maker-section-border) 70%, transparent);"
 }
 
 fn story_nav_tab_style(active: bool, accent: &str) -> String {
