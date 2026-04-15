@@ -738,6 +738,12 @@ struct BuildSuccessState {
     output_path: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutcomeChoiceKind {
+    Server,
+    Client,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SidebarTreeRow {
     Folder {
@@ -1014,7 +1020,7 @@ fn app() -> Element {
                     }
                     if index + 1 < journey_stages().len() {
                         span {
-                            style: "font-size:11px; color:var(--maker-titlebar-muted);",
+                            style: "font-size:13px; font-weight:500; color:var(--maker-titlebar-muted); opacity:0.9;",
                             "→"
                         }
                     }
@@ -1547,15 +1553,20 @@ fn StudioCanvas(
     let current_stage = state.current_setup.journey_stage;
     let compact_studio = state.window_width < 1280;
     let stacked_studio = state.window_width < 1340;
-    let primary_outcome_cards = preset_cards()
-        .iter()
-        .copied()
-        .filter(|card| card.id != PresetId::RecoveryAnchor)
-        .collect::<Vec<_>>();
-    let recovery_outcome_card = preset_cards()
-        .iter()
-        .copied()
-        .find(|card| card.id == PresetId::RecoveryAnchor);
+    let outcome_options = [
+        (
+            PresetId::Nas,
+            "Yggdrasil Server live-boot iso",
+            "Choose this for your NAS, server, or infrastructure liveboot ISO.",
+            OutcomeChoiceKind::Server,
+        ),
+        (
+            PresetId::PersonalWorkstation,
+            "Yggdrasil Client live-boot iso",
+            "Choose this for your laptop or desktop liveboot ISO.",
+            OutcomeChoiceKind::Client,
+        ),
+    ];
     let selected_profile = state
         .current_setup
         .setup
@@ -1565,11 +1576,6 @@ fn StudioCanvas(
         .iter()
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
-    let outcome_grid_style = if compact_studio {
-        "display:grid; grid-template-columns:minmax(0, 1fr); gap:12px; align-items:stretch;"
-    } else {
-        "display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:stretch;"
-    };
     let stage_split_style = if stacked_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1588,43 +1594,46 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:flex; flex-direction:column; gap:2px;",
-                        h2 { style: section_title_style(), "Choose a starting point" }
-                        p { style: section_copy_style(), "Pick one option." }
+                        style: "display:flex; flex-direction:column; gap:3px;",
+                        h2 { style: section_title_style(), "What do you want to make today?" }
                     }
                     div {
-                        style: outcome_grid_style,
-                        for card in primary_outcome_cards.into_iter() {
+                        style: if compact_studio {
+                            "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:stretch;"
+                        } else {
+                            "display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; align-items:stretch;"
+                        },
+                        for (preset_id, title, subtitle, kind) in outcome_options {
                             button {
-                                style: outcome_choice_card_style(card.id == state.current_setup.setup.preset, &accent),
-                                onclick: move |_| on_apply_preset.call(card.id),
+                                style: outcome_showcase_card_style(preset_id == state.current_setup.setup.preset, &accent),
+                                onclick: move |_| on_apply_preset.call(preset_id),
                                 div {
-                                    style: "display:flex; align-items:center; justify-content:space-between; gap:10px;",
-                                    h3 { style: "margin:0; font-size:18px; line-height:1.1; color:var(--maker-text-strong);", "{card.title}" }
+                                    style: "display:flex; align-items:flex-start; justify-content:space-between; gap:14px;",
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:8px; min-width:0; flex:1;",
+                                        h3 { style: "margin:0; font-size:23px; line-height:1.06; color:var(--maker-text-strong);", "{title}" }
+                                        p {
+                                            style: "margin:0; font-size:13px; line-height:1.5; color:var(--maker-copy); max-width:34ch;",
+                                            "{subtitle}"
+                                        }
+                                    }
                                     span {
-                                        style: outcome_choice_badge_style(card.id == state.current_setup.setup.preset, &accent),
-                                        {if card.id == state.current_setup.setup.preset { "Selected" } else { card.recommended_profile.slug() }}
+                                        style: outcome_choice_badge_style(preset_id == state.current_setup.setup.preset, &accent),
+                                        {if preset_id == state.current_setup.setup.preset { "Selected" } else { "Choose" }}
                                     }
                                 }
-                                p {
-                                    style: "margin:0; font-size:12px; line-height:1.45; color:var(--maker-copy);",
-                                    "{card.summary}"
+                                div {
+                                    style: "display:flex; align-items:flex-end; justify-content:space-between; gap:14px; min-height:118px;",
+                                    OutcomeChoiceArtwork {
+                                        kind: kind,
+                                        accent: accent.clone(),
+                                    }
+                                    div {
+                                        style: "display:flex; flex-direction:column; align-items:flex-end; gap:5px; padding-bottom:2px;",
+                                        span { style: "font-size:11px; font-weight:700; color:var(--maker-note); text-transform:uppercase; letter-spacing:0.06em;", if kind == OutcomeChoiceKind::Server { "Server path" } else { "Client path" } }
+                                        span { style: "font-size:12px; font-weight:700; color:var(--maker-text-strong);", if kind == OutcomeChoiceKind::Server { "Headless-first" } else { "Desktop-first" } }
+                                    }
                                 }
-                            }
-                        }
-                    }
-                    if let Some(card) = recovery_outcome_card {
-                        button {
-                            style: quiet_option_row_style(card.id == state.current_setup.setup.preset),
-                            onclick: move |_| on_apply_preset.call(card.id),
-                            div {
-                                style: "display:flex; align-items:center; justify-content:space-between; gap:12px;",
-                                span { style: "font-size:12px; font-weight:800; color:var(--maker-text-strong);", "{card.title}" }
-                                span { style: "font-size:11px; font-weight:700; color:var(--maker-note);", "{card.recommended_profile.slug()}" }
-                            }
-                            p {
-                                style: "margin:0; font-size:12px; line-height:1.45; color:var(--maker-note);",
-                                "{card.summary}"
                             }
                         }
                     }
@@ -2306,69 +2315,45 @@ fn ReleaseLeafIcon(selected: bool) -> Element {
 }
 
 #[component]
-fn StageCartoon(stage: JourneyStage, accent: String, compact: bool) -> Element {
-    let frame_style = if compact {
-        "display:none;"
-    } else {
-        "display:flex; align-items:center; justify-content:center; min-height:150px; padding:10px 0 0 0; animation:makerFloat 4.6s ease-in-out infinite;"
-    };
-    let stroke = if matches!(stage, JourneyStage::Build | JourneyStage::Boot) {
-        "rgba(239,247,253,0.72)"
-    } else {
-        "rgba(228,239,247,0.66)"
-    };
-    rsx! {
-        div {
-            style: frame_style,
+#[component]
+fn OutcomeChoiceArtwork(kind: OutcomeChoiceKind, accent: String) -> Element {
+    let glow = format!("color-mix(in srgb, {accent} 22%, transparent)");
+    match kind {
+        OutcomeChoiceKind::Server => rsx! {
             svg {
-                width: "250",
-                height: "160",
-                view_box: "0 0 250 160",
+                width: "196",
+                height: "112",
+                view_box: "0 0 196 112",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                ellipse { cx: "126", cy: "136", rx: "84", ry: "18", fill: "rgba(12,18,26,0.12)" }
-                rect { x: "44", y: "34", width: "162", height: "78", rx: "18", fill: "rgba(255,255,255,0.08)", stroke: "{stroke}", stroke_width: "1.2" }
-                match stage {
-                    JourneyStage::Outcome => rsx! {
-                        rect { x: "64", y: "54", width: "50", height: "38", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        rect { x: "124", y: "54", width: "62", height: "38", rx: "12", fill: "color-mix(in srgb, {accent} 18%, rgba(255,255,255,0.06))", stroke: "{accent}", stroke_width: "1.4" }
-                        circle { cx: "156", cy: "73", r: "10", fill: "{accent}" }
-                        path { d: "M152 73L155 76L161 69", stroke: "white", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
-                    },
-                    JourneyStage::Profile => rsx! {
-                        rect { x: "60", y: "56", width: "40", height: "34", rx: "10", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        rect { x: "108", y: "48", width: "40", height: "42", rx: "10", fill: "color-mix(in srgb, {accent} 16%, rgba(255,255,255,0.08))", stroke: "{accent}", stroke_width: "1.4" }
-                        rect { x: "156", y: "60", width: "34", height: "30", rx: "10", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        path { d: "M128 118V94", stroke: "{accent}", stroke_width: "2", stroke_linecap: "round" }
-                        path { d: "M118 109L128 119L138 109", stroke: "{accent}", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round" }
-                    },
-                    JourneyStage::Personalize => rsx! {
-                        rect { x: "64", y: "54", width: "122", height: "34", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        path { d: "M80 72H142", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                        circle { cx: "166", cy: "71", r: "10", fill: "color-mix(in srgb, {accent} 20%, rgba(255,255,255,0.08))", stroke: "{accent}", stroke_width: "1.3" }
-                        path { d: "M166 64V78", stroke: "{accent}", stroke_width: "1.8", stroke_linecap: "round" }
-                        path { d: "M159 71H173", stroke: "{accent}", stroke_width: "1.8", stroke_linecap: "round" }
-                    },
-                    JourneyStage::Review => rsx! {
-                        rect { x: "66", y: "50", width: "112", height: "50", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        path { d: "M82 66H144", stroke: "rgba(255,255,255,0.62)", stroke_width: "1.8", stroke_linecap: "round" }
-                        path { d: "M82 78H138", stroke: "rgba(255,255,255,0.48)", stroke_width: "1.8", stroke_linecap: "round" }
-                        path { d: "M188 62L198 72L214 54", stroke: "{accent}", stroke_width: "3", stroke_linecap: "round", stroke_linejoin: "round" }
-                    },
-                    JourneyStage::Build => rsx! {
-                        rect { x: "60", y: "56", width: "70", height: "36", rx: "12", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        rect { x: "142", y: "56", width: "46", height: "36", rx: "12", fill: "color-mix(in srgb, {accent} 14%, rgba(255,255,255,0.08))", stroke: "{accent}", stroke_width: "1.4" }
-                        path { d: "M116 74H142", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                        path { d: "M134 66L142 74L134 82", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
-                    },
-                    JourneyStage::Boot => rsx! {
-                        rect { x: "72", y: "48", width: "98", height: "56", rx: "14", fill: "rgba(255,255,255,0.10)", stroke: "{stroke}", stroke_width: "1" }
-                        rect { x: "98", y: "104", width: "46", height: "10", rx: "5", fill: "{accent}" }
-                        path { d: "M182 70L192 80L208 62", stroke: "{accent}", stroke_width: "3", stroke_linecap: "round", stroke_linejoin: "round" }
-                    },
-                }
+                ellipse { cx: "84", cy: "96", rx: "62", ry: "11", fill: "rgba(8,12,18,0.16)" }
+                rect { x: "28", y: "18", width: "112", height: "62", rx: "18", fill: "rgba(255,255,255,0.05)", stroke: "rgba(216,231,244,0.26)", stroke_width: "1.1" }
+                rect { x: "42", y: "31", width: "84", height: "14", rx: "7", fill: "rgba(255,255,255,0.07)" }
+                rect { x: "42", y: "51", width: "58", height: "10", rx: "5", fill: "rgba(255,255,255,0.06)" }
+                rect { x: "108", y: "50", width: "18", height: "18", rx: "9", fill: "{glow}" }
+                path { d: "M114 58L117 61L121 54", stroke: "{accent}", stroke_width: "2.1", stroke_linecap: "round", stroke_linejoin: "round" }
+                rect { x: "54", y: "82", width: "60", height: "6", rx: "3", fill: "rgba(255,255,255,0.08)" }
+                path { d: "M150 36H172", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+                path { d: "M161 26V48", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
             }
-        }
+        },
+        OutcomeChoiceKind::Client => rsx! {
+            svg {
+                width: "196",
+                height: "112",
+                view_box: "0 0 196 112",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                ellipse { cx: "100", cy: "96", rx: "62", ry: "11", fill: "rgba(8,12,18,0.16)" }
+                rect { x: "38", y: "18", width: "112", height: "66", rx: "20", fill: "rgba(255,255,255,0.05)", stroke: "rgba(216,231,244,0.26)", stroke_width: "1.1" }
+                rect { x: "49", y: "29", width: "90", height: "38", rx: "14", fill: "color-mix(in srgb, {accent} 14%, rgba(255,255,255,0.04))", stroke: "rgba(216,231,244,0.20)", stroke_width: "0.9" }
+                path { d: "M74 84H114", stroke: "rgba(255,255,255,0.14)", stroke_width: "6", stroke_linecap: "round" }
+                path { d: "M72 88H116", stroke: "rgba(255,255,255,0.08)", stroke_width: "4", stroke_linecap: "round" }
+                circle { cx: "153", cy: "36", r: "13", fill: "{glow}" }
+                path { d: "M146 36H160", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+                path { d: "M153 29V43", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+            }
+        },
     }
 }
 
@@ -3793,7 +3778,7 @@ fn utility_icon_button_style(active: bool) -> String {
 fn titlebar_step_arrow_style(enabled: bool) -> String {
     format!(
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
-         background:{}; color:{}; font-size:18px; font-weight:700; box-shadow:{}; opacity:{};",
+         background:{}; color:{}; font-size:19px; font-weight:600; box-shadow:{}; opacity:{};",
         if enabled {
             "color-mix(in srgb, var(--maker-card-bg) 74%, transparent)"
         } else {
@@ -3837,17 +3822,17 @@ fn titlebar_icon_button_style(active: bool) -> String {
 }
 
 fn titlebar_center_field_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:center; gap:10px; width:100%; min-width:0; height:32px; padding:0 8px; border-radius:0; background:transparent; box-shadow:none; overflow:hidden;"
+    "display:flex; align-items:center; justify-content:center; gap:12px; width:100%; min-width:0; height:34px; padding:0 10px; border-radius:0; background:transparent; box-shadow:none; overflow:hidden;"
 }
 
 fn titlebar_flow_label_style(stage: JourneyStage, current: JourneyStage) -> String {
     if stage == current {
-        "font-size:11px; font-weight:800; color:var(--maker-titlebar-text); white-space:nowrap;"
+        "font-size:13px; font-weight:500; color:var(--maker-titlebar-text); white-space:nowrap;"
             .to_owned()
     } else if stage_precedes(stage, current) {
-        "font-size:11px; font-weight:700; color:var(--maker-copy); white-space:nowrap;".to_owned()
+        "font-size:13px; font-weight:400; color:var(--maker-copy); white-space:nowrap;".to_owned()
     } else {
-        "font-size:11px; font-weight:700; color:var(--maker-titlebar-muted); white-space:nowrap;"
+        "font-size:13px; font-weight:400; color:var(--maker-titlebar-muted); white-space:nowrap;"
             .to_owned()
     }
 }
@@ -3946,13 +3931,13 @@ fn section_card_style() -> &'static str {
     "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:var(--maker-surface-backdrop); -webkit-backdrop-filter:var(--maker-surface-backdrop);"
 }
 
-fn outcome_choice_card_style(selected: bool, accent: &str) -> String {
+fn outcome_showcase_card_style(selected: bool, accent: &str) -> String {
     format!(
-        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; gap:10px; min-height:132px; padding:15px 15px 14px 15px; border:none; border-radius:12px; \
+        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; justify-content:space-between; gap:18px; min-height:232px; padding:18px 18px 16px 18px; border:none; border-radius:14px; \
          background:{}; text-align:left; box-shadow:{}; outline:none;",
         if selected {
             format!(
-                "linear-gradient(180deg, color-mix(in srgb, {} 12%, var(--maker-card-bg)) 0%, var(--maker-card-bg) 100%)",
+                "linear-gradient(180deg, color-mix(in srgb, {} 10%, var(--maker-card-bg)) 0%, var(--maker-card-bg) 100%)",
                 accent
             )
         } else {
@@ -3960,28 +3945,11 @@ fn outcome_choice_card_style(selected: bool, accent: &str) -> String {
         },
         if selected {
             format!(
-                "inset 0 0 0 1px color-mix(in srgb, {} 72%, var(--maker-card-border)), 0 12px 24px color-mix(in srgb, {} 12%, transparent)",
+                "inset 0 0 0 1px color-mix(in srgb, {} 68%, var(--maker-card-border)), 0 14px 28px color-mix(in srgb, {} 12%, transparent)",
                 accent, accent
             )
         } else {
             "inset 0 0 0 1px var(--maker-card-border)".to_owned()
-        }
-    )
-}
-
-fn quiet_option_row_style(selected: bool) -> String {
-    format!(
-        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; gap:6px; padding:12px 14px; border:none; border-radius:12px; \
-         background:{}; text-align:left; box-shadow:{}; outline:none;",
-        if selected {
-            "var(--maker-card-bg)"
-        } else {
-            "transparent"
-        },
-        if selected {
-            "inset 0 0 0 1px var(--maker-card-border)"
-        } else {
-            "inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 50%, transparent)"
         }
     )
 }
@@ -4103,7 +4071,7 @@ fn rail_empty_note_style() -> &'static str {
 }
 
 fn pre_panel_style() -> &'static str {
-    "margin:0; padding:14px 16px 16px 16px; border-radius:12px; background:var(--maker-panel-bg); color:var(--maker-panel-text); font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px var(--maker-panel-border);"
+    "margin:0; padding:14px 16px 16px 16px; border-radius:12px; background:transparent; color:var(--maker-panel-text); font-size:11px; line-height:1.58; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:inset 0 0 0 1px var(--maker-panel-border);"
 }
 
 fn appearance_sidebar_card_style() -> &'static str {
