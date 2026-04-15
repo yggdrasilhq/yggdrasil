@@ -2868,7 +2868,7 @@ fn update_repo_root(mut state: Signal<MakerUiState>, value: String) {
 fn update_profile(mut state: Signal<MakerUiState>, value: BuildProfile) {
     state.with_mut(|ui| {
         ui.current_setup.setup.profile_override = Some(value);
-        ui.set_journey_stage(JourneyStage::Profile);
+        ui.set_journey_stage(JourneyStage::Personalize);
         ui.success_state = None;
         ui.refresh_previews();
     });
