@@ -28,7 +28,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tao::event_loop::{EventLoop, EventLoopBuilder};
 #[cfg(target_os = "linux")]
 use tao::platform::unix::{EventLoopBuilderExtUnix, WindowExtUnix};
@@ -340,16 +340,46 @@ impl MakerUiState {
         }
     }
 
-    fn refresh_previews(&mut self) {
+    fn refresh_config_preview(&mut self) {
+        let started = Instant::now();
         self.config_preview = self
             .app
             .emit_config_toml(&self.current_setup)
             .unwrap_or_else(|error| format!("Config preview unavailable:\n{error}"));
+        self.trace_slow_preview_refresh("config", started.elapsed());
+    }
+
+    fn refresh_plan_preview(&mut self) {
+        let started = Instant::now();
         self.plan_preview = self
             .app
             .plan_build(self.build_inputs())
             .and_then(|plan| serde_json::to_string_pretty(&plan).map_err(|error| error.into()))
             .unwrap_or_else(|error| format!("Build plan unavailable:\n{error}"));
+        self.trace_slow_preview_refresh("plan", started.elapsed());
+    }
+
+    fn refresh_previews(&mut self) {
+        self.refresh_config_preview();
+        self.refresh_plan_preview();
+    }
+
+    fn trace_slow_preview_refresh(&self, preview: &str, elapsed: Duration) {
+        let elapsed_ms = elapsed.as_millis();
+        if elapsed_ms < 24 {
+            return;
+        }
+        trace_ui(
+            &self.trace_root,
+            "perf",
+            "slow_preview_refresh",
+            json!({
+                "preview": preview,
+                "elapsed_ms": elapsed_ms,
+                "journey_stage": self.current_setup.journey_stage.label(),
+                "setup_id": self.current_setup.setup_id,
+            }),
+        );
     }
 
     fn refresh_recent_artifacts(&mut self) {
@@ -536,6 +566,9 @@ impl MakerUiState {
     }
 
     fn set_journey_stage(&mut self, stage: JourneyStage) {
+        if self.current_setup.journey_stage == stage {
+            return;
+        }
         self.current_setup.journey_stage = stage;
         self.sync_truth_surface_for_stage();
         sync_bootstrap_from_state(self);
@@ -2831,27 +2864,32 @@ fn handle_keyup(evt: KeyboardEvent, mut state: Signal<MakerUiState>) {
 fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.current_setup.setup.name = value;
-        ui.set_journey_stage(JourneyStage::Personalize);
+        if ui.current_setup.journey_stage != JourneyStage::Personalize {
+            ui.set_journey_stage(JourneyStage::Personalize);
+        }
         ui.success_state = None;
-        ui.refresh_previews();
     });
 }
 
 fn update_hostname(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.current_setup.setup.personalization.hostname = value;
-        ui.set_journey_stage(JourneyStage::Personalize);
+        if ui.current_setup.journey_stage != JourneyStage::Personalize {
+            ui.set_journey_stage(JourneyStage::Personalize);
+        }
         ui.success_state = None;
-        ui.refresh_previews();
+        ui.refresh_config_preview();
     });
 }
 
 fn update_artifacts_dir(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.artifacts_dir = value;
-        ui.set_journey_stage(JourneyStage::Review);
+        if ui.current_setup.journey_stage != JourneyStage::Review {
+            ui.set_journey_stage(JourneyStage::Review);
+        }
         ui.success_state = None;
-        ui.refresh_previews();
+        ui.refresh_plan_preview();
         ui.refresh_recent_artifacts();
     });
 }
@@ -2859,9 +2897,11 @@ fn update_artifacts_dir(mut state: Signal<MakerUiState>, value: String) {
 fn update_repo_root(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
         ui.repo_root = value;
-        ui.set_journey_stage(JourneyStage::Review);
+        if ui.current_setup.journey_stage != JourneyStage::Review {
+            ui.set_journey_stage(JourneyStage::Review);
+        }
         ui.success_state = None;
-        ui.refresh_previews();
+        ui.refresh_plan_preview();
     });
 }
 
