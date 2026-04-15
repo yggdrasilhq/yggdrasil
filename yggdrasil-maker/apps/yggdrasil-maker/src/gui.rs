@@ -792,15 +792,6 @@ enum ShellFinish {
     Crisp,
 }
 
-impl ShellFinish {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Sleek => "Sleek",
-            Self::Crisp => "Crisp",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThemePreset {
     ArcFrost,
@@ -1162,7 +1153,6 @@ fn app() -> Element {
             div {
                 style: shell_surface_style(
                     snapshot.maximized,
-                    snapshot.shell_settings.finish,
                     &shell_tint_fill,
                     &shell_gradient,
                     blur_supported,
@@ -1379,10 +1369,6 @@ fn app() -> Element {
                                                     ui.theme_editor_draft = theme_spec_for_preset(preset);
                                                     ui.theme_editor_selected_stop = ui.theme_editor_draft.colors.first().map(|_| 0);
                                                 }),
-                                                on_select_finish: move |finish: ShellFinish| state.with_mut(|ui| {
-                                                    ui.shell_settings.finish = finish;
-                                                    ui.persist_shell_settings();
-                                                }),
                                                 on_select_theme: move |theme: UiTheme| state.with_mut(|ui| {
                                                     ui.shell_settings.theme = theme;
                                                     ui.persist_shell_settings();
@@ -1584,7 +1570,11 @@ fn StudioCanvas(
 
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; gap:18px; max-width:920px; margin:0 auto;",
+            style: if current_stage == JourneyStage::Outcome {
+                "display:flex; flex-direction:column; gap:18px; width:min(760px, 100%); min-height:100%; margin:0 auto; justify-content:center;"
+            } else {
+                "display:flex; flex-direction:column; gap:18px; max-width:920px; margin:0 auto;"
+            },
             if current_stage == JourneyStage::Outcome {
                 div {
                     style: "display:flex; flex-direction:column; gap:16px; max-width:760px;",
@@ -1608,10 +1598,6 @@ fn StudioCanvas(
                                             style: "margin:0; font-size:13px; line-height:1.5; color:var(--maker-copy); max-width:34ch;",
                                             "{subtitle}"
                                         }
-                                    }
-                                    span {
-                                        style: outcome_choice_badge_style(preset_id == state.current_setup.setup.preset, &accent),
-                                        {if preset_id == state.current_setup.setup.preset { "Selected" } else { "Choose" }}
                                     }
                                 }
                                 div {
@@ -1969,7 +1955,6 @@ fn AppearanceSidebar(
     selected_stop: Option<usize>,
     preview_surface: String,
     on_select_preset: EventHandler<ThemePreset>,
-    on_select_finish: EventHandler<ShellFinish>,
     on_select_theme: EventHandler<UiTheme>,
     on_begin_drag_stop: EventHandler<usize>,
     on_drag_stop: EventHandler<(f32, f32)>,
@@ -2005,13 +1990,13 @@ fn AppearanceSidebar(
                         }
                         div {
                             style: "font-size:13px; color:var(--maker-copy); line-height:1.5;",
-                            "Shape the shared shell gradient, brightness, and finish from the right rail without leaving the build studio."
+                            "Adjust the shared Ygg theme from the right rail."
                         }
                     }
                 }
                 div {
                     style: "display:flex; flex-direction:column; gap:8px;",
-                    div { style: label_style(), "Theme Preset" }
+                    div { style: label_style(), "Palette" }
                     div {
                         style: "display:flex; flex-wrap:wrap; gap:8px;",
                         for preset in ThemePreset::all() {
@@ -2025,43 +2010,25 @@ fn AppearanceSidebar(
                 }
                 div {
                     style: "display:flex; flex-direction:column; gap:8px;",
-                    div { style: label_style(), "Finish" }
-                    div {
-                        style: "display:flex; flex-wrap:wrap; gap:8px;",
-                        for finish in [ShellFinish::Sleek, ShellFinish::Crisp] {
-                            button {
-                                style: small_chip_style(shell_settings.finish == finish, &accent),
-                                onclick: move |_| on_select_finish.call(finish),
-                                "{finish.label()}"
-                            }
-                        }
-                    }
-                    if !blur_supported {
-                        div {
-                            style: "padding:10px 12px; border-radius:12px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border); font-size:12px; line-height:1.55; color:var(--maker-status-muted);",
-                            strong {
-                                style: "display:block; margin-bottom:4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--maker-status-text);",
-                                "X11 Clarity Mode"
-                            }
-                            "Live glass blur is not dependable on this display backend, so Maker uses stronger surface fills here to keep the text readable."
-                        }
-                    }
-                }
-                div {
-                    style: "display:flex; flex-direction:column; gap:8px;",
-                    div { style: label_style(), "Shell Mode" }
+                    div { style: label_style(), "Theme" }
                     div {
                         style: appearance_segment_style(),
                         button {
-                            style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedLight),
+                            style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedLight, &accent),
                             onclick: move |_| on_select_theme.call(UiTheme::ZedLight),
                             "Light"
                         }
                         button {
-                            style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedDark),
+                            style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedDark, &accent),
                             onclick: move |_| on_select_theme.call(UiTheme::ZedDark),
                             "Dark"
                         }
+                    }
+                }
+                if !blur_supported {
+                    div {
+                        style: "padding:10px 12px; border-radius:12px; background:var(--maker-status-bg); box-shadow:inset 0 0 0 1px var(--maker-status-border); font-size:12px; line-height:1.55; color:var(--maker-status-muted);",
+                        "This display backend runs without live blur, so Maker keeps the shell crisp and readable here."
                     }
                 }
                 div {
@@ -3487,29 +3454,29 @@ fn supports_live_blur() -> bool {
 fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> String {
     if is_dark_theme(theme) {
         let section_bg = if blur_supported {
-            "rgba(24,31,39,0.74)"
+            "rgba(27,28,31,0.84)"
         } else {
-            "rgba(18,24,31,0.92)"
+            "rgba(27,28,31,0.96)"
         };
         let card_bg = if blur_supported {
-            "rgba(30,39,48,0.78)"
+            "rgba(32,33,37,0.94)"
         } else {
-            "rgba(29,38,47,0.94)"
+            "rgba(32,33,37,0.98)"
         };
         let proof_bg = if blur_supported {
-            "rgba(23,31,39,0.58)"
+            "rgba(28,29,33,0.92)"
         } else {
-            "rgba(23,31,39,0.88)"
+            "rgba(28,29,33,0.97)"
         };
         let panel_bg = if blur_supported {
-            "rgba(23,31,39,0.82)"
+            "rgba(30,31,35,0.90)"
         } else {
-            "rgba(20,28,35,0.96)"
+            "rgba(30,31,35,0.98)"
         };
         let footer_bg = if blur_supported {
-            "rgba(23,31,39,0.74)"
+            "rgba(28,29,33,0.88)"
         } else {
-            "rgba(19,27,34,0.94)"
+            "rgba(28,29,33,0.97)"
         };
         format!(
             "--maker-accent:{accent};\
@@ -3561,9 +3528,9 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
              --maker-stage-inactive-text:#dce7f1;\
              --maker-rail-selected-bg:color-mix(in srgb, {accent} 26%, rgba(24,31,39,0.78));\
              --maker-rail-selected-border:color-mix(in srgb, {accent} 70%, rgba(128,154,178,0.20));\
-             --maker-rail-card-bg:rgba(22,29,36,0.72);\
+             --maker-rail-card-bg:rgba(30,31,35,0.88);\
              --maker-rail-card-border:rgba(128,154,178,0.20);\
-             --maker-rail-meta-bg:rgba(22,29,36,0.62);\
+             --maker-rail-meta-bg:rgba(30,31,35,0.78);\
              --maker-rail-gradient:linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(33,43,53,0.18) 14%, rgba(22,29,36,0.58) 100%);\
              --yggui-scrollbar-thumb:color-mix(in srgb, {accent} 28%, rgba(222,235,247,0.20));\
              --yggui-scrollbar-thumb-hover:color-mix(in srgb, {accent} 40%, rgba(236,244,251,0.28));\
@@ -3664,21 +3631,13 @@ fn theme_css_variables(theme: UiTheme, accent: &str, blur_supported: bool) -> St
 
 fn shell_surface_style(
     maximized: bool,
-    finish: ShellFinish,
     shell_tint_fill: &str,
     shell_gradient: &str,
     blur_supported: bool,
 ) -> String {
     let radius = if maximized { 0 } else { 10 };
-    let blur = match finish {
-        ShellFinish::Sleek if blur_supported => 10,
-        ShellFinish::Crisp => 0,
-        ShellFinish::Sleek => 0,
-    };
-    let saturation = match finish {
-        ShellFinish::Sleek => 135,
-        ShellFinish::Crisp => 100,
-    };
+    let blur = if blur_supported { 10 } else { 0 };
+    let saturation = if blur_supported { 135 } else { 100 };
     let frame_outline = if maximized {
         "none"
     } else {
@@ -3937,10 +3896,7 @@ fn outcome_showcase_card_style(selected: bool, accent: &str) -> String {
         "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; justify-content:space-between; gap:18px; min-height:232px; padding:18px 18px 16px 18px; border:none; border-radius:14px; \
          background:{}; text-align:left; box-shadow:{}; outline:none;",
         if selected {
-            format!(
-                "linear-gradient(180deg, color-mix(in srgb, {} 10%, var(--maker-card-bg)) 0%, var(--maker-card-bg) 100%)",
-                accent
-            )
+            format!("color-mix(in srgb, {} 14%, var(--maker-card-bg))", accent)
         } else {
             "var(--maker-card-bg)".to_owned()
         },
@@ -4076,14 +4032,17 @@ fn appearance_sidebar_card_style() -> &'static str {
 }
 
 fn appearance_segment_style() -> &'static str {
-    "display:flex; align-items:center; gap:4px; padding:4px; border:none; border-radius:999px; background:var(--maker-secondary-bg); box-shadow: inset 0 0 0 1px var(--maker-secondary-border);"
+    "display:flex; align-items:center; gap:4px; padding:4px; border:none; border-radius:999px; background:color-mix(in srgb, var(--maker-card-bg) 86%, transparent); box-shadow: inset 0 0 0 1px var(--maker-secondary-border);"
 }
 
-fn appearance_segment_button_style(selected: bool) -> &'static str {
+fn appearance_segment_button_style(selected: bool, accent: &str) -> String {
     if selected {
-        "flex:1; height:26px; border:none; border-radius:999px; background:var(--maker-card-bg); color:var(--maker-text-strong); font-size:11px; font-weight:700; box-shadow: inset 0 0 0 1px var(--maker-card-border);"
+        format!(
+            "flex:1; height:28px; border:none; border-radius:999px; background:color-mix(in srgb, {} 12%, var(--maker-card-bg)); color:var(--maker-text-strong); font-size:11px; font-weight:700; box-shadow: inset 0 0 0 1px color-mix(in srgb, {} 42%, var(--maker-card-border));",
+            accent, accent
+        )
     } else {
-        "flex:1; height:26px; border:none; border-radius:999px; background:transparent; color:var(--maker-muted); font-size:11px; font-weight:700;"
+        "flex:1; height:28px; border:none; border-radius:999px; background:transparent; color:var(--maker-muted); font-size:11px; font-weight:700;".to_owned()
     }
 }
 
