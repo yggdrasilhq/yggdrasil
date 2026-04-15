@@ -1279,10 +1279,6 @@ fn app() -> Element {
                                         }
                                     }
                                 }
-                                div {
-                                    style: "position:absolute; left:0; right:0; bottom:0; height:30px; pointer-events:none; \
-                                        background:linear-gradient(180deg, rgba(255,255,255,0) 0%, color-mix(in srgb, var(--maker-section-bg) 82%, transparent) 100%);"
-                                }
                             }
                         }
                     }
@@ -1551,7 +1547,6 @@ fn StudioCanvas(
     on_build: EventHandler<()>,
 ) -> Element {
     let current_stage = state.current_setup.journey_stage;
-    let compact_studio = state.window_width < 1280;
     let stacked_studio = state.window_width < 1340;
     let outcome_options = [
         (
@@ -1589,21 +1584,17 @@ fn StudioCanvas(
 
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; gap:14px; max-width:920px; margin:0 auto;",
+            style: "display:flex; flex-direction:column; gap:18px; max-width:920px; margin:0 auto;",
             if current_stage == JourneyStage::Outcome {
                 div {
-                    style: section_card_style(),
+                    style: "display:flex; flex-direction:column; gap:16px; max-width:760px;",
                     div {
-                        style: "display:flex; flex-direction:column; gap:3px;",
+                        style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "What do you want to make today?" }
                     }
                     div {
-                        style: if compact_studio {
-                            "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:stretch;"
-                        } else {
-                            "display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; align-items:stretch;"
-                        },
-                        for (preset_id, title, subtitle, kind) in outcome_options {
+                        style: "display:grid; grid-template-columns:minmax(0, 1fr); gap:16px; align-items:stretch;",
+                        for (index, (preset_id, title, subtitle, kind)) in outcome_options.into_iter().enumerate() {
                             button {
                                 style: outcome_showcase_card_style(preset_id == state.current_setup.setup.preset, &accent),
                                 onclick: move |_| on_apply_preset.call(preset_id),
@@ -1611,6 +1602,7 @@ fn StudioCanvas(
                                     style: "display:flex; align-items:flex-start; justify-content:space-between; gap:14px;",
                                     div {
                                         style: "display:flex; flex-direction:column; gap:8px; min-width:0; flex:1;",
+                                        span { style: "font-size:11px; font-weight:800; color:var(--maker-note); letter-spacing:0.08em; text-transform:uppercase;", if index == 0 { "A" } else { "B" } }
                                         h3 { style: "margin:0; font-size:23px; line-height:1.06; color:var(--maker-text-strong);", "{title}" }
                                         p {
                                             style: "margin:0; font-size:13px; line-height:1.5; color:var(--maker-copy); max-width:34ch;",
@@ -1642,16 +1634,16 @@ fn StudioCanvas(
 
             if current_stage == JourneyStage::Profile {
                 div {
-                    style: section_card_style(),
+                    style: "display:flex; flex-direction:column; gap:16px;",
                     div {
-                        style: "display:flex; flex-direction:column; gap:14px;",
+                        style: "display:flex; flex-direction:column; gap:16px;",
                         div {
-                            style: "display:flex; flex-direction:column; gap:2px;",
+                            style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                             h2 { style: section_title_style(), "Choose the build profile" }
                             p { style: section_copy_style(), "Pick one profile, then adjust hardware only if needed." }
                         }
                         div {
-                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; align-items:stretch;",
                             for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
                                 button {
                                     style: profile_choice_card_style(selected_profile == profile, &accent),
@@ -1672,7 +1664,7 @@ fn StudioCanvas(
                             }
                         }
                         div {
-                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; align-items:stretch;",
                             button {
                                 style: profile_toggle_card_style(state.current_setup.setup.hardware.with_nvidia, &accent),
                                 onclick: move |_| on_toggle_nvidia.call(()),
@@ -1712,13 +1704,16 @@ fn StudioCanvas(
 
             if current_stage == JourneyStage::Personalize {
                 div {
-                    style: section_card_style(),
+                    style: "display:flex; flex-direction:column; gap:16px;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
+                        h2 { style: section_title_style(), "Personalize" }
+                        p { style: section_copy_style(), "Name the setup and give the future host a stable identity before you ask the builder to make it real." }
+                    }
                     div {
                         style: stage_split_style,
                         div {
-                            style: "display:flex; flex-direction:column; gap:14px;",
-                            h2 { style: section_title_style(), "Personalize" }
-                            p { style: section_copy_style(), "Name the setup and give the future host a stable identity before you ask the builder to make it real." }
+                            style: floating_group_style(),
                             div {
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px;",
                                 div {
@@ -1759,13 +1754,16 @@ fn StudioCanvas(
 
             if current_stage == JourneyStage::Review {
                 div {
-                    style: section_card_style(),
+                    style: "display:flex; flex-direction:column; gap:16px;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
+                        h2 { style: section_title_style(), "Review" }
+                        p { style: section_copy_style(), "Lock the build inputs before you launch. Shell Truth on the right holds the native config and build plan while you check the last mile." }
+                    }
                     div {
                         style: stage_split_style,
                         div {
-                            style: "display:flex; flex-direction:column; gap:14px;",
-                            h2 { style: section_title_style(), "Review" }
-                            p { style: section_copy_style(), "Lock the build inputs before you launch. Shell Truth on the right holds the native config and build plan while you check the last mile." }
+                            style: floating_group_style(),
                             div {
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;",
                                 div {
@@ -1821,16 +1819,16 @@ fn StudioCanvas(
 
             if current_stage == JourneyStage::Build {
                 div {
-                    style: section_card_style(),
+                    style: "display:flex; flex-direction:column; gap:16px;",
                     div {
-                        style: "display:flex; flex-direction:column; gap:14px;",
+                        style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "Launch" }
                         p { style: section_copy_style(), "Launch the local Docker build on Linux, or export the truthful handoff bundle on the other platforms. Raw logs stay in Shell Truth; the main canvas stays focused on the outcome." }
                     }
                     div {
                         style: build_split_style,
                         div {
-                            style: "display:flex; flex-direction:column; gap:14px;",
+                            style: floating_group_style(),
                             div {
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
                                 div { style: proof_card_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
@@ -1846,7 +1844,7 @@ fn StudioCanvas(
                             }
                         }
                         div {
-                            style: info_stack_style(),
+                            style: floating_group_style(),
                             div { style: label_style(), "Launch" }
                             div { style: info_row_style(), span { style: stat_label_style(), "OS path" } span { style: stat_value_style(), "{build_mode_label()}" } }
                             div { style: info_row_style(), span { style: stat_label_style(), "Truth rail" } span { style: stat_value_style(), "Structured logs and manifest stay on the right." } }
@@ -1872,13 +1870,16 @@ fn StudioCanvas(
 
             if current_stage == JourneyStage::Boot {
                 div {
-                    style: section_card_style(),
+                    style: "display:flex; flex-direction:column; gap:16px;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
+                        h2 { style: section_title_style(), "Boot" }
+                        p { style: section_copy_style(), "This is the handoff moment after a truthful build or export. If the dedicated success surface is not active yet, return to Build and rerun or inspect the latest artifacts." }
+                    }
                     div {
                         style: stage_split_style,
                         div {
-                            style: "display:flex; flex-direction:column; gap:14px;",
-                            h2 { style: section_title_style(), "Boot" }
-                            p { style: section_copy_style(), "This is the handoff moment after a truthful build or export. If the dedicated success surface is not active yet, return to Build and rerun or inspect the latest artifacts." }
+                            style: floating_group_style(),
                             if state.recent_artifacts.is_empty() {
                                 div { style: empty_note_style(), "No recent artifact summary is available yet for this setup." }
                             } else {
@@ -1895,7 +1896,7 @@ fn StudioCanvas(
                             }
                         }
                         div {
-                            style: proof_stack_style(),
+                            style: floating_group_style(),
                             div { style: label_style(), "Handoff" }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Primary action" } span { style: stat_value_style(), "Reveal artifact, inspect details, or start the next setup." } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Current setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
@@ -3927,8 +3928,8 @@ fn section_toggle_style(expanded: bool) -> String {
     }
 }
 
-fn section_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:var(--maker-surface-backdrop); -webkit-backdrop-filter:var(--maker-surface-backdrop);"
+fn floating_group_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
 fn outcome_showcase_card_style(selected: bool, accent: &str) -> String {
@@ -4028,10 +4029,6 @@ fn profile_toggle_card_style(selected: bool, accent: &str) -> String {
 
 fn proof_stack_style() -> &'static str {
     "display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:14px; background:var(--maker-proof-bg); box-shadow:inset 0 0 0 1px var(--maker-proof-border);"
-}
-
-fn info_stack_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:10px; padding:0;"
 }
 
 fn info_row_style() -> &'static str {
