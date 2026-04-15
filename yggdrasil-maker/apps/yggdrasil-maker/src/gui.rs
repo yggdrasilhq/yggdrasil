@@ -51,9 +51,7 @@ use crate::app_control::{
     take_next_app_control_request,
 };
 #[cfg(target_os = "linux")]
-use crate::linux_desktop::{
-    YGGDRASIL_MAKER_WM_CLASS, refresh_dev_desktop_integration,
-};
+use crate::linux_desktop::{YGGDRASIL_MAKER_WM_CLASS, refresh_dev_desktop_integration};
 use crate::window_icon;
 
 static BOOTSTRAP: Lazy<Mutex<Option<MakerBootstrap>>> = Lazy::new(|| Mutex::new(None));
@@ -767,11 +765,12 @@ enum OutcomeChoiceKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EcosystemCardKind {
-    Term,
-    Client,
+enum StorybookPageKind {
+    Overview,
+    Mail,
+    Secrets,
+    Remote,
     Sync,
-    Infra,
     Gaming,
 }
 
@@ -1541,11 +1540,15 @@ fn StudioCanvas(
     on_build: EventHandler<()>,
 ) -> Element {
     let current_stage = state.current_setup.journey_stage;
+    let total_story_pages = 6;
     let mut setup_name_draft = use_signal(|| state.current_setup.setup.name.clone());
     let mut hostname_draft =
         use_signal(|| state.current_setup.setup.personalization.hostname.clone());
     let mut artifacts_dir_draft = use_signal(|| state.artifacts_dir.clone());
     let mut repo_root_draft = use_signal(|| state.repo_root.clone());
+    let mut story_anchor_ms = use_signal(|| now_ms);
+    let mut story_pause_page = use_signal(|| 0usize);
+    let mut story_pause_until_ms = use_signal(|| 0u64);
     let mut draft_sync_key = use_signal(|| {
         (
             String::new(),
@@ -1603,7 +1606,13 @@ fn StudioCanvas(
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
     let setup_id_for_name_sync = state.current_setup.setup_id.clone();
-    let build_story_spotlight_index = ((now_ms / 7000) % 5) as usize;
+    let auto_story_page =
+        (((now_ms.saturating_sub(story_anchor_ms())) / 30_000) as usize) % total_story_pages;
+    let build_story_spotlight_index = if now_ms < story_pause_until_ms() {
+        story_pause_page()
+    } else {
+        auto_story_page
+    };
     let stage_split_style = if stacked_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1894,21 +1903,6 @@ fn StudioCanvas(
                                     div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{latest_result_summary(&state)}" }
                                 }
                             }
-                            if state.build_running {
-                                div {
-                                    style: waiting_story_panel_style(),
-                                    div {
-                                        style: "display:flex; flex-direction:column; gap:4px;",
-                                        div { style: label_style(), "While this runs" }
-                                        h3 { style: "margin:0; font-size:18px; line-height:1.12; color:var(--maker-section-title);", "This ISO is the first move, not the whole system." }
-                                        p { style: "margin:0; font-size:12px; line-height:1.65; color:var(--maker-copy);", "While the build runs, here is how the rest of the Yggdrasil tools fit around the machine you are making." }
-                                    }
-                                    BuildStoryDeck {
-                                        page_index: build_story_spotlight_index,
-                                        accent: accent.clone(),
-                                    }
-                                }
-                            }
                         }
                         div {
                             style: floating_group_style(),
@@ -1931,6 +1925,26 @@ fn StudioCanvas(
                             onclick: move |_| on_build.call(()),
                             if state.build_running { "{launch_running_label()}" } else { "{launch_action_label()}" }
                         }
+                    }
+                    BuildStorybook {
+                        page_index: build_story_spotlight_index,
+                        accent: accent.clone(),
+                        running: state.build_running,
+                        on_pause_cycle: move |_| {
+                            let displayed_page = if now_ms < story_pause_until_ms() {
+                                story_pause_page()
+                            } else {
+                                (((now_ms.saturating_sub(story_anchor_ms())) / 30_000) as usize)
+                                    % total_story_pages
+                            };
+                            story_pause_page.set(displayed_page);
+                            story_pause_until_ms.set(now_ms.saturating_add(1_500));
+                        },
+                        on_select_page: move |index: usize| {
+                            story_anchor_ms.set(now_ms.saturating_sub(index as u64 * 30_000));
+                            story_pause_page.set(index);
+                            story_pause_until_ms.set(now_ms.saturating_add(30_000));
+                        },
                     }
                 }
             }
@@ -2386,76 +2400,102 @@ fn OutcomeChoiceArtwork(kind: OutcomeChoiceKind, accent: String) -> Element {
 }
 
 #[component]
-fn BuildStoryDeck(page_index: usize, accent: String) -> Element {
-    let total_pages = 5;
+fn BuildStorybook(
+    page_index: usize,
+    accent: String,
+    running: bool,
+    on_pause_cycle: EventHandler<MouseEvent>,
+    on_select_page: EventHandler<usize>,
+) -> Element {
+    let chapters = ["What next", "Mail", "Secrets", "Remote", "Sync", "Gaming"];
     let (kicker, title, body, note, kind) = match page_index {
         0 => (
-            "Remote control",
-            "yggterm keeps the machine reachable while you build and debug it.",
-            "Open a terminal into the box, watch services settle, and keep one honest operator surface instead of guessing through ad-hoc SSH tabs.",
-            "Example: laptop 10.0.0.12 -> yggterm -> nas-01 10.0.0.21 -> containers and services.",
-            EcosystemCardKind::Term,
+            "What next",
+            "The ISO gets the first machine up. The rest of Yggdrasil keeps it useful.",
+            "Build gets you to first boot. After that, yggterm gives you a truthful terminal, yggclient applies guided changes on the machine, and yggsync keeps more than one host aligned.",
+            "Typical path: build ISO -> boot host -> open yggterm -> apply roles with yggclient -> sync the same intent to the next box with yggsync.",
+            StorybookPageKind::Overview,
         ),
         1 => (
-            "Day-two admin",
-            "yggclient is what you use on the machine after boot.",
-            "It turns the fresh ISO into an operator box you can keep shaping: install roles, inspect services, and make guided changes without rebuilding every time.",
-            "Example: boot server ISO -> install storage role -> enable mail and reverse proxy -> validate health.",
-            EcosystemCardKind::Client,
+            "Mail server",
+            "A server ISO can become a clean mail box without turning into a mystery pile.",
+            "Start with one server host, put nginx or another edge proxy in front, keep mail on its own box, and back it up to a second node. The ISO is just the stable first layer.",
+            "Example: edge-01 10.0.0.10 -> mail-01 10.0.0.20 -> backup-01 10.0.0.30.",
+            StorybookPageKind::Mail,
         ),
         2 => (
-            "Fleet sync",
-            "yggsync keeps the same intent moving across more than one host.",
-            "Use one source of truth for configs, then sync to server, client, and backup nodes so the fleet does not drift apart.",
-            "Example: git main -> yggsync -> mail-01 10.0.0.31, proxy-01 10.0.0.32, backup-01 10.0.0.33.",
-            EcosystemCardKind::Sync,
+            "Secrets + apps",
+            "Keep secrets and apps understandable instead of hiding them inside one giant host.",
+            "Put Infisical behind your edge service, let apps read what they need, and keep the relationship visible. This is the sort of layout a plain server ISO can grow into.",
+            "Example: proxy-01 10.0.0.10 -> infisical-01 10.0.0.11 -> app-01 10.0.0.21 and app-02 10.0.0.22.",
+            StorybookPageKind::Secrets,
         ),
         3 => (
-            "Infra pattern",
-            "One ISO can become the start of a whole service box.",
-            "Typical path: nginx in front, Infisical for secrets, then app services such as mail, dashboards, or internal tools behind it.",
-            "Example: edge-01 10.0.0.40 -> nginx -> infisical 10.0.0.41 + mail 10.0.0.42 + apps 10.0.0.43.",
-            EcosystemCardKind::Infra,
+            "Remote control",
+            "yggterm is the honest operator surface when the machine is real and timing matters.",
+            "Use it to reach the host, watch services settle, and work in one deliberate terminal instead of collecting a dozen drifting SSH tabs.",
+            "Example: laptop 10.0.0.12 -> yggterm -> nas-01 10.0.0.21 -> containers and services.",
+            StorybookPageKind::Remote,
+        ),
+        4 => (
+            "Fleet sync",
+            "yggsync keeps the same build intent moving across more than one host.",
+            "Keep one source of truth in git, then sync to mail, proxy, backup, or desktop nodes so the fleet stays readable and does not drift over time.",
+            "Example: git main -> yggsync -> mail-01, proxy-01, backup-01, desk-01.",
+            StorybookPageKind::Sync,
         ),
         _ => (
-            "Gaming pattern",
-            "The KDE path can also become a desktop or passthrough gaming box.",
-            "Use the client profile, enable the GPU path you need, then let the box host Steam, media tools, or a passthrough workstation.",
-            "Example: gamer-01 10.0.0.60 -> GPU host -> VFIO guest -> Steam + media + remote play.",
-            EcosystemCardKind::Gaming,
+            "Gaming",
+            "The KDE path can become a serious desktop or a GPU passthrough box.",
+            "Start from the client path, enable the hardware you need, then shape it into a workstation, a Steam host, or a VFIO setup without losing the system story.",
+            "Example: kde-01 10.0.0.60 -> gpu host -> vfio vm -> Steam and remote play.",
+            StorybookPageKind::Gaming,
         ),
     };
+
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; gap:12px;",
+            style: build_storybook_style(),
+            onmouseenter: move |evt| on_pause_cycle.call(evt),
+            onmousemove: move |evt| on_pause_cycle.call(evt),
             div {
-                style: "display:flex; align-items:flex-end; justify-content:space-between; gap:12px;",
+                style: "display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;",
                 div {
                     style: "display:flex; flex-direction:column; gap:4px;",
-                    div { style: label_style(), "{kicker}" }
-                    h4 { style: "margin:0; font-size:16px; line-height:1.2; color:var(--maker-section-title);", "{title}" }
-                    p { style: "margin:0; font-size:12px; line-height:1.65; color:var(--maker-copy); max-width:62ch;", "{body}" }
+                    div { style: label_style(), if running { "While this builds" } else { "What next" } }
+                    h3 { style: "margin:0; font-size:20px; line-height:1.12; color:var(--maker-section-title); max-width:44ch;", "{title}" }
+                    p { style: "margin:0; font-size:12px; line-height:1.7; color:var(--maker-copy); max-width:70ch;", "{body}" }
                 }
                 div {
-                    style: "display:flex; align-items:center; gap:6px;",
-                    for idx in 0..total_pages {
-                        span {
-                            style: build_story_dot_style(idx == page_index, &accent),
+                    style: "display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end;",
+                    for (idx, chapter) in chapters.into_iter().enumerate() {
+                        button {
+                            style: story_nav_tab_style(idx == page_index, &accent),
+                            onclick: move |_| on_select_page.call(idx),
+                            "{chapter}"
                         }
                     }
                 }
             }
             div {
-                style: "display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(220px, 0.9fr); gap:12px; align-items:stretch;",
+                style: "display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(250px, 0.92fr); gap:16px; align-items:stretch;",
                 div {
-                    style: ecosystem_story_panel_style(),
-                    EcosystemArtwork { kind: kind, accent: accent.clone() }
+                    style: story_scene_style(),
+                    div { style: label_style(), "{kicker}" }
+                    StorybookArtwork { kind: kind, accent: accent.clone() }
                 }
                 div {
-                    style: ecosystem_story_panel_style(),
-                    div { style: label_style(), "How it helps" }
-                    p { style: "margin:0; font-size:12px; line-height:1.7; color:var(--maker-copy);", "{note}" }
-                    div { style: proof_card_style(), span { style: stat_label_style(), "Why this matters" } span { style: stat_value_style(), "The ISO gets you to first boot. These tools carry the system after that." } }
+                    style: "display:flex; flex-direction:column; gap:12px;",
+                    div {
+                        style: story_note_card_style(),
+                        div { style: label_style(), "How it fits" }
+                        p { style: "margin:0; font-size:12px; line-height:1.72; color:var(--maker-copy);", "{note}" }
+                    }
+                    div {
+                        style: story_note_card_style(),
+                        div { style: label_style(), "Why it matters" }
+                        p { style: "margin:0; font-size:12px; line-height:1.72; color:var(--maker-copy);", "The ISO should feel like the first chapter of a system, not the whole story. These pages show where the machine goes next once it boots." }
+                    }
                 }
             }
         }
@@ -2463,116 +2503,138 @@ fn BuildStoryDeck(page_index: usize, accent: String) -> Element {
 }
 
 #[component]
-fn EcosystemArtwork(kind: EcosystemCardKind, accent: String) -> Element {
+fn StorybookArtwork(kind: StorybookPageKind, accent: String) -> Element {
     let glow = format!("color-mix(in srgb, {accent} 18%, transparent)");
     match kind {
-        EcosystemCardKind::Term => rsx! {
+        StorybookPageKind::Overview => rsx! {
             svg {
                 width: "100%",
-                height: "154",
-                view_box: "0 0 360 154",
+                height: "212",
+                view_box: "0 0 420 212",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "18", y: "32", width: "92", height: "54", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.2" }
-                text { x: "34", y: "64", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "Laptop" }
-                rect { x: "134", y: "32", width: "92", height: "54", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.24)", stroke_width: "1.2" }
-                text { x: "156", y: "64", fill: "{accent}", font_size: "14", font_weight: "800", "yggterm" }
-                rect { x: "250", y: "20", width: "92", height: "54", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.2" }
-                text { x: "276", y: "52", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "nas-01" }
-                rect { x: "250", y: "84", width: "92", height: "40", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.14)", stroke_width: "1" }
-                text { x: "268", y: "108", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "containers" }
-                path { d: "M110 58H134", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M226 58H250", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M296 74V84", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
+                rect { x: "18", y: "82", width: "98", height: "42", rx: "14", fill: "rgba(255,255,255,0.035)", stroke: "rgba(216,231,244,0.16)", stroke_width: "1.1" }
+                rect { x: "160", y: "36", width: "98", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.22)", stroke_width: "1.1" }
+                rect { x: "160", y: "86", width: "98", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.22)", stroke_width: "1.1" }
+                rect { x: "160", y: "136", width: "98", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.22)", stroke_width: "1.1" }
+                rect { x: "302", y: "82", width: "98", height: "42", rx: "14", fill: "rgba(255,255,255,0.035)", stroke: "rgba(216,231,244,0.16)", stroke_width: "1.1" }
+                text { x: "40", y: "108", fill: "rgba(230,239,247,0.88)", font_size: "15", font_weight: "700", "new ISO" }
+                text { x: "181", y: "62", fill: "{accent}", font_size: "14", font_weight: "800", "yggterm" }
+                text { x: "176", y: "112", fill: "{accent}", font_size: "14", font_weight: "800", "yggclient" }
+                text { x: "181", y: "162", fill: "{accent}", font_size: "14", font_weight: "800", "yggsync" }
+                text { x: "325", y: "108", fill: "rgba(230,239,247,0.88)", font_size: "15", font_weight: "700", "fleet" }
+                path { d: "M116 103H160", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M258 57H302M258 107H302M258 157H302", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
             }
         },
-        EcosystemCardKind::Client => rsx! {
+        StorybookPageKind::Mail => rsx! {
             svg {
                 width: "100%",
-                height: "154",
-                view_box: "0 0 360 154",
+                height: "212",
+                view_box: "0 0 420 212",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "18", y: "34", width: "96", height: "52", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.18)", stroke_width: "1.1" }
-                text { x: "34", y: "65", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "Fresh ISO" }
-                rect { x: "138", y: "34", width: "96", height: "52", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
-                text { x: "156", y: "65", fill: "{accent}", font_size: "14", font_weight: "800", "yggclient" }
-                rect { x: "258", y: "20", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "258", y: "64", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "258", y: "108", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                text { x: "280", y: "41", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "storage" }
-                text { x: "286", y: "85", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "proxy" }
-                text { x: "286", y: "129", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail" }
-                path { d: "M114 60H138", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M234 60H258", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M300 54V64M300 98V108", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
+                rect { x: "18", y: "82", width: "92", height: "42", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "154", y: "82", width: "104", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                rect { x: "304", y: "36", width: "96", height: "42", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "304", y: "128", width: "96", height: "42", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "40", y: "108", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "Internet" }
+                text { x: "184", y: "108", fill: "{accent}", font_size: "14", font_weight: "800", "mail-01" }
+                text { x: "329", y: "62", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "proxy-01" }
+                text { x: "322", y: "154", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "backup-01" }
+                text { x: "320", y: "78", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.10" }
+                text { x: "170", y: "124", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.20" }
+                text { x: "318", y: "170", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.30" }
+                path { d: "M110 103H154", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M258 103H304", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M352 78V128", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
-        EcosystemCardKind::Sync => rsx! {
+        StorybookPageKind::Secrets => rsx! {
             svg {
                 width: "100%",
-                height: "154",
-                view_box: "0 0 360 154",
+                height: "212",
+                view_box: "0 0 420 212",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "24", y: "54", width: "84", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
-                text { x: "46", y: "79", fill: "{accent}", font_size: "14", font_weight: "800", "yggsync" }
-                rect { x: "154", y: "18", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "154", y: "60", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "154", y: "102", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "264", y: "39", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "264", y: "81", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                text { x: "180", y: "40", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail-01" }
-                text { x: "176", y: "82", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "proxy-01" }
-                text { x: "172", y: "124", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "backup-01" }
-                text { x: "289", y: "61", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "desk-01" }
-                text { x: "287", y: "103", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "lab-02" }
-                path { d: "M108 75H154", stroke: "{accent}", stroke_width: "2.3", stroke_linecap: "round" }
-                path { d: "M228 35H264M228 77H264M228 119H264", stroke: "rgba(216,231,244,0.38)", stroke_width: "2", stroke_linecap: "round" }
+                rect { x: "24", y: "82", width: "96", height: "42", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "164", y: "82", width: "108", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                rect { x: "316", y: "42", width: "84", height: "36", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "316", y: "130", width: "84", height: "36", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "46", y: "108", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "proxy-01" }
+                text { x: "188", y: "108", fill: "{accent}", font_size: "14", font_weight: "800", "infisical" }
+                text { x: "338", y: "65", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "app-01" }
+                text { x: "338", y: "153", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "app-02" }
+                text { x: "328", y: "80", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.21" }
+                text { x: "328", y: "168", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.22" }
+                path { d: "M120 103H164", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M272 103H316", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M358 78V130", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
-        EcosystemCardKind::Infra => rsx! {
+        StorybookPageKind::Remote => rsx! {
             svg {
                 width: "100%",
-                height: "154",
-                view_box: "0 0 360 154",
+                height: "212",
+                view_box: "0 0 420 212",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "18", y: "58", width: "82", height: "36", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "138", y: "58", width: "82", height: "36", rx: "12", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
-                rect { x: "258", y: "22", width: "82", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "258", y: "62", width: "82", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "258", y: "102", width: "82", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                text { x: "44", y: "81", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "Internet" }
-                text { x: "165", y: "81", fill: "{accent}", font_size: "13", font_weight: "800", "nginx" }
-                text { x: "278", y: "42", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "infisical" }
-                text { x: "286", y: "82", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail" }
-                text { x: "286", y: "122", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "apps" }
-                path { d: "M100 76H138", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M220 76H258", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M299 52V62M299 92V102", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
+                rect { x: "22", y: "78", width: "96", height: "46", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.2" }
+                text { x: "42", y: "107", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "Laptop" }
+                text { x: "34", y: "122", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.12" }
+                rect { x: "162", y: "78", width: "98", height: "46", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.24)", stroke_width: "1.2" }
+                text { x: "186", y: "107", fill: "{accent}", font_size: "14", font_weight: "800", "yggterm" }
+                rect { x: "304", y: "50", width: "96", height: "46", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.2" }
+                text { x: "330", y: "78", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "nas-01" }
+                text { x: "324", y: "93", fill: "rgba(189,203,216,0.76)", font_size: "11", "10.0.0.21" }
+                rect { x: "304", y: "126", width: "96", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.14)", stroke_width: "1" }
+                text { x: "326", y: "148", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "services" }
+                path { d: "M118 101H162", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M260 101H304", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M352 96V126", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
-        EcosystemCardKind::Gaming => rsx! {
+        StorybookPageKind::Sync => rsx! {
             svg {
                 width: "100%",
-                height: "154",
-                view_box: "0 0 360 154",
+                height: "212",
+                view_box: "0 0 420 212",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "18", y: "58", width: "90", height: "36", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "136", y: "58", width: "92", height: "36", rx: "12", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
-                rect { x: "256", y: "22", width: "86", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "256", y: "62", width: "86", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                rect { x: "256", y: "102", width: "86", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
-                text { x: "38", y: "81", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "KDE ISO" }
-                text { x: "154", y: "81", fill: "{accent}", font_size: "13", font_weight: "800", "GPU host" }
-                text { x: "282", y: "42", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "vfio vm" }
-                text { x: "286", y: "82", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "steam" }
-                text { x: "273", y: "122", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "remote play" }
-                path { d: "M108 76H136", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M228 76H256", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                path { d: "M299 52V62M299 92V102", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
+                rect { x: "28", y: "84", width: "90", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                text { x: "50", y: "110", fill: "{accent}", font_size: "14", font_weight: "800", "yggsync" }
+                rect { x: "172", y: "34", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "172", y: "84", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "172", y: "134", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "310", y: "58", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "310", y: "110", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "194", y: "56", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail-01" }
+                text { x: "190", y: "106", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "proxy-01" }
+                text { x: "186", y: "156", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "backup" }
+                text { x: "332", y: "80", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "desk-01" }
+                text { x: "334", y: "132", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "lab-02" }
+                path { d: "M118 105H172", stroke: "{accent}", stroke_width: "2.3", stroke_linecap: "round" }
+                path { d: "M256 51H310M256 101H310M256 151H310", stroke: "rgba(216,231,244,0.38)", stroke_width: "2", stroke_linecap: "round" }
+            }
+        },
+        StorybookPageKind::Gaming => rsx! {
+            svg {
+                width: "100%",
+                height: "212",
+                view_box: "0 0 420 212",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                rect { x: "24", y: "84", width: "98", height: "40", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "166", y: "84", width: "108", height: "40", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                rect { x: "318", y: "42", width: "80", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "318", y: "130", width: "80", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "45", y: "109", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "KDE ISO" }
+                text { x: "193", y: "109", fill: "{accent}", font_size: "13", font_weight: "800", "GPU host" }
+                text { x: "340", y: "65", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "vfio vm" }
+                text { x: "342", y: "153", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "steam" }
+                path { d: "M122 104H166", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M274 104H318", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M358 76V130", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
     }
@@ -4179,25 +4241,32 @@ fn floating_group_style() -> &'static str {
     "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
-fn waiting_story_panel_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:color-mix(in srgb, var(--maker-section-bg) 92%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
+fn build_storybook_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:16px; padding:16px 18px 18px 18px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
-fn ecosystem_story_panel_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; justify-content:center; min-height:190px; padding:16px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+fn story_scene_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:12px; justify-content:center; min-height:256px; padding:16px; border-radius:16px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
-fn build_story_dot_style(active: bool, accent: &str) -> String {
+fn story_note_card_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:8px; min-height:122px; padding:14px 15px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+}
+
+fn story_nav_tab_style(active: bool, accent: &str) -> String {
     format!(
-        "display:inline-flex; width:{}px; height:8px; border-radius:999px; background:{}; box-shadow:{};",
-        if active { 18 } else { 8 },
+        "display:inline-flex; align-items:center; justify-content:center; border:none; background:transparent; padding:0 0 8px 0; min-height:28px; font-size:12px; font-weight:{}; color:{}; box-shadow:{};",
+        if active { 800 } else { 700 },
         if active {
-            format!("color-mix(in srgb, {} 68%, transparent)", accent)
+            format!("color-mix(in srgb, {} 78%, white 18%)", accent)
         } else {
-            "color-mix(in srgb, var(--maker-muted) 34%, transparent)".to_owned()
+            "var(--maker-copy)".to_owned()
         },
         if active {
-            format!("0 0 0 1px color-mix(in srgb, {} 30%, transparent)", accent)
+            format!(
+                "inset 0 -2px 0 color-mix(in srgb, {} 68%, transparent)",
+                accent
+            )
         } else {
             "none".to_owned()
         }
