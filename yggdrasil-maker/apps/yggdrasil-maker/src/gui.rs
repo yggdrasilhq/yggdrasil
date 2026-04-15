@@ -781,6 +781,13 @@ enum OutcomeChoiceKind {
     Client,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EcosystemCardKind {
+    Cli,
+    Client,
+    Sync,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SidebarTreeRow {
     Folder {
@@ -1325,6 +1332,7 @@ fn app() -> Element {
                                 StudioCanvas {
                                     state: snapshot.clone(),
                                     accent: accent.clone(),
+                                    now_ms: now_ms(),
                                     on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.set_journey_stage(stage)),
                                     on_update_setup_name: move |value: String| update_setup_name(state, value),
                                     on_update_hostname: move |value: String| update_hostname(state, value),
@@ -1342,6 +1350,7 @@ fn app() -> Element {
                             StudioCanvas {
                                 state: snapshot.clone(),
                                 accent: accent.clone(),
+                                now_ms: now_ms(),
                                 on_set_stage: move |stage: JourneyStage| state.with_mut(|ui| ui.set_journey_stage(stage)),
                                 on_update_setup_name: move |value: String| update_setup_name(state, value),
                                 on_update_hostname: move |value: String| update_hostname(state, value),
@@ -1531,6 +1540,7 @@ fn app() -> Element {
 fn StudioCanvas(
     state: MakerUiState,
     accent: String,
+    now_ms: u64,
     on_set_stage: EventHandler<JourneyStage>,
     on_update_setup_name: EventHandler<String>,
     on_update_hostname: EventHandler<String>,
@@ -1606,6 +1616,7 @@ fn StudioCanvas(
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
     let setup_id_for_name_sync = state.current_setup.setup_id.clone();
+    let build_story_spotlight_index = ((now_ms / 4500) % 3) as usize;
     let stage_split_style = if stacked_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1894,6 +1905,41 @@ fn StudioCanvas(
                                     style: status_card_style(),
                                     div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Last result" }
                                     div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{latest_result_summary(&state)}" }
+                                }
+                            }
+                            if state.build_running {
+                                div {
+                                    style: waiting_story_panel_style(),
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:4px;",
+                                        div { style: label_style(), "While this runs" }
+                                        h3 { style: "margin:0; font-size:18px; line-height:1.12; color:var(--maker-section-title);", "The rest of Yggdrasil comes next." }
+                                        p { style: "margin:0; font-size:12px; line-height:1.65; color:var(--maker-copy);", "The ISO gets the machine ready first. After boot, the rest of the tools help you manage builds, sync changes, and keep the box in shape." }
+                                    }
+                                    div {
+                                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                                        EcosystemGuideCard {
+                                            title: "yggcli",
+                                            body: "Repeat the same build path from the terminal when you want automation or remote operation.",
+                                            accent: accent.clone(),
+                                            active: build_story_spotlight_index == 0,
+                                            artwork: rsx! { EcosystemArtwork { kind: EcosystemCardKind::Cli, accent: accent.clone() } },
+                                        }
+                                        EcosystemGuideCard {
+                                            title: "yggclient",
+                                            body: "After boot, use the client tools on the machine for day-two admin tasks and guided changes.",
+                                            accent: accent.clone(),
+                                            active: build_story_spotlight_index == 1,
+                                            artwork: rsx! { EcosystemArtwork { kind: EcosystemCardKind::Client, accent: accent.clone() } },
+                                        }
+                                        EcosystemGuideCard {
+                                            title: "yggsync",
+                                            body: "Keep machines and configs aligned once you have more than one box to manage.",
+                                            accent: accent.clone(),
+                                            active: build_story_spotlight_index == 2,
+                                            artwork: rsx! { EcosystemArtwork { kind: EcosystemCardKind::Sync, accent: accent.clone() } },
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2367,6 +2413,85 @@ fn OutcomeChoiceArtwork(kind: OutcomeChoiceKind, accent: String) -> Element {
                 circle { cx: "153", cy: "36", r: "13", fill: "{glow}" }
                 path { d: "M146 36H160", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
                 path { d: "M153 29V43", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+            }
+        },
+    }
+}
+
+#[component]
+fn EcosystemGuideCard(
+    title: &'static str,
+    body: &'static str,
+    accent: String,
+    active: bool,
+    artwork: Element,
+) -> Element {
+    rsx! {
+        div {
+            style: ecosystem_card_style(active, &accent),
+            div {
+                style: "display:flex; align-items:flex-start; justify-content:space-between; gap:12px;",
+                div {
+                    style: "display:flex; flex-direction:column; gap:4px;",
+                    span { style: "font-size:15px; font-weight:800; color:var(--maker-text-strong);", "{title}" }
+                    p { style: "margin:0; font-size:12px; line-height:1.6; color:var(--maker-copy);", "{body}" }
+                }
+                div {
+                    style: "display:flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:999px; background:color-mix(in srgb, var(--maker-card-bg) 84%, transparent); box-shadow:inset 0 0 0 1px var(--maker-card-border); color:var(--maker-muted); font-size:10px; font-weight:800;",
+                    if active { "•" } else { "·" }
+                }
+            }
+            div { style: "display:flex; align-items:flex-end; min-height:74px;", {artwork} }
+        }
+    }
+}
+
+#[component]
+fn EcosystemArtwork(kind: EcosystemCardKind, accent: String) -> Element {
+    let glow = format!("color-mix(in srgb, {accent} 18%, transparent)");
+    match kind {
+        EcosystemCardKind::Cli => rsx! {
+            svg {
+                width: "132",
+                height: "74",
+                view_box: "0 0 132 74",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                rect { x: "10", y: "10", width: "92", height: "50", rx: "12", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1" }
+                path { d: "M26 30L36 38L26 46", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
+                path { d: "M44 46H66", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                rect { x: "80", y: "22", width: "34", height: "24", rx: "12", fill: "{glow}" }
+            }
+        },
+        EcosystemCardKind::Client => rsx! {
+            svg {
+                width: "132",
+                height: "74",
+                view_box: "0 0 132 74",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                rect { x: "10", y: "8", width: "78", height: "46", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1" }
+                rect { x: "20", y: "17", width: "58", height: "26", rx: "10", fill: "color-mix(in srgb, {accent} 12%, rgba(255,255,255,0.04))" }
+                path { d: "M34 58H66", stroke: "rgba(255,255,255,0.12)", stroke_width: "5", stroke_linecap: "round" }
+                circle { cx: "103", cy: "31", r: "13", fill: "{glow}" }
+                path { d: "M96 31H110", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+                path { d: "M103 24V38", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+            }
+        },
+        EcosystemCardKind::Sync => rsx! {
+            svg {
+                width: "132",
+                height: "74",
+                view_box: "0 0 132 74",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                rect { x: "12", y: "16", width: "34", height: "24", rx: "10", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.18)", stroke_width: "1" }
+                rect { x: "86", y: "16", width: "34", height: "24", rx: "10", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.18)", stroke_width: "1" }
+                path { d: "M46 28H86", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+                path { d: "M78 21L86 28L78 35", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round" }
+                path { d: "M86 48H46", stroke: "rgba(216,231,244,0.40)", stroke_width: "2", stroke_linecap: "round" }
+                path { d: "M54 41L46 48L54 55", stroke: "rgba(216,231,244,0.40)", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round" }
+                circle { cx: "66", cy: "48", r: "14", fill: "{glow}" }
             }
         },
     }
@@ -3973,6 +4098,29 @@ fn floating_group_style() -> &'static str {
     "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
+fn waiting_story_panel_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:color-mix(in srgb, var(--maker-section-bg) 92%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
+}
+
+fn ecosystem_card_style(active: bool, accent: &str) -> String {
+    format!(
+        "display:flex; flex-direction:column; justify-content:space-between; gap:12px; min-height:168px; padding:14px; border-radius:14px; background:{}; box-shadow:{};",
+        if active {
+            format!("color-mix(in srgb, {} 10%, var(--maker-card-bg))", accent)
+        } else {
+            "var(--maker-card-bg)".to_owned()
+        },
+        if active {
+            format!(
+                "inset 0 0 0 1px color-mix(in srgb, {} 44%, var(--maker-card-border)), 0 12px 24px color-mix(in srgb, {} 10%, transparent)",
+                accent, accent
+            )
+        } else {
+            "inset 0 0 0 1px var(--maker-card-border)".to_owned()
+        }
+    )
+}
+
 fn outcome_showcase_card_style(selected: bool, accent: &str) -> String {
     format!(
         "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; justify-content:space-between; gap:18px; min-height:232px; padding:18px 18px 16px 18px; border:none; border-radius:14px; \
@@ -4167,11 +4315,8 @@ mod tests {
 
     #[test]
     fn naming_scheme_tokens_expand() {
-        let name = resolve_build_name_scheme(
-            "$MACHINE_NAME-{%date%}",
-            "Lab Box",
-            "setup-1776251028091-0",
-        );
+        let name =
+            resolve_build_name_scheme("$MACHINE_NAME-{%date%}", "Lab Box", "setup-1776251028091-0");
         assert!(name.starts_with("lab-box-"));
         assert!(!name.contains("$MACHINE_NAME"));
         assert!(!name.contains("{%date%}"));
