@@ -1534,6 +1534,43 @@ fn StudioCanvas(
     on_build: EventHandler<()>,
 ) -> Element {
     let current_stage = state.current_setup.journey_stage;
+    let mut setup_name_draft = use_signal(|| state.current_setup.setup.name.clone());
+    let mut hostname_draft =
+        use_signal(|| state.current_setup.setup.personalization.hostname.clone());
+    let mut artifacts_dir_draft = use_signal(|| state.artifacts_dir.clone());
+    let mut repo_root_draft = use_signal(|| state.repo_root.clone());
+    let mut draft_sync_key = use_signal(|| {
+        (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        )
+    });
+    {
+        let setup_id = state.current_setup.setup_id.clone();
+        let setup_name = state.current_setup.setup.name.clone();
+        let hostname = state.current_setup.setup.personalization.hostname.clone();
+        let artifacts_dir = state.artifacts_dir.clone();
+        let repo_root = state.repo_root.clone();
+        use_effect(move || {
+            let next_key = (
+                setup_id.clone(),
+                setup_name.clone(),
+                hostname.clone(),
+                artifacts_dir.clone(),
+                repo_root.clone(),
+            );
+            if draft_sync_key() != next_key {
+                draft_sync_key.set(next_key);
+                setup_name_draft.set(setup_name.clone());
+                hostname_draft.set(hostname.clone());
+                artifacts_dir_draft.set(artifacts_dir.clone());
+                repo_root_draft.set(repo_root.clone());
+            }
+        });
+    }
     let stacked_studio = state.window_width < 1340;
     let outcome_options = [
         (
@@ -1694,8 +1731,8 @@ fn StudioCanvas(
                     style: "display:flex; flex-direction:column; gap:16px;",
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
-                        h2 { style: section_title_style(), "Personalize" }
-                        p { style: section_copy_style(), "Name the setup and give the future host a stable identity before you ask the builder to make it real." }
+                        h2 { style: section_title_style(), "Name this machine" }
+                        p { style: section_copy_style(), "Pick one name for the saved build, and one name for the machine itself." }
                     }
                     div {
                         style: stage_split_style,
@@ -1705,35 +1742,37 @@ fn StudioCanvas(
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px;",
                                 div {
                                     style: "display:flex; flex-direction:column; gap:6px;",
-                                    label { style: label_style(), "Setup" }
+                                    label { style: label_style(), "Saved build name" }
                                     input {
                                         id: "maker-setup-name",
                                         r#type: "text",
-                                        value: "{state.current_setup.setup.name}",
+                                        value: "{setup_name_draft()}",
                                         style: input_style(),
-                                        oninput: move |evt| on_update_setup_name.call(evt.value()),
+                                        oninput: move |evt| setup_name_draft.set(evt.value()),
+                                        onchange: move |_| on_update_setup_name.call(setup_name_draft()),
                                     }
                                 }
                                 div {
                                     style: "display:flex; flex-direction:column; gap:6px;",
-                                    label { style: label_style(), "Hostname" }
+                                    label { style: label_style(), "Machine name" }
                                     input {
                                         r#type: "text",
-                                        value: "{state.current_setup.setup.personalization.hostname}",
+                                        value: "{hostname_draft()}",
                                         style: input_style(),
-                                        oninput: move |evt| on_update_hostname.call(evt.value()),
+                                        oninput: move |evt| hostname_draft.set(evt.value()),
+                                        onchange: move |_| on_update_hostname.call(hostname_draft()),
                                     }
                                 }
                             }
                         }
                         div {
                             style: identity_preview_style(),
-                            div { style: label_style(), "Identity preview" }
-                            h3 { style: "margin:0; font-size:24px; line-height:1.08; color:var(--maker-section-title);", "{state.current_setup.setup.personalization.hostname}" }
-                            p { style: "margin:0; font-size:13px; line-height:1.65; color:var(--maker-copy);", "This is the machine identity that will carry through the emitted native config and the saved setup story." }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Setup slug" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Journey" } span { style: stat_value_style(), "{current_stage.label()}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Artifacts root" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
+                            div { style: label_style(), "What the machine will be called" }
+                            h3 { style: "margin:0; font-size:24px; line-height:1.08; color:var(--maker-section-title);", "{hostname_draft()}" }
+                            p { style: "margin:0; font-size:13px; line-height:1.65; color:var(--maker-copy);", "This name goes into the config and shows up after boot." }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Shown in sidebar as" } span { style: stat_value_style(), "{setup_name_draft()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "File name" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
                         }
                     }
                 }
@@ -1745,7 +1784,7 @@ fn StudioCanvas(
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "Review" }
-                        p { style: section_copy_style(), "Lock the build inputs before you launch. Shell Truth on the right holds the native config and build plan while you check the last mile." }
+                        p { style: section_copy_style(), "Check the paths before you build. The right side shows the config and build plan." }
                     }
                     div {
                         style: stage_split_style,
@@ -1755,36 +1794,38 @@ fn StudioCanvas(
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;",
                                 div {
                                     style: "display:flex; flex-direction:column; gap:6px;",
-                                    label { style: label_style(), "Artifacts directory" }
+                                    label { style: label_style(), "Artifacts folder" }
                                     input {
                                         r#type: "text",
-                                        value: "{state.artifacts_dir}",
+                                        value: "{artifacts_dir_draft()}",
                                         style: input_style(),
-                                        oninput: move |evt| on_update_artifacts_dir.call(evt.value()),
+                                        oninput: move |evt| artifacts_dir_draft.set(evt.value()),
+                                        onchange: move |_| on_update_artifacts_dir.call(artifacts_dir_draft()),
                                     }
                                 }
                                 div {
                                     style: "display:flex; flex-direction:column; gap:6px;",
-                                    label { style: label_style(), "Repo root (optional for repo-local builds)" }
+                                    label { style: label_style(), "Repo root" }
                                     input {
                                         r#type: "text",
-                                        value: "{state.repo_root}",
+                                        value: "{repo_root_draft()}",
                                         style: input_style(),
-                                        oninput: move |evt| on_update_repo_root.call(evt.value()),
+                                        oninput: move |evt| repo_root_draft.set(evt.value()),
+                                        onchange: move |_| on_update_repo_root.call(repo_root_draft()),
                                     }
                                 }
                             }
                         }
                         div {
                             style: proof_stack_style(),
-                            div { style: label_style(), "Ready check" }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                            div { style: label_style(), "Check before build" }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Build type" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
                             div {
                                 style: status_card_style(),
                                 div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "{state.build_status}" }
-                                div { style: "font-size:11px; color:var(--maker-status-muted);", "Save the setup, then continue into Launch when the right rail looks truthful." }
+                                div { style: "font-size:11px; color:var(--maker-status-muted);", "Save the build, then continue when the config on the right looks correct." }
                             }
                         }
                     }
