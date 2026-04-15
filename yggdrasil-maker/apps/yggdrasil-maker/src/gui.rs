@@ -2183,30 +2183,64 @@ fn StudioCanvas(
                         h2 { style: section_title_style(), "Build" }
                         p { style: section_copy_style(), "This is the factual build screen. The right rail stays honest, and the chapter page below shows what the machine can grow into after first boot." }
                     }
-                    div {
-                        style: build_split_style,
+                    if state.build_running {
                         div {
-                            style: floating_group_style(),
+                            style: "display:flex; flex-direction:column; gap:18px; padding:4px 2px 0 2px;",
                             div {
-                                style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
-                            }
-                            if !state.build_result.trim().is_empty() {
+                                style: "display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(280px, 0.8fr); gap:28px; align-items:start;",
                                 div {
-                                    style: status_card_style(),
-                                    div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Last result" }
-                                    div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{latest_result_summary(&state)}" }
+                                    style: "display:flex; flex-direction:column; gap:14px;",
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:8px; padding:0 0 14px 0; box-shadow:inset 0 -1px 0 color-mix(in srgb, var(--maker-section-border) 72%, transparent);",
+                                        div { style: label_style(), "Live build" }
+                                        h3 { style: "margin:0; font-size:30px; line-height:1.02; color:var(--maker-section-title);", "Building now" }
+                                        p { style: "margin:0; max-width:62ch; font-size:13px; line-height:1.72; color:var(--maker-copy);", "The main view stays calm while the real log, config, and plan stream on the right. Closing the window will not stop the build." }
+                                    }
+                                    div {
+                                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px 22px;",
+                                        div { style: build_running_info_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                                        div { style: build_running_info_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
+                                        div { style: build_running_info_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
+                                    }
+                                }
+                                div {
+                                    style: "display:flex; flex-direction:column; gap:10px;",
+                                    div { style: label_style(), "What happens" }
+                                    div { style: build_running_info_style(), span { style: stat_label_style(), "Linux" } span { style: stat_value_style(), "Builds the ISO locally with Docker." } }
+                                    div { style: build_running_info_style(), span { style: stat_label_style(), "Other systems" } span { style: stat_value_style(), "Can save a builder bundle instead." } }
+                                    div { style: build_running_info_style(), span { style: stat_label_style(), "Details" } span { style: stat_value_style(), "Config, plan, and log stay on the right." } }
+                                    if !state.build_result.trim().is_empty() {
+                                        div { style: build_running_info_style(), span { style: stat_label_style(), "Last result" } span { style: stat_value_style(), "{latest_result_summary(&state)}" } }
+                                    }
                                 }
                             }
                         }
+                    } else {
                         div {
-                            style: floating_group_style(),
-                            div { style: label_style(), "What happens" }
-                            div { style: info_row_style(), span { style: stat_label_style(), "Linux" } span { style: stat_value_style(), "Builds the ISO locally with Docker." } }
-                            div { style: info_row_style(), span { style: stat_label_style(), "Other systems" } span { style: stat_value_style(), "Can save a builder bundle instead." } }
-                            div { style: info_row_style(), span { style: stat_label_style(), "Details" } span { style: stat_value_style(), "Config, plan, and log stay on the right." } }
+                            style: build_split_style,
+                            div {
+                                style: floating_group_style(),
+                                div {
+                                    style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                                    div { style: proof_card_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                                    div { style: proof_card_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
+                                    div { style: proof_card_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
+                                }
+                                if !state.build_result.trim().is_empty() {
+                                    div {
+                                        style: status_card_style(),
+                                        div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Last result" }
+                                        div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{latest_result_summary(&state)}" }
+                                    }
+                                }
+                            }
+                            div {
+                                style: floating_group_style(),
+                                div { style: label_style(), "What happens" }
+                                div { style: info_row_style(), span { style: stat_label_style(), "Linux" } span { style: stat_value_style(), "Builds the ISO locally with Docker." } }
+                                div { style: info_row_style(), span { style: stat_label_style(), "Other systems" } span { style: stat_value_style(), "Can save a builder bundle instead." } }
+                                div { style: info_row_style(), span { style: stat_label_style(), "Details" } span { style: stat_value_style(), "Config, plan, and log stay on the right." } }
+                            }
                         }
                     }
                     div {
@@ -2227,6 +2261,7 @@ fn StudioCanvas(
                         page_index: build_story_spotlight_index,
                         accent: accent.clone(),
                         running: state.build_running,
+                        full_viewport: state.build_running,
                         paused: story_paused,
                         seconds_remaining: story_seconds_remaining,
                         on_pause_cycle: move |_| {
@@ -2704,6 +2739,7 @@ fn BuildStorybook(
     page_index: usize,
     accent: String,
     running: bool,
+    full_viewport: bool,
     paused: bool,
     seconds_remaining: u64,
     on_pause_cycle: EventHandler<MouseEvent>,
@@ -2763,7 +2799,7 @@ fn BuildStorybook(
 
     rsx! {
         div {
-            style: build_storybook_style(),
+            style: build_storybook_style(full_viewport),
             onmouseenter: move |evt| on_pause_cycle.call(evt),
             onmousemove: move |evt| on_pause_cycle.call(evt),
             div {
@@ -2792,27 +2828,31 @@ fn BuildStorybook(
                 }
             }
             div {
-                style: "display:grid; grid-template-columns:minmax(0, 1.3fr) minmax(250px, 0.9fr); gap:16px; align-items:stretch;",
+                style: if full_viewport {
+                    "display:grid; grid-template-columns:minmax(0, 1.35fr) minmax(250px, 0.85fr); gap:20px; align-items:stretch;"
+                } else {
+                    "display:grid; grid-template-columns:minmax(0, 1.3fr) minmax(250px, 0.9fr); gap:16px; align-items:stretch;"
+                },
                 div {
-                    style: story_scene_style(),
+                    style: story_scene_style(full_viewport),
                     StorybookArtwork { kind: kind, accent: accent.clone() }
                 }
                 div {
                     style: "display:flex; flex-direction:column; gap:12px;",
                     div {
-                        style: story_note_card_style(),
+                        style: story_note_card_style(full_viewport),
                         div { style: label_style(), "How it fits" }
                         p { style: "margin:0; font-size:12px; line-height:1.72; color:var(--maker-copy);", "{note}" }
                     }
                     div {
-                        style: story_note_card_style(),
+                        style: story_note_card_style(full_viewport),
                         div { style: label_style(), "Why it matters" }
                         p { style: "margin:0; font-size:12px; line-height:1.72; color:var(--maker-copy);", "The ISO should feel like the first chapter of a system, not the whole story. These pages show where the machine goes next once it boots." }
                     }
                 }
             }
             div {
-                style: story_footer_style(),
+                style: story_footer_style(full_viewport),
                 div {
                     style: "display:flex; align-items:center; gap:12px; flex-wrap:wrap;",
                     div { style: label_style(), "Chapters" }
@@ -4560,20 +4600,40 @@ fn floating_group_style() -> &'static str {
     "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
-fn build_storybook_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; padding:14px 16px 12px 16px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
+fn build_storybook_style(full_viewport: bool) -> &'static str {
+    if full_viewport {
+        "display:flex; flex-direction:column; gap:14px; padding:0; border-radius:0; background:transparent; box-shadow:none;"
+    } else {
+        "display:flex; flex-direction:column; gap:12px; padding:14px 16px 12px 16px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
+    }
 }
 
-fn story_scene_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:10px; justify-content:center; min-height:220px; padding:14px; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+fn story_scene_style(full_viewport: bool) -> &'static str {
+    if full_viewport {
+        "display:flex; flex-direction:column; gap:10px; justify-content:center; min-height:236px; padding:2px 0; border-radius:0; background:transparent; box-shadow:none;"
+    } else {
+        "display:flex; flex-direction:column; gap:10px; justify-content:center; min-height:220px; padding:14px; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    }
 }
 
-fn story_note_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:8px; min-height:100px; padding:12px 13px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+fn story_note_card_style(full_viewport: bool) -> &'static str {
+    if full_viewport {
+        "display:flex; flex-direction:column; gap:8px; min-height:0; padding:10px 0 12px 0; border-radius:0; background:transparent; box-shadow:inset 0 -1px 0 color-mix(in srgb, var(--maker-card-border) 78%, transparent);"
+    } else {
+        "display:flex; flex-direction:column; gap:8px; min-height:100px; padding:12px 13px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    }
 }
 
-fn story_footer_style() -> &'static str {
-    "display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--maker-section-border) 70%, transparent);"
+fn story_footer_style(full_viewport: bool) -> &'static str {
+    if full_viewport {
+        "display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-top:10px; border-top:1px solid color-mix(in srgb, var(--maker-section-border) 78%, transparent);"
+    } else {
+        "display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--maker-section-border) 70%, transparent);"
+    }
+}
+
+fn build_running_info_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:8px; padding:0 0 12px 0; border-radius:0; background:transparent; box-shadow:inset 0 -1px 0 color-mix(in srgb, var(--maker-card-border) 76%, transparent);"
 }
 
 fn story_nav_tab_style(active: bool, accent: &str) -> String {
