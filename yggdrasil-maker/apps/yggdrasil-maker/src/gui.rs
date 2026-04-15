@@ -236,6 +236,7 @@ struct MakerUiState {
     success_state: Option<BuildSuccessState>,
     notifications: Vec<ToastItem>,
     next_notification_id: u64,
+    confirm_close_open: bool,
     alt_overlay_active: bool,
     appearance_panel_open: bool,
     theme_editor_draft: YgguiThemeSpec,
@@ -277,6 +278,7 @@ impl MakerUiState {
             success_state: None,
             notifications: Vec::new(),
             next_notification_id: 1,
+            confirm_close_open: false,
             alt_overlay_active: false,
             appearance_panel_open: false,
             theme_editor_draft,
@@ -1133,7 +1135,11 @@ fn app() -> Element {
                     });
                 },
                 on_close_app: move |_| {
-                    window().close();
+                    if snapshot.build_running {
+                        state.with_mut(|ui| ui.confirm_close_open = true);
+                    } else {
+                        window().close();
+                    }
                 },
             }
         }
@@ -1504,11 +1510,51 @@ fn app() -> Element {
                                 }
                             }
                         }
+                }
+            }
+            if snapshot.confirm_close_open {
+                div {
+                    style: "position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:28px; background:rgba(13,17,23,0.36); backdrop-filter:blur(8px); z-index:30;",
+                    onclick: move |_| {
+                        state.with_mut(|ui| ui.confirm_close_open = false);
+                    },
+                    div {
+                        style: "width:min(460px, 100%); display:flex; flex-direction:column; gap:14px; padding:20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);",
+                        onclick: |evt| evt.stop_propagation(),
+                        div {
+                            style: "display:flex; flex-direction:column; gap:6px;",
+                            div { style: label_style(), "Build in progress" }
+                            h3 { style: "margin:0; font-size:20px; line-height:1.15; color:var(--maker-section-title);", "Closing now can interrupt this ISO build." }
+                            p { style: "margin:0; font-size:13px; line-height:1.7; color:var(--maker-copy);", "The current build still runs under this desktop app. If you close the window now, the build may stop or end in an unclear state." }
+                        }
+                        div {
+                            style: status_card_style(),
+                            div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Current status" }
+                            div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{snapshot.build_status}" }
+                        }
+                        div {
+                            style: "display:flex; justify-content:flex-end; gap:10px; margin-top:4px;",
+                            button {
+                                style: tertiary_button_style(),
+                                onclick: move |_| {
+                                    state.with_mut(|ui| ui.confirm_close_open = false);
+                                },
+                                "Keep building"
+                            }
+                            button {
+                                style: "display:inline-flex; align-items:center; justify-content:center; min-width:132px; height:34px; border:none; border-radius:999px; padding:0 16px; background:#cf5d5d; color:#fff8f8; font-size:12px; font-weight:800; box-shadow:0 10px 24px rgba(207,93,93,0.32);",
+                                onclick: move |_| {
+                                    window().close();
+                                },
+                                "Close anyway"
+                            }
+                        }
                     }
                 }
-                ToastViewport {
-                    items: snapshot.notifications.clone(),
-                    palette: toast_palette,
+            }
+            ToastViewport {
+                items: snapshot.notifications.clone(),
+                palette: toast_palette,
                     center_offset: 0,
                     max_age_ms: 6_500,
                     max_visible: 4,
