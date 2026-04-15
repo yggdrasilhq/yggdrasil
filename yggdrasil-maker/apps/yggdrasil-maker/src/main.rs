@@ -2,12 +2,15 @@ use anyhow::{Context, Result};
 use build_job::DetachedBuildCompletionRecord;
 use clap::{Args, Parser, Subcommand};
 use maker_app::{BuildInputs, MakerApp};
-use maker_build::{BuildErrorCode, BuildEvent, BuildMode};
+use maker_build::{
+    ArtifactKind, ArtifactManifest, BuildErrorCode, BuildEvent, BuildMode, BuildStage,
+};
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, PresetId};
 #[cfg(feature = "desktop-ui")]
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 #[cfg(feature = "desktop-ui")]
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -417,12 +420,35 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
             }
         }
         BuildCommand::Run(args) => {
+            let inputs = load_build_inputs(app, args.input)?;
             let as_json = args.json;
             let completion_file = args.completion_file.clone();
-            match app.run_build(load_build_inputs(app, args.input)?, |event| {
+            match app.run_build(inputs.clone(), |event| {
                 let _ = emit_local_event(&event, as_json);
             }) {
                 Ok(result) => {
+                    if let Err(error) =
+                        run_host_qemu_smoke_checks(&inputs, &result.manifest, as_json)
+                    {
+                        emit_local_event(
+                            &BuildEvent::Failure {
+                                code: BuildErrorCode::SmokeTestFailed,
+                                message_key: "host_qemu_smoke_failed".to_owned(),
+                                detail: error.to_string(),
+                            },
+                            as_json,
+                        )?;
+                        write_completion_file(
+                            completion_file.as_ref(),
+                            &DetachedBuildCompletionRecord {
+                                success: false,
+                                completed_at_ms: current_millis_u128(),
+                                manifest_path: None,
+                                error: Some(error.to_string()),
+                            },
+                        )?;
+                        std::process::exit(1);
+                    }
                     write_completion_file(
                         completion_file.as_ref(),
                         &DetachedBuildCompletionRecord {
@@ -483,6 +509,167 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_host_qemu_smoke_checks(
+    inputs: &BuildInputs,
+    manifest: &ArtifactManifest,
+    as_json: bool,
+) -> Result<()> {
+    if std::env::consts::OS != "linux"
+        || inputs.skip_smoke
+        || !inputs.setup_document.setup.smoke.enable_qemu_smoke
+        || manifest.mode != BuildMode::LocalDocker
+    {
+        return Ok(());
+    }
+
+    let repo_root = inputs
+        .repo_root
+        .clone()
+        .unwrap_or(std::env::current_dir().context("failed to resolve current repo root")?);
+    let ssh_key = resolve_qemu_smoke_private_key()?;
+    let smoke_targets = manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.kind == ArtifactKind::Iso)
+        .filter_map(|artifact| {
+            artifact
+                .profile
+                .map(|profile| (profile, artifact.path.clone()))
+        })
+        .collect::<Vec<(BuildProfile, String)>>();
+
+    if smoke_targets.is_empty() {
+        return Err(anyhow::anyhow!(
+            "host QEMU smoke could not find any ISO artifacts to test"
+        ));
+    }
+
+    emit_local_event(
+        &BuildEvent::StageStarted {
+            stage: BuildStage::Smoke,
+        },
+        as_json,
+    )?;
+    for (profile, iso_path) in smoke_targets {
+        emit_local_event(
+            &BuildEvent::LogLine {
+                stream: "stdout".to_owned(),
+                line: format!(
+                    "Running host QEMU smoke for {} via {}",
+                    profile.slug(),
+                    iso_path
+                ),
+            },
+            as_json,
+        )?;
+        run_host_qemu_smoke_check(&repo_root, &ssh_key, profile, &iso_path, as_json)?;
+    }
+    emit_local_event(
+        &BuildEvent::StageFinished {
+            stage: BuildStage::Smoke,
+        },
+        as_json,
+    )?;
+    Ok(())
+}
+
+fn run_host_qemu_smoke_check(
+    repo_root: &PathBuf,
+    ssh_key: &PathBuf,
+    profile: BuildProfile,
+    iso_path: &str,
+    as_json: bool,
+) -> Result<()> {
+    let mode = match profile {
+        BuildProfile::Server => "server",
+        BuildProfile::Kde => "kde",
+        BuildProfile::Both => {
+            return Err(anyhow::anyhow!(
+                "host QEMU smoke cannot run against combined profile value"
+            ));
+        }
+    };
+
+    let can_sudo = ProcessCommand::new("sudo")
+        .arg("-n")
+        .arg("true")
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    let mut command = if can_sudo {
+        let mut command = ProcessCommand::new("sudo");
+        command.arg("-n");
+        command.arg("./tests/smoke/boot-qemu.sh");
+        command
+    } else {
+        ProcessCommand::new("./tests/smoke/boot-qemu.sh")
+    };
+    let output = command
+        .current_dir(repo_root)
+        .arg("--iso")
+        .arg(iso_path)
+        .arg("--mode")
+        .arg(mode)
+        .arg("--ssh-private-key")
+        .arg(ssh_key)
+        .output()
+        .with_context(|| format!("failed to run host smoke for {}", iso_path))?;
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if !line.trim().is_empty() {
+            emit_local_event(
+                &BuildEvent::LogLine {
+                    stream: "stdout".to_owned(),
+                    line: line.to_owned(),
+                },
+                as_json,
+            )?;
+        }
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        if !line.trim().is_empty() {
+            emit_local_event(
+                &BuildEvent::LogLine {
+                    stream: "stderr".to_owned(),
+                    line: line.to_owned(),
+                },
+                as_json,
+            )?;
+        }
+    }
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(anyhow::anyhow!(
+        "host QEMU smoke failed for {} (status {})",
+        profile.slug(),
+        output.status
+    ))
+}
+
+fn resolve_qemu_smoke_private_key() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("YGG_QEMU_SSH_PRIVATE_KEY") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".ssh/id_ed25519");
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "host QEMU smoke requires YGG_QEMU_SSH_PRIVATE_KEY or ~/.ssh/id_ed25519"
+    ))
 }
 
 fn write_completion_file(

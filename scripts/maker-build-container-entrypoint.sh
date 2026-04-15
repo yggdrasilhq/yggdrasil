@@ -289,7 +289,6 @@ fi
 profile="$(json_field "$INVOKE_PATH" build_profile)"
 skip_smoke="$(json_field "$INVOKE_PATH" skip_smoke)"
 artifacts_dir="$(json_field "$INVOKE_PATH" artifacts_dir)"
-enable_qemu_smoke="$(toml_field "$CONFIG_PATH" enable_qemu_smoke || printf 'false')"
 
 if [[ ! -r "$REPO_ROOT" ]]; then
   emit_failure "output-permission-denied" "repo_not_readable" "repo root is not readable: $REPO_ROOT"
@@ -435,34 +434,6 @@ if [[ "$build_status" -ne 0 ]]; then
 fi
 
 emit_stage_finished "build"
-if [[ "$skip_smoke" != "true" ]]; then
-  emit_stage_started "smoke"
-  smoke_cmd=(
-    ./tests/smoke/run.sh
-    --profile "$profile"
-    --require-artifacts
-    --with-iso-rootfs
-    --artifacts-dir ./artifacts
-    --server-iso ./artifacts/server-latest.iso
-    --kde-iso ./artifacts/kde-latest.iso
-  )
-  if [[ "$enable_qemu_smoke" == "true" ]]; then
-    smoke_cmd+=(--with-qemu-boot)
-  fi
-
-  set +e
-  "${smoke_cmd[@]}" \
-    > >(while IFS= read -r line; do emit_log_line "stdout" "$line"; done) \
-    2> >(while IFS= read -r line; do emit_log_line "stderr" "$line"; done)
-  smoke_status=$?
-  set -e
-  if [[ "$smoke_status" -ne 0 ]]; then
-    emit_failure "smoke-test-failed" "smoke_failed" "post-build smoke tests failed for profile $profile"
-    exit 1
-  fi
-  emit_stage_finished "smoke"
-fi
-
 emit_stage_started "artifact_copy"
 
 copy_if_present() {
@@ -528,5 +499,31 @@ payload = {
 PY
 
 emit_stage_finished "artifact_copy"
+
+if [[ "$skip_smoke" != "true" ]]; then
+  emit_stage_started "smoke"
+  smoke_cmd=(
+    ./tests/smoke/run.sh
+    --profile "$profile"
+    --require-artifacts
+    --with-iso-rootfs
+    --artifacts-dir "$artifacts_dir"
+    --server-iso "$artifacts_dir/server-latest.iso"
+    --kde-iso "$artifacts_dir/kde-latest.iso"
+  )
+
+  set +e
+  "${smoke_cmd[@]}" \
+    > >(while IFS= read -r line; do emit_log_line "stdout" "$line"; done) \
+    2> >(while IFS= read -r line; do emit_log_line "stderr" "$line"; done)
+  smoke_status=$?
+  set -e
+  if [[ "$smoke_status" -ne 0 ]]; then
+    emit_failure "smoke-test-failed" "smoke_failed" "post-build smoke tests failed for profile $profile"
+    exit 1
+  fi
+  emit_stage_finished "smoke"
+fi
+
 emit_stage_started "complete"
 emit_stage_finished "complete"

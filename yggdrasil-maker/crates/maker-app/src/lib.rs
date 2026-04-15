@@ -163,11 +163,20 @@ impl MakerApp {
                 });
                 Ok(BuildRunResult { plan, manifest })
             }
-            BuildMode::LocalDocker => self.run_local_docker_build(plan, on_event),
+            BuildMode::LocalDocker => self.run_local_docker_build(
+                plan,
+                inputs.setup_document.setup.smoke.enable_qemu_smoke && !inputs.skip_smoke,
+                on_event,
+            ),
         }
     }
 
-    fn run_local_docker_build<F>(&self, plan: BuildPlan, mut on_event: F) -> Result<BuildRunResult>
+    fn run_local_docker_build<F>(
+        &self,
+        plan: BuildPlan,
+        enable_host_qemu_smoke: bool,
+        mut on_event: F,
+    ) -> Result<BuildRunResult>
     where
         F: FnMut(BuildEvent),
     {
@@ -232,9 +241,15 @@ impl MakerApp {
             Ok(())
         });
 
+        let mut last_failure_event: Option<BuildEvent> = None;
         let parse_result = {
             let reader = BufReader::new(stdout);
-            parse_build_event_stream(reader, |event| on_event(event))
+            parse_build_event_stream(reader, |event| {
+                if let BuildEvent::Failure { .. } = &event {
+                    last_failure_event = Some(event.clone());
+                }
+                on_event(event);
+            })
         };
 
         while let Ok(event) = stderr_rx.try_recv() {
@@ -266,12 +281,20 @@ impl MakerApp {
         });
 
         if !status.success() {
-            let event = BuildEvent::Failure {
+            let event = last_failure_event.unwrap_or_else(|| BuildEvent::Failure {
                 code: BuildErrorCode::ContainerLaunchFailed,
                 message_key: "container_launch_failed".to_owned(),
                 detail: format!("docker exited with status {status}"),
-            };
-            on_event(event.clone());
+            });
+            if matches!(
+                event,
+                BuildEvent::Failure {
+                    code: BuildErrorCode::ContainerLaunchFailed,
+                    ..
+                }
+            ) {
+                on_event(event.clone());
+            }
             bail!(BuildFailure { event });
         }
 
@@ -296,6 +319,11 @@ impl MakerApp {
             on_event(event.clone());
             bail!(BuildFailure { event });
         }
+
+        if enable_host_qemu_smoke {
+            run_host_qemu_smoke(&plan, &manifest, &mut on_event)?;
+        }
+
         Ok(BuildRunResult { plan, manifest })
     }
 }
@@ -432,6 +460,196 @@ fn require_runtime_sensitive_inputs(document: &SetupDocument) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn run_host_qemu_smoke<F>(
+    plan: &BuildPlan,
+    manifest: &ArtifactManifest,
+    on_event: &mut F,
+) -> Result<()>
+where
+    F: FnMut(BuildEvent),
+{
+    #[cfg(not(target_os = "linux"))]
+    {
+        let event = BuildEvent::Failure {
+            code: BuildErrorCode::UnsupportedPlatform,
+            message_key: "host_qemu_smoke_unsupported".to_owned(),
+            detail: "host-side QEMU smoke is only supported on Linux".to_owned(),
+        };
+        on_event(event.clone());
+        bail!(BuildFailure { event });
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let ssh_key = resolve_qemu_smoke_private_key()?;
+        let repo_root = resolve_host_repo_root(plan)?;
+        let smoke_targets = manifest
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.kind == ArtifactKind::Iso)
+            .filter_map(|artifact| {
+                artifact
+                    .profile
+                    .map(|profile| (profile, artifact.path.clone()))
+            })
+            .collect::<Vec<(BuildProfile, String)>>();
+
+        if smoke_targets.is_empty() {
+            let event = BuildEvent::Failure {
+                code: BuildErrorCode::ArtifactMissing,
+                message_key: "iso_missing_for_smoke".to_owned(),
+                detail: "no ISO artifacts were available for host-side smoke".to_owned(),
+            };
+            on_event(event.clone());
+            bail!(BuildFailure { event });
+        }
+
+        on_event(BuildEvent::StageStarted {
+            stage: BuildStage::Smoke,
+        });
+
+        for (profile, iso_path) in smoke_targets {
+            on_event(BuildEvent::LogLine {
+                stream: "stdout".to_owned(),
+                line: format!(
+                    "Running host QEMU smoke for {} via {}",
+                    profile.slug(),
+                    iso_path
+                ),
+            });
+            run_host_qemu_smoke_for_iso(&repo_root, &ssh_key, profile, &iso_path, on_event)?;
+        }
+
+        on_event(BuildEvent::StageFinished {
+            stage: BuildStage::Smoke,
+        });
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_host_qemu_smoke_for_iso<F>(
+    repo_root: &Path,
+    ssh_key: &Path,
+    profile: BuildProfile,
+    iso_path: &str,
+    on_event: &mut F,
+) -> Result<()>
+where
+    F: FnMut(BuildEvent),
+{
+    let mode = match profile {
+        BuildProfile::Server => "server",
+        BuildProfile::Kde => "kde",
+        BuildProfile::Both => {
+            let event = BuildEvent::Failure {
+                code: BuildErrorCode::SmokeTestFailed,
+                message_key: "invalid_smoke_profile".to_owned(),
+                detail: "host-side QEMU smoke does not accept the combined both profile".to_owned(),
+            };
+            on_event(event.clone());
+            bail!(BuildFailure { event });
+        }
+    };
+
+    let can_sudo = ProcessCommand::new("sudo")
+        .arg("-n")
+        .arg("true")
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    let mut command = if can_sudo {
+        let mut command = ProcessCommand::new("sudo");
+        command.arg("-n");
+        command.arg("./tests/smoke/boot-qemu.sh");
+        command
+    } else {
+        ProcessCommand::new("./tests/smoke/boot-qemu.sh")
+    };
+
+    command
+        .current_dir(repo_root)
+        .arg("--iso")
+        .arg(iso_path)
+        .arg("--mode")
+        .arg(mode)
+        .arg("--ssh-private-key")
+        .arg(ssh_key)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = command
+        .output()
+        .with_context(|| format!("failed to run host smoke for {}", iso_path))?;
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if !line.trim().is_empty() {
+            on_event(BuildEvent::LogLine {
+                stream: "stdout".to_owned(),
+                line: line.to_owned(),
+            });
+        }
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        if !line.trim().is_empty() {
+            on_event(BuildEvent::LogLine {
+                stream: "stderr".to_owned(),
+                line: line.to_owned(),
+            });
+        }
+    }
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let event = BuildEvent::Failure {
+        code: BuildErrorCode::SmokeTestFailed,
+        message_key: "host_qemu_smoke_failed".to_owned(),
+        detail: format!(
+            "host QEMU smoke failed for {} (status {})",
+            profile.slug(),
+            output.status
+        ),
+    };
+    on_event(event.clone());
+    bail!(BuildFailure { event });
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_host_repo_root(plan: &BuildPlan) -> Result<PathBuf> {
+    if let Some(repo_root) = plan.repo_root.as_ref() {
+        return Ok(repo_root.clone());
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    Ok(manifest_dir
+        .ancestors()
+        .nth(3)
+        .context("failed to resolve yggdrasil repo root from maker-app")?
+        .to_path_buf())
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_qemu_smoke_private_key() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("YGG_QEMU_SSH_PRIVATE_KEY") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".ssh/id_ed25519");
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+
+    bail!("host QEMU smoke requires YGG_QEMU_SSH_PRIVATE_KEY or ~/.ssh/id_ed25519")
 }
 
 fn write_setup_json(path: &Path, document: &SetupDocument) -> Result<()> {

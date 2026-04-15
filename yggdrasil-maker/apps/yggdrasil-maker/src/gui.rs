@@ -324,6 +324,10 @@ impl MakerUiState {
             state.sync_truth_surface_for_stage();
         }
         state.restore_active_build_job();
+        if state.normalize_startup_stage() {
+            state.refresh_previews();
+            let _ = state.persist_current_setup();
+        }
         state
     }
 
@@ -407,6 +411,34 @@ impl MakerUiState {
         self.shell_settings.utility_pane_open = true;
         self.current_setup.journey_stage = JourneyStage::Build;
         self.poll_active_build_job();
+    }
+
+    fn normalize_startup_stage(&mut self) -> bool {
+        if self.build_running || self.active_build_job.is_some() {
+            return false;
+        }
+
+        let normalized_stage = match self.current_setup.journey_stage {
+            JourneyStage::Build | JourneyStage::Boot => JourneyStage::Review,
+            stage => stage,
+        };
+        if normalized_stage == self.current_setup.journey_stage {
+            return false;
+        }
+
+        self.current_setup.journey_stage = normalized_stage;
+        self.success_state = None;
+        self.sync_truth_surface_for_stage();
+        trace_ui(
+            &self.trace_root,
+            "startup",
+            "normalize_stage",
+            json!({
+                "setup_id": self.current_setup.setup_id,
+                "journey_stage": self.current_setup.journey_stage.label(),
+            }),
+        );
+        true
     }
 
     fn poll_active_build_job(&mut self) {
