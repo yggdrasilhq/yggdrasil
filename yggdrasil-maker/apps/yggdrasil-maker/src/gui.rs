@@ -921,6 +921,7 @@ fn app() -> Element {
                     match process_pending_app_control_requests(&trace_root, &desktop, state).await {
                         Ok(true) => {
                             wake_app_control();
+                            desktop.window.request_redraw();
                             schedule_ui_update();
                         }
                         Ok(false) => {}
@@ -973,47 +974,64 @@ fn app() -> Element {
                 "☰"
             }
             button {
-                style: titlebar_setup_button_style(),
+                title: "New Setup",
+                style: titlebar_icon_button_style(false),
                 onmousedown: |evt| evt.stop_propagation(),
                 ondoubleclick: |evt| evt.stop_propagation(),
                 onclick: move |_| {
                     state.with_mut(|ui| {
-                        ui.set_journey_stage(JourneyStage::Personalize);
+                        ui.start_another_setup();
                     });
                     let _ = document::eval("document.getElementById('maker-setup-name')?.focus?.();");
                 },
-                div {
-                    style: "display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-width:0;",
-                    span {
-                        style: "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; color:var(--maker-titlebar-text); text-align:left;",
-                        "{sidebar_setup_primary(&snapshot.current_setup.setup.name)}"
-                    }
-                    span {
-                        style: "flex:0 0 auto; font-size:10px; color:var(--maker-titlebar-muted); white-space:nowrap;",
-                        "{snapshot.current_setup.setup.preset.slug()} • {profile_title_label(snapshot.current_setup.setup.profile_override.unwrap_or_else(|| snapshot.current_setup.setup.preset.recommended_profile()))}"
-                    }
-                }
+                "+"
             }
         }
     };
 
     let titlebar_center = rsx! {
         div {
-            style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; width:min(520px, 100%);",
+            style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; width:min(680px, 100%);",
+            button {
+                title: "Previous Step",
+                disabled: previous_journey_stage(snapshot.current_setup.journey_stage).is_none(),
+                style: titlebar_step_arrow_style(previous_journey_stage(snapshot.current_setup.journey_stage).is_some()),
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
+                onclick: move |_| {
+                    if let Some(stage) = previous_journey_stage(snapshot.current_setup.journey_stage) {
+                        state.with_mut(|ui| ui.set_journey_stage(stage));
+                    }
+                },
+                "‹"
+            }
             div {
                 style: titlebar_center_field_style(),
-                span {
-                    style: "font-size:11px; font-weight:800; letter-spacing:0.08em; color:var(--maker-titlebar-muted); white-space:nowrap;",
-                    "{snapshot.current_setup.journey_stage.label()}"
+                for (index, stage) in journey_stages().iter().copied().enumerate() {
+                    span {
+                        style: titlebar_flow_label_style(stage, snapshot.current_setup.journey_stage),
+                        "{stage.label()}"
+                    }
+                    if index + 1 < journey_stages().len() {
+                        span {
+                            style: "font-size:11px; color:var(--maker-titlebar-muted);",
+                            "→"
+                        }
+                    }
                 }
-                span {
-                    style: "font-size:11px; font-weight:700; color:var(--maker-titlebar-text); white-space:nowrap;",
-                    "{snapshot.current_setup.setup.profile_override.unwrap_or_else(|| snapshot.current_setup.setup.preset.recommended_profile())}"
-                }
-                span {
-                    style: "font-size:11px; color:var(--maker-titlebar-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
-                    "{titlebar_status_text(&snapshot)}"
-                }
+            }
+            button {
+                title: "Next Step",
+                disabled: next_journey_stage(snapshot.current_setup.journey_stage).is_none(),
+                style: titlebar_step_arrow_style(next_journey_stage(snapshot.current_setup.journey_stage).is_some()),
+                onmousedown: |evt| evt.stop_propagation(),
+                ondoubleclick: |evt| evt.stop_propagation(),
+                onclick: move |_| {
+                    if let Some(stage) = next_journey_stage(snapshot.current_setup.journey_stage) {
+                        state.with_mut(|ui| ui.set_journey_stage(stage));
+                    }
+                },
+                "›"
             }
         }
     };
@@ -1529,6 +1547,15 @@ fn StudioCanvas(
     let current_stage = state.current_setup.journey_stage;
     let compact_studio = state.window_width < 1280;
     let stacked_studio = state.window_width < 1340;
+    let primary_outcome_cards = preset_cards()
+        .iter()
+        .copied()
+        .filter(|card| card.id != PresetId::RecoveryAnchor)
+        .collect::<Vec<_>>();
+    let recovery_outcome_card = preset_cards()
+        .iter()
+        .copied()
+        .find(|card| card.id == PresetId::RecoveryAnchor);
     let selected_profile = state
         .current_setup
         .setup
@@ -1538,21 +1565,10 @@ fn StudioCanvas(
         .iter()
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
-    let previous_stage = previous_journey_stage(current_stage);
-    let next_stage = next_journey_stage(current_stage);
-    let (stage_title, stage_copy) = stage_headline(current_stage);
-    let stage_index = journey_stage_index(current_stage) + 1;
-    let stage_total = journey_stages().len();
-    let hero_compact = current_stage != JourneyStage::Outcome;
-    let header_split_style = if compact_studio {
-        "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
-    } else {
-        "display:grid; grid-template-columns:minmax(0, 1.15fr) minmax(220px, 0.85fr); gap:18px; align-items:center;"
-    };
     let outcome_grid_style = if compact_studio {
-        "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
+        "display:grid; grid-template-columns:minmax(0, 1fr); gap:12px; align-items:stretch;"
     } else {
-        "display:grid; grid-template-columns:minmax(0, 1.08fr) minmax(260px, 0.92fr); gap:14px; align-items:start;"
+        "display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:stretch;"
     };
     let stage_split_style = if stacked_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
@@ -1568,135 +1584,47 @@ fn StudioCanvas(
     rsx! {
         div {
             style: "display:flex; flex-direction:column; gap:14px; max-width:920px; margin:0 auto;",
-            div {
-                style: viewport_header_style(hero_compact),
-                div {
-                    style: header_split_style,
-                    div {
-                        style: "display:flex; flex-direction:column; gap:0;",
-                        div {
-                            style: "display:flex; align-items:center; gap:10px; flex-wrap:wrap;",
-                            div {
-                                style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                                "{current_stage.label()} STAGE"
-                            }
-                            div {
-                                style: "display:inline-flex; align-items:center; gap:8px; padding:5px 9px; border-radius:999px; background:color-mix(in srgb, var(--maker-card-bg) 62%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 82%, transparent); font-size:11px; font-weight:700; color:var(--maker-copy);",
-                                "Step {stage_index} of {stage_total}"
-                            }
-                        }
-                        h1 {
-                            style: if hero_compact {
-                                "margin:6px 0 4px 0; font-size:28px; line-height:1.08; color:var(--maker-hero-title);"
-                            } else {
-                                "margin:8px 0 6px 0; font-size:38px; line-height:1.04; color:var(--maker-hero-title);"
-                            },
-                            "{stage_title}"
-                        }
-                        p {
-                            style: if hero_compact {
-                                "margin:0; max-width:760px; font-size:14px; line-height:1.65; color:var(--maker-hero-copy);"
-                            } else {
-                                "margin:0; max-width:720px; font-size:15px; line-height:1.7; color:var(--maker-hero-copy);"
-                            },
-                            "{stage_copy}"
-                        }
-                        div {
-                            style: "display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; font-weight:700; color:var(--maker-copy);",
-                            span {
-                                style: format!("display:inline-flex; width:8px; height:8px; border-radius:999px; background:{}; box-shadow:0 0 0 6px color-mix(in srgb, {} 12%, transparent); animation:makerProgressSweep 2.6s ease-in-out infinite; transform-origin:center;", accent, accent),
-                            }
-                            "{stage_reassurance_copy(current_stage)}"
-                        }
-                        div {
-                            style: format!(
-                                "display:flex; flex-wrap:wrap; gap:10px; margin-top:{}px;",
-                                if hero_compact { 12 } else { 16 }
-                            ),
-                            div { style: header_meta_chip_style(), span { style: stat_label_style(), "Setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
-                            div { style: header_meta_chip_style(), span { style: stat_label_style(), "Preset" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
-                            div { style: header_meta_chip_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
-                        }
-                    }
-                    StageCartoon {
-                        stage: current_stage,
-                        accent: accent.clone(),
-                        compact: compact_studio,
-                    }
-                }
-            }
-
-            div {
-                style: "display:flex; flex-wrap:wrap; gap:16px; align-items:center; padding:0 4px 2px 4px; border-bottom:1px solid var(--maker-card-border);",
-                for stage in journey_stages() {
-                    button {
-                        style: stage_pill_style(stage == current_stage, stage_precedes(stage, current_stage), &accent),
-                        onclick: move |_| on_set_stage.call(stage),
-                        "{stage.label()}"
-                    }
-                }
-            }
-
             if current_stage == JourneyStage::Outcome {
                 div {
                     style: section_card_style(),
                     div {
-                        style: "display:flex; align-items:end; justify-content:space-between; gap:12px; flex-wrap:wrap;",
-                        div {
-                            style: "display:flex; flex-direction:column; gap:6px;",
-                            h2 { style: section_title_style(), "Outcome" }
-                            p { style: section_copy_style(), "Pick the machine you are trying to make real. The selected intent should feel concrete before you move deeper into the build." }
-                        }
-                        div {
-                            style: "font-size:11px; font-weight:700; color:var(--maker-note);",
-                            "Choose once, then tune posture and identity."
-                        }
+                        style: "display:flex; flex-direction:column; gap:2px;",
+                        h2 { style: section_title_style(), "Choose a starting point" }
+                        p { style: section_copy_style(), "Pick one option." }
                     }
                     div {
                         style: outcome_grid_style,
-                        div {
-                            style: selected_intent_card_style(&accent),
-                            div {
-                                style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                                span { style: label_style(), "Selected intent" }
-                                span { style: format!("font-size:10px; font-weight:800; color:{};", accent), "{selected_profile.slug()}" }
-                            }
-                            h3 {
-                                style: "margin:0; font-size:28px; line-height:1.04; color:var(--maker-section-title);",
-                                "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}"
-                            }
-                            p {
-                                style: "margin:0; font-size:14px; line-height:1.72; color:var(--maker-copy);",
-                                "{selected_preset.map(|card| card.summary).unwrap_or(\"No preset copy available.\")}"
-                            }
-                            div {
-                                style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px;",
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Hostname" } span { style: stat_value_style(), "{state.current_setup.setup.personalization.hostname}" } }
-                            }
-                        }
-                        div {
-                            style: "display:flex; flex-direction:column; gap:10px;",
-                            div { style: label_style(), "Other intents" }
-                            for card in preset_cards()
-                                .iter()
-                                .copied()
-                                .filter(|card| card.id != state.current_setup.setup.preset)
-                            {
-                                button {
-                                    style: secondary_preset_card_style(),
-                                    onclick: move |_| on_apply_preset.call(card.id),
-                                    div {
-                                        style: "display:flex; align-items:center; justify-content:space-between; gap:8px;",
-                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "{card.title}" }
-                                        span { style: "font-size:10px; font-weight:800; color:#7ab8ff;", "{card.recommended_profile.slug()}" }
-                                    }
-                                    p {
-                                        style: "margin:0; font-size:12px; line-height:1.6; color:var(--maker-copy);",
-                                        "{card.summary}"
+                        for card in primary_outcome_cards.into_iter() {
+                            button {
+                                style: outcome_choice_card_style(card.id == state.current_setup.setup.preset, &accent),
+                                onclick: move |_| on_apply_preset.call(card.id),
+                                div {
+                                    style: "display:flex; align-items:center; justify-content:space-between; gap:10px;",
+                                    h3 { style: "margin:0; font-size:18px; line-height:1.1; color:var(--maker-text-strong);", "{card.title}" }
+                                    span {
+                                        style: outcome_choice_badge_style(card.id == state.current_setup.setup.preset, &accent),
+                                        {if card.id == state.current_setup.setup.preset { "Selected" } else { card.recommended_profile.slug() }}
                                     }
                                 }
+                                p {
+                                    style: "margin:0; font-size:12px; line-height:1.45; color:var(--maker-copy);",
+                                    "{card.summary}"
+                                }
+                            }
+                        }
+                    }
+                    if let Some(card) = recovery_outcome_card {
+                        button {
+                            style: quiet_option_row_style(card.id == state.current_setup.setup.preset),
+                            onclick: move |_| on_apply_preset.call(card.id),
+                            div {
+                                style: "display:flex; align-items:center; justify-content:space-between; gap:12px;",
+                                span { style: "font-size:12px; font-weight:800; color:var(--maker-text-strong);", "{card.title}" }
+                                span { style: "font-size:11px; font-weight:700; color:var(--maker-note);", "{card.recommended_profile.slug()}" }
+                            }
+                            p {
+                                style: "margin:0; font-size:12px; line-height:1.45; color:var(--maker-note);",
+                                "{card.summary}"
                             }
                         }
                     }
@@ -1707,42 +1635,67 @@ fn StudioCanvas(
                 div {
                     style: section_card_style(),
                     div {
-                        style: stage_split_style,
+                        style: "display:flex; flex-direction:column; gap:14px;",
                         div {
-                            style: "display:flex; flex-direction:column; gap:14px;",
-                            h2 { style: section_title_style(), "Profile" }
-                            p { style: section_copy_style(), "Set the build posture clearly. This decides whether the artifact lands as server, KDE, or the dual-profile build." }
-                            div {
-                                style: "display:flex; flex-wrap:wrap; gap:10px;",
-                                for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
-                                    button {
-                                        style: option_button_style(selected_profile == profile, &accent),
-                                        onclick: move |_| on_select_profile.call(profile),
-                                        "{profile.slug()}"
+                            style: "display:flex; flex-direction:column; gap:2px;",
+                            h2 { style: section_title_style(), "Choose the build profile" }
+                            p { style: section_copy_style(), "Pick one profile, then adjust hardware only if needed." }
+                        }
+                        div {
+                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                            for profile in [BuildProfile::Server, BuildProfile::Kde, BuildProfile::Both] {
+                                button {
+                                    style: profile_choice_card_style(selected_profile == profile, &accent),
+                                    onclick: move |_| on_select_profile.call(profile),
+                                    div {
+                                        style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;",
+                                        div {
+                                            style: "display:flex; flex-direction:column; gap:5px; text-align:left;",
+                                            span { style: "font-size:17px; font-weight:800; color:var(--maker-text-strong); text-transform:none;", "{profile.slug()}" }
+                                            span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "{profile_choice_copy(profile)}" }
+                                        }
+                                        span {
+                                            style: outcome_choice_badge_style(selected_profile == profile, &accent),
+                                            {if selected_profile == profile { "Selected" } else { "Profile" }}
+                                        }
                                     }
-                                }
-                            }
-                            div {
-                                style: "display:flex; flex-wrap:wrap; gap:10px;",
-                                button {
-                                    style: option_button_style(state.current_setup.setup.hardware.with_nvidia, &accent),
-                                    onclick: move |_| on_toggle_nvidia.call(()),
-                                    "NVIDIA path"
-                                }
-                                button {
-                                    style: option_button_style(state.current_setup.setup.hardware.with_lts, &accent),
-                                    onclick: move |_| on_toggle_lts.call(()),
-                                    "LTS kernel"
                                 }
                             }
                         }
                         div {
-                            style: proof_stack_style(),
-                            div { style: label_style(), "Posture proof" }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Recommended" } span { style: stat_value_style(), "{state.current_setup.setup.preset.recommended_profile().slug()}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Selected" } span { style: stat_value_style(), "{selected_profile.slug()}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Hardware" } span { style: stat_value_style(), "{hardware_summary(&state)}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Preset intent" } span { style: stat_value_style(), "{selected_preset.map(|card| card.title).unwrap_or(\"Unknown\")}" } }
+                            style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
+                            button {
+                                style: profile_toggle_card_style(state.current_setup.setup.hardware.with_nvidia, &accent),
+                                onclick: move |_| on_toggle_nvidia.call(()),
+                                div {
+                                    style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;",
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:4px; text-align:left;",
+                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "NVIDIA path" }
+                                        span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "Only for machines that need NVIDIA support." }
+                                    }
+                                    span {
+                                        style: outcome_choice_badge_style(state.current_setup.setup.hardware.with_nvidia, &accent),
+                                        {if state.current_setup.setup.hardware.with_nvidia { "On" } else { "Off" }}
+                                    }
+                                }
+                            }
+                            button {
+                                style: profile_toggle_card_style(state.current_setup.setup.hardware.with_lts, &accent),
+                                onclick: move |_| on_toggle_lts.call(()),
+                                div {
+                                    style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;",
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:4px; text-align:left;",
+                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "LTS kernel" }
+                                        span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "Use the long-term kernel for steadier machines." }
+                                    }
+                                    span {
+                                        style: outcome_choice_badge_style(state.current_setup.setup.hardware.with_lts, &accent),
+                                        {if state.current_setup.setup.hardware.with_lts { "On" } else { "Off" }}
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1947,50 +1900,6 @@ fn StudioCanvas(
                 }
             }
 
-            div {
-                style: stage_footer_bar_style(),
-                div {
-                    style: "display:flex; flex-direction:column; gap:4px;",
-                    div { style: "font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:var(--maker-note);", "Next move" }
-                    div { style: "font-size:13px; color:var(--maker-copy);", "{stage_footer_copy(current_stage)}" }
-                }
-                div {
-                    style: "display:flex; flex-direction:column; gap:6px; min-width:180px; flex:1 1 180px; max-width:260px;",
-                    div {
-                        style: "display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:11px; color:var(--maker-note);",
-                        span { "Guided progress" }
-                        span { "{stage_index}/{stage_total}" }
-                    }
-                    div {
-                        style: "position:relative; height:8px; border-radius:999px; overflow:hidden; background:color-mix(in srgb, var(--maker-card-bg) 72%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 82%, transparent);",
-                        div {
-                            style: format!(
-                                "height:100%; width:{:.2}%; border-radius:999px; background:linear-gradient(90deg, color-mix(in srgb, {} 80%, white) 0%, {} 100%); animation:makerProgressSweep 2.6s ease-in-out infinite; transform-origin:left center;",
-                                journey_stage_progress_percent(current_stage),
-                                accent,
-                                accent
-                            ),
-                        }
-                    }
-                }
-                div {
-                    style: "display:flex; flex-wrap:wrap; gap:10px;",
-                    if let Some(stage) = previous_stage {
-                        button {
-                            style: tertiary_button_style(),
-                            onclick: move |_| on_set_stage.call(stage),
-                            "Back to {stage.label()}"
-                        }
-                    }
-                    if let Some(stage) = next_stage {
-                        button {
-                            style: guided_primary_button_style(&accent),
-                            onclick: move |_| on_set_stage.call(stage),
-                            "Continue to {stage.label()}"
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -2652,6 +2561,9 @@ async fn process_pending_app_control_requests(
             } else {
                 PathBuf::from(output_path)
             };
+            desktop.set_focus();
+            desktop.window.request_redraw();
+            sleep(Duration::from_millis(90)).await;
             match capture_visible_app_surface(desktop, &target).await {
                 Ok(path) => AppControlResponse {
                     request_id: request.request_id.clone(),
@@ -2682,6 +2594,9 @@ async fn process_pending_app_control_requests(
             } else {
                 PathBuf::from(output_path)
             };
+            desktop.set_focus();
+            desktop.window.request_redraw();
+            sleep(Duration::from_millis(90)).await;
             match record_visible_app_surface(desktop, &target, duration_secs) {
                 Ok(path) => AppControlResponse {
                     request_id: request.request_id.clone(),
@@ -3087,35 +3002,6 @@ fn build_summary(state: &MakerUiState) -> String {
     }
 }
 
-fn titlebar_status_text(state: &MakerUiState) -> String {
-    if state.build_running {
-        "Build in flight".to_owned()
-    } else if let Some(success) = state.success_state.as_ref() {
-        success.title.clone()
-    } else if state.build_status.to_ascii_lowercase().contains("failed") {
-        "Build needs attention".to_owned()
-    } else if !state.build_result.trim().is_empty() {
-        "Needs attention".to_owned()
-    } else {
-        match state.current_setup.journey_stage {
-            JourneyStage::Outcome => "Choose the machine intent".to_owned(),
-            JourneyStage::Profile => "Set the build posture".to_owned(),
-            JourneyStage::Personalize => "Personalize the machine".to_owned(),
-            JourneyStage::Review => "Review the native plan".to_owned(),
-            JourneyStage::Build => "Ready to build".to_owned(),
-            JourneyStage::Boot => "Artifact ready to boot".to_owned(),
-        }
-    }
-}
-
-fn profile_title_label(profile: BuildProfile) -> &'static str {
-    match profile {
-        BuildProfile::Server => "Server",
-        BuildProfile::Kde => "KDE",
-        BuildProfile::Both => "Both",
-    }
-}
-
 fn default_truth_mode_for_stage(stage: JourneyStage) -> RightPanelMode {
     match stage {
         JourneyStage::Outcome | JourneyStage::Profile | JourneyStage::Personalize => {
@@ -3167,91 +3053,6 @@ fn stage_precedes(candidate: JourneyStage, current: JourneyStage) -> bool {
         .unwrap_or(false)
 }
 
-fn stage_headline(stage: JourneyStage) -> (&'static str, &'static str) {
-    match stage {
-        JourneyStage::Outcome => (
-            "What do you want to build?",
-            "Start with the thing you are actually trying to make. This first choice is not permanent, it just gives the build studio the right posture before you tune the details.",
-        ),
-        JourneyStage::Profile => (
-            "Set the build posture.",
-            "Choose whether this artifact lands as server, KDE, or both, then decide whether the hardware path needs NVIDIA or LTS bias before you continue.",
-        ),
-        JourneyStage::Personalize => (
-            "Give the machine a stable identity.",
-            "Name the setup, set the hostname, and make the future artifact feel deliberate before you save or build anything.",
-        ),
-        JourneyStage::Review => (
-            "Review the truthful inputs.",
-            "Check the artifact destination and optional repo root while Shell Truth keeps the native config and build plan visible on the right.",
-        ),
-        JourneyStage::Build => (
-            "Launch the artifact path.",
-            "Build locally on Linux or export a truthful handoff bundle elsewhere. The main canvas stays calm while the structured build truth streams in the utility rail.",
-        ),
-        JourneyStage::Boot => (
-            "Hand off the artifact.",
-            "This is the moment after a truthful build or export, where the app should help you reveal what was created and move toward the next machine.",
-        ),
-    }
-}
-
-fn stage_reassurance_copy(stage: JourneyStage) -> &'static str {
-    match stage {
-        JourneyStage::Outcome => {
-            "Start simple. You can change the intent, profile, and hardware choices later."
-        }
-        JourneyStage::Profile => {
-            "You are only choosing the landing posture here. The emitted config will stay visible on the right."
-        }
-        JourneyStage::Personalize => {
-            "Give the machine a stable name now, then review the exact inputs before you launch anything."
-        }
-        JourneyStage::Review => {
-            "This is the calm truth check. If it looks honest here, the build step becomes straightforward."
-        }
-        JourneyStage::Build => {
-            "This is the launch moment. The next screen is the handoff, not another maze of settings."
-        }
-        JourneyStage::Boot => {
-            "You made the artifact. From here the app should help you reveal it and move on cleanly."
-        }
-    }
-}
-
-fn stage_footer_copy(stage: JourneyStage) -> &'static str {
-    match stage {
-        JourneyStage::Outcome => {
-            "Pick the goal first, then continue into posture. Nothing is locked yet."
-        }
-        JourneyStage::Profile => {
-            "Set the artifact profile clearly, then move into identity and naming."
-        }
-        JourneyStage::Personalize => {
-            "Keep the setup and hostname clean, then review the exact emitted inputs."
-        }
-        JourneyStage::Review => "Save if needed, then continue when the right rail looks honest.",
-        JourneyStage::Build => {
-            "Run the build when ready. After that, the app should switch into artifact handoff."
-        }
-        JourneyStage::Boot => {
-            "Boot is the handoff moment. Return to Build if you need to inspect or regenerate the output."
-        }
-    }
-}
-
-fn journey_stage_index(stage: JourneyStage) -> usize {
-    journey_stages()
-        .iter()
-        .position(|candidate| *candidate == stage)
-        .unwrap_or(0)
-}
-
-fn journey_stage_progress_percent(stage: JourneyStage) -> f32 {
-    let total = journey_stages().len().max(1) as f32;
-    ((journey_stage_index(stage) as f32 + 1.0) / total) * 100.0
-}
-
 fn hardware_summary(state: &MakerUiState) -> String {
     let mut parts = Vec::new();
     if state.current_setup.setup.hardware.with_nvidia {
@@ -3264,6 +3065,14 @@ fn hardware_summary(state: &MakerUiState) -> String {
         "Standard".to_owned()
     } else {
         parts.join(" + ")
+    }
+}
+
+fn profile_choice_copy(profile: BuildProfile) -> &'static str {
+    match profile {
+        BuildProfile::Server => "Lean headless path for services and infrastructure.",
+        BuildProfile::Kde => "Desktop-first path for a workstation or local console.",
+        BuildProfile::Both => "Ship both server and KDE artifacts in one run.",
     }
 }
 
@@ -3981,6 +3790,29 @@ fn utility_icon_button_style(active: bool) -> String {
     )
 }
 
+fn titlebar_step_arrow_style(enabled: bool) -> String {
+    format!(
+        "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
+         background:{}; color:{}; font-size:18px; font-weight:700; box-shadow:{}; opacity:{};",
+        if enabled {
+            "color-mix(in srgb, var(--maker-card-bg) 74%, transparent)"
+        } else {
+            "transparent"
+        },
+        if enabled {
+            "var(--maker-titlebar-text)"
+        } else {
+            "var(--maker-titlebar-muted)"
+        },
+        if enabled {
+            "inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 84%, transparent)"
+        } else {
+            "none"
+        },
+        if enabled { "1" } else { "0.42" }
+    )
+}
+
 fn titlebar_icon_button_style(active: bool) -> String {
     format!(
         "display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:none; border-radius:8px; \
@@ -4004,12 +3836,20 @@ fn titlebar_icon_button_style(active: bool) -> String {
     )
 }
 
-fn titlebar_setup_button_style() -> &'static str {
-    "display:flex; align-items:center; width:min(360px, 100%); min-width:0; height:32px; padding:0 4px; border:none; border-radius:0; background:transparent; box-shadow:none;"
-}
-
 fn titlebar_center_field_style() -> &'static str {
     "display:flex; align-items:center; justify-content:center; gap:10px; width:100%; min-width:0; height:32px; padding:0 8px; border-radius:0; background:transparent; box-shadow:none; overflow:hidden;"
+}
+
+fn titlebar_flow_label_style(stage: JourneyStage, current: JourneyStage) -> String {
+    if stage == current {
+        "font-size:11px; font-weight:800; color:var(--maker-titlebar-text); white-space:nowrap;"
+            .to_owned()
+    } else if stage_precedes(stage, current) {
+        "font-size:11px; font-weight:700; color:var(--maker-copy); white-space:nowrap;".to_owned()
+    } else {
+        "font-size:11px; font-weight:700; color:var(--maker-titlebar-muted); white-space:nowrap;"
+            .to_owned()
+    }
 }
 
 fn utility_tab_style(selected: bool, accent: &str) -> String {
@@ -4020,31 +3860,6 @@ fn utility_tab_style(selected: bool, accent: &str) -> String {
         )
     } else {
         "flex:1; height:30px; border:none; border-radius:0; background:transparent; color:var(--maker-secondary-text); font-size:11px; font-weight:700; box-shadow:none;".to_owned()
-    }
-}
-
-fn viewport_header_style(compact: bool) -> &'static str {
-    if compact {
-        "display:flex; flex-direction:column; gap:0; padding:4px 4px 2px 4px;"
-    } else {
-        "display:flex; flex-direction:column; gap:0; padding:6px 4px 4px 4px;"
-    }
-}
-
-fn header_meta_chip_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:3px; min-width:110px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--maker-card-bg) 66%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 78%, transparent);"
-}
-
-fn stage_pill_style(active: bool, complete: bool, accent: &str) -> String {
-    if active {
-        format!(
-            "display:inline-flex; align-items:center; justify-content:center; height:30px; padding:0 2px; border:none; border-radius:0; background:transparent; color:var(--maker-text-strong); font-size:11px; font-weight:800; box-shadow:inset 0 -2px 0 {};",
-            accent
-        )
-    } else if complete {
-        "display:inline-flex; align-items:center; justify-content:center; height:30px; padding:0 2px; border:none; border-radius:0; background:transparent; color:var(--maker-stage-complete-text); font-size:11px; font-weight:800; box-shadow:none;".to_owned()
-    } else {
-        "display:inline-flex; align-items:center; justify-content:center; height:30px; padding:0 2px; border:none; border-radius:0; background:transparent; color:var(--maker-stage-inactive-text); font-size:11px; font-weight:700; box-shadow:none;".to_owned()
     }
 }
 
@@ -4059,23 +3874,12 @@ fn primary_button_style(accent: &str) -> String {
     )
 }
 
-fn guided_primary_button_style(accent: &str) -> String {
-    format!(
-        "display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 16px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:800; box-shadow:0 10px 26px color-mix(in srgb, {} 30%, transparent); animation:makerPulseGlow 2.6s ease-in-out infinite;",
-        accent, accent
-    )
-}
-
 fn secondary_button_style() -> &'static str {
     "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:12px; background:var(--maker-secondary-bg); color:var(--maker-secondary-text); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-secondary-border);"
 }
 
 fn tertiary_button_style() -> &'static str {
     "display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:none; border-radius:10px; background:var(--maker-tertiary-bg); color:var(--maker-tertiary-text); font-size:12px; font-weight:800; box-shadow:inset 0 0 0 1px var(--maker-tertiary-border);"
-}
-
-fn stage_footer_bar_style() -> &'static str {
-    "display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; padding:12px 16px; border-radius:18px; background:var(--maker-footer-bg); box-shadow:0 12px 28px rgba(88,107,129,0.08), inset 0 0 0 1px var(--maker-footer-border);"
 }
 
 fn primary_rail_button_style(accent: &str) -> String {
@@ -4142,18 +3946,116 @@ fn section_card_style() -> &'static str {
     "display:flex; flex-direction:column; gap:12px; padding:18px 20px 18px 20px; border-radius:18px; background:var(--maker-section-bg); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border); backdrop-filter:var(--maker-surface-backdrop); -webkit-backdrop-filter:var(--maker-surface-backdrop);"
 }
 
-fn selected_intent_card_style(accent: &str) -> String {
+fn outcome_choice_card_style(selected: bool, accent: &str) -> String {
     format!(
-        "display:flex; flex-direction:column; gap:14px; padding:18px 18px 18px 18px; border-radius:18px; \
-         background:radial-gradient(circle at top right, color-mix(in srgb, {} 14%, white) 0%, rgba(255,255,255,0) 36%), \
-         linear-gradient(180deg, color-mix(in srgb, var(--maker-section-bg) 82%, white) 0%, var(--maker-section-bg) 100%); \
-         box-shadow:0 18px 44px rgba(88,107,129,0.10), inset 0 0 0 1px var(--maker-card-border), inset 0 1px 0 rgba(255,255,255,0.16);",
-        accent,
+        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; gap:10px; min-height:132px; padding:15px 15px 14px 15px; border:none; border-radius:12px; \
+         background:{}; text-align:left; box-shadow:{}; outline:none;",
+        if selected {
+            format!(
+                "linear-gradient(180deg, color-mix(in srgb, {} 12%, var(--maker-card-bg)) 0%, var(--maker-card-bg) 100%)",
+                accent
+            )
+        } else {
+            "var(--maker-card-bg)".to_owned()
+        },
+        if selected {
+            format!(
+                "inset 0 0 0 1px color-mix(in srgb, {} 72%, var(--maker-card-border)), 0 12px 24px color-mix(in srgb, {} 12%, transparent)",
+                accent, accent
+            )
+        } else {
+            "inset 0 0 0 1px var(--maker-card-border)".to_owned()
+        }
     )
 }
 
-fn secondary_preset_card_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:8px; padding:14px 14px 15px 14px; border:none; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border); text-align:left;"
+fn quiet_option_row_style(selected: bool) -> String {
+    format!(
+        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; gap:6px; padding:12px 14px; border:none; border-radius:12px; \
+         background:{}; text-align:left; box-shadow:{}; outline:none;",
+        if selected {
+            "var(--maker-card-bg)"
+        } else {
+            "transparent"
+        },
+        if selected {
+            "inset 0 0 0 1px var(--maker-card-border)"
+        } else {
+            "inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 50%, transparent)"
+        }
+    )
+}
+
+fn outcome_choice_badge_style(selected: bool, accent: &str) -> String {
+    format!(
+        "display:inline-flex; align-items:center; justify-content:center; min-width:54px; height:24px; padding:0 9px; border-radius:999px; \
+         background:{}; color:{}; font-size:10px; font-weight:800; box-shadow:{};",
+        if selected {
+            format!("color-mix(in srgb, {} 14%, transparent)", accent)
+        } else {
+            "color-mix(in srgb, var(--maker-card-bg) 66%, transparent)".to_owned()
+        },
+        if selected {
+            accent.to_owned()
+        } else {
+            "var(--maker-note)".to_owned()
+        },
+        if selected {
+            format!(
+                "inset 0 0 0 1px color-mix(in srgb, {} 58%, transparent)",
+                accent
+            )
+        } else {
+            "inset 0 0 0 1px color-mix(in srgb, var(--maker-card-border) 82%, transparent)"
+                .to_owned()
+        }
+    )
+}
+
+fn profile_choice_card_style(selected: bool, accent: &str) -> String {
+    format!(
+        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; justify-content:flex-start; gap:8px; min-height:114px; padding:14px 15px 14px 15px; \
+         border:none; border-radius:12px; text-align:left; background:{}; box-shadow:{}; outline:none;",
+        if selected {
+            format!(
+                "linear-gradient(180deg, color-mix(in srgb, {} 10%, var(--maker-card-bg)) 0%, var(--maker-card-bg) 100%)",
+                accent
+            )
+        } else {
+            "var(--maker-card-bg)".to_owned()
+        },
+        if selected {
+            format!(
+                "inset 0 0 0 1px color-mix(in srgb, {} 70%, var(--maker-card-border)), 0 12px 26px color-mix(in srgb, {} 12%, transparent)",
+                accent, accent
+            )
+        } else {
+            "inset 0 0 0 1px var(--maker-card-border)".to_owned()
+        }
+    )
+}
+
+fn profile_toggle_card_style(selected: bool, accent: &str) -> String {
+    format!(
+        "appearance:none; -webkit-appearance:none; display:flex; flex-direction:column; justify-content:flex-start; gap:8px; min-height:96px; padding:14px 15px; border:none; \
+         border-radius:12px; text-align:left; background:{}; box-shadow:{}; outline:none;",
+        if selected {
+            format!(
+                "linear-gradient(180deg, color-mix(in srgb, {} 9%, var(--maker-proof-bg)) 0%, var(--maker-proof-bg) 100%)",
+                accent
+            )
+        } else {
+            "var(--maker-proof-bg)".to_owned()
+        },
+        if selected {
+            format!(
+                "inset 0 0 0 1px color-mix(in srgb, {} 64%, var(--maker-proof-border))",
+                accent
+            )
+        } else {
+            "inset 0 0 0 1px var(--maker-proof-border)".to_owned()
+        }
+    )
 }
 
 fn proof_stack_style() -> &'static str {
@@ -4174,17 +4076,6 @@ fn identity_preview_style() -> &'static str {
 
 fn proof_card_style() -> &'static str {
     "display:flex; flex-direction:column; gap:6px; padding:13px 14px; border-radius:12px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
-}
-
-fn option_button_style(selected: bool, accent: &str) -> String {
-    if selected {
-        format!(
-            "height:34px; padding:0 14px; border:none; border-radius:11px; background:{}; color:white; font-size:12px; font-weight:700;",
-            accent
-        )
-    } else {
-        "height:34px; padding:0 14px; border:none; border-radius:11px; background:var(--maker-secondary-bg); color:var(--maker-secondary-text); font-size:12px; font-weight:700; box-shadow:inset 0 0 0 1px var(--maker-secondary-border);".to_owned()
-    }
 }
 
 fn input_style() -> &'static str {

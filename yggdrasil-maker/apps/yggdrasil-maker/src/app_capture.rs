@@ -184,17 +184,19 @@ async fn platform_capture_visible_app_surface(
     desktop: &DesktopContext,
     output_path: &Path,
 ) -> Result<()> {
+    if std::env::var_os("DISPLAY").is_some() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        if capture_linux_x11_window_screenshot(std::process::id(), output_path).is_ok() {
+            return Ok(());
+        }
+        if capture_linux_root_crop(desktop, output_path).is_ok() {
+            return Ok(());
+        }
+    }
     if capture_linux_webview_snapshot(desktop, output_path)
         .await
         .is_ok()
     {
         return Ok(());
-    }
-    if std::env::var_os("DISPLAY").is_some() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        if capture_linux_x11_window_screenshot(std::process::id(), output_path).is_ok() {
-            return Ok(());
-        }
-        return capture_linux_root_crop(desktop, output_path);
     }
     let _ = desktop;
     bail!("native maker screenshot capture is only implemented for Linux/X11 right now")
