@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use build_job::DetachedBuildCompletionRecord;
 use clap::{Args, Parser, Subcommand};
 use maker_app::{BuildInputs, MakerApp};
 use maker_build::{BuildErrorCode, BuildEvent, BuildMode};
@@ -9,11 +10,13 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(feature = "desktop-ui")]
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "desktop-ui")]
 mod app_capture;
 #[cfg(feature = "desktop-ui")]
 mod app_control;
+mod build_job;
 #[cfg(feature = "desktop-ui")]
 mod gui;
 #[cfg(all(feature = "desktop-ui", target_os = "linux"))]
@@ -302,6 +305,8 @@ struct RunBuildArgs {
     input: BuildInputArgs,
     #[arg(long)]
     json: bool,
+    #[arg(long)]
+    completion_file: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -413,10 +418,26 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
         }
         BuildCommand::Run(args) => {
             let as_json = args.json;
+            let completion_file = args.completion_file.clone();
             match app.run_build(load_build_inputs(app, args.input)?, |event| {
                 let _ = emit_local_event(&event, as_json);
             }) {
                 Ok(result) => {
+                    write_completion_file(
+                        completion_file.as_ref(),
+                        &DetachedBuildCompletionRecord {
+                            success: true,
+                            completed_at_ms: current_millis_u128(),
+                            manifest_path: Some(
+                                result
+                                    .plan
+                                    .host_artifact_manifest_path
+                                    .display()
+                                    .to_string(),
+                            ),
+                            error: None,
+                        },
+                    )?;
                     if as_json {
                         println!("{}", serde_json::to_string_pretty(&result.manifest)?);
                     } else {
@@ -428,6 +449,15 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
                 }
                 Err(error) => {
                     if error.to_string().starts_with("Failure { code:") {
+                        write_completion_file(
+                            completion_file.as_ref(),
+                            &DetachedBuildCompletionRecord {
+                                success: false,
+                                completed_at_ms: current_millis_u128(),
+                                manifest_path: None,
+                                error: Some(error.to_string()),
+                            },
+                        )?;
                         std::process::exit(1);
                     }
                     emit_local_event(
@@ -438,12 +468,44 @@ fn run_build(app: &MakerApp, command: BuildCommand) -> Result<()> {
                         },
                         as_json,
                     )?;
+                    write_completion_file(
+                        completion_file.as_ref(),
+                        &DetachedBuildCompletionRecord {
+                            success: false,
+                            completed_at_ms: current_millis_u128(),
+                            manifest_path: None,
+                            error: Some(error.to_string()),
+                        },
+                    )?;
                     std::process::exit(1);
                 }
             }
         }
     }
     Ok(())
+}
+
+fn write_completion_file(
+    path: Option<&PathBuf>,
+    completion: &DetachedBuildCompletionRecord,
+) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let payload = serde_json::to_vec_pretty(completion)?;
+    std::fs::write(path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn current_millis_u128() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 #[cfg(feature = "desktop-ui")]

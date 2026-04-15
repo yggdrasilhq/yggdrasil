@@ -21,12 +21,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
+use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "linux")]
 use tao::platform::unix::WindowExtUnix;
@@ -34,6 +34,8 @@ use tao::window::ResizeDirection;
 use time::{OffsetDateTime, UtcOffset};
 use tokio::time::sleep;
 use yggterm_core::append_trace_event;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use yggui::{
     ChromePalette, HoveredChromeControl, RailHeader, RailScrollBody, RailSectionTitle,
     SideRailShell, THEME_EDITOR_SWATCHES, TOAST_CSS, TitlebarChrome, ToastItem, ToastPalette,
@@ -50,6 +52,7 @@ use crate::app_control::{
     default_recording_output_path, default_screenshot_output_path, register_client_instance,
     take_next_app_control_request,
 };
+use crate::build_job::{DetachedBuildCompletionRecord, DetachedBuildJobRecord};
 #[cfg(target_os = "linux")]
 use crate::linux_desktop::{YGGDRASIL_MAKER_WM_CLASS, refresh_dev_desktop_integration};
 use crate::window_icon;
@@ -227,6 +230,7 @@ struct MakerUiState {
     build_status: String,
     build_result: String,
     build_running: bool,
+    active_build_job: Option<DetachedBuildJobRecord>,
     right_panel_mode: RightPanelMode,
     sidebar_open: bool,
     collapsed_tree_nodes: BTreeSet<String>,
@@ -269,6 +273,7 @@ impl MakerUiState {
             build_status: "Ready to build".to_owned(),
             build_result: String::new(),
             build_running: false,
+            active_build_job: None,
             right_panel_mode: RightPanelMode::Config,
             sidebar_open: true,
             collapsed_tree_nodes: BTreeSet::new(),
@@ -318,6 +323,7 @@ impl MakerUiState {
         } else {
             state.sync_truth_surface_for_stage();
         }
+        state.restore_active_build_job();
         state
     }
 
@@ -383,6 +389,162 @@ impl MakerUiState {
             .unwrap_or_default();
     }
 
+    fn restore_active_build_job(&mut self) {
+        let Some(job) = read_active_build_job().ok().flatten() else {
+            return;
+        };
+        if let Ok(document) = self.app.setup_store().load(&job.setup_id) {
+            self.current_setup = document;
+        }
+        self.artifacts_dir = job.artifacts_dir.clone();
+        self.repo_root = job.repo_root.clone().unwrap_or_default();
+        self.active_build_job = Some(job);
+        self.build_running = true;
+        self.build_status = "Building…".to_owned();
+        self.right_panel_mode = RightPanelMode::Build;
+        self.utility_pane_open = true;
+        self.shell_settings.right_panel_mode = RightPanelMode::Build;
+        self.shell_settings.utility_pane_open = true;
+        self.current_setup.journey_stage = JourneyStage::Build;
+        self.poll_active_build_job();
+    }
+
+    fn poll_active_build_job(&mut self) {
+        if self.active_build_job.is_none()
+            && let Ok(Some(job)) = read_active_build_job()
+        {
+            self.active_build_job = Some(job);
+        }
+
+        let Some(job) = self.active_build_job.clone() else {
+            return;
+        };
+
+        if self.current_setup.setup_id != job.setup_id
+            && let Ok(document) = self.app.setup_store().load(&job.setup_id)
+        {
+            self.current_setup = document;
+        }
+        self.artifacts_dir = job.artifacts_dir.clone();
+        self.repo_root = job.repo_root.clone().unwrap_or_default();
+
+        if let Ok(payload) = fs::read_to_string(&job.log_path) {
+            let lines = payload
+                .lines()
+                .map(|line| line.to_owned())
+                .collect::<Vec<String>>();
+            if self.build_log != lines {
+                self.build_log = lines;
+            }
+        }
+
+        let completion_path = Path::new(&job.completion_path);
+        if completion_path.is_file() {
+            let completion = fs::read(completion_path).ok().and_then(|payload| {
+                serde_json::from_slice::<DetachedBuildCompletionRecord>(&payload).ok()
+            });
+            self.active_build_job = None;
+            self.build_running = false;
+            let _ = clear_active_build_job();
+
+            match completion {
+                Some(record) if record.success => {
+                    let manifest_path = record.manifest_path.clone();
+                    let manifest = record
+                        .manifest_path
+                        .as_deref()
+                        .map(PathBuf::from)
+                        .and_then(|path| read_artifact_manifest(&path).ok());
+                    if let Some(manifest) = manifest.as_ref() {
+                        self.build_status = "Build finished".to_owned();
+                        self.build_result = serde_json::to_string_pretty(manifest)
+                            .unwrap_or_else(|error| error.to_string());
+                        self.activate_success_state(manifest);
+                        self.refresh_recent_artifacts();
+                        self.push_notification(
+                            ToastTone::Success,
+                            "Files Ready",
+                            format!("{} is ready.", manifest.setup_name),
+                        );
+                    } else {
+                        self.build_status = "Build finished".to_owned();
+                        self.build_result =
+                            "Build finished, but the output file list could not be loaded."
+                                .to_owned();
+                    }
+                    trace_ui(
+                        &self.trace_root,
+                        "build",
+                        "success",
+                        json!({
+                            "setup_id": job.setup_id,
+                            "pid": job.pid,
+                            "manifest_path": manifest_path,
+                        }),
+                    );
+                }
+                Some(record) => {
+                    let error = record.error.unwrap_or_else(|| "Build failed.".to_owned());
+                    self.build_status = format!("Build failed: {error}");
+                    self.build_result = error.clone();
+                    self.push_notification(ToastTone::Error, "Build Failed", error.clone());
+                    trace_ui(
+                        &self.trace_root,
+                        "build",
+                        "failure",
+                        json!({
+                            "setup_id": job.setup_id,
+                            "pid": job.pid,
+                            "error": error,
+                        }),
+                    );
+                }
+                None => {
+                    self.build_status = "Build finished with unclear result".to_owned();
+                    self.build_result =
+                        "The build process ended, but completion details were missing.".to_owned();
+                    self.push_notification(
+                        ToastTone::Error,
+                        "Build Result Missing",
+                        "The build ended without a completion record.".to_owned(),
+                    );
+                }
+            }
+            return;
+        }
+
+        if !pid_is_alive(job.pid) {
+            self.active_build_job = None;
+            self.build_running = false;
+            self.build_status = "Build stopped unexpectedly".to_owned();
+            self.build_result =
+                "The build process exited before it wrote a completion record.".to_owned();
+            let _ = clear_active_build_job();
+            self.push_notification(
+                ToastTone::Error,
+                "Build Stopped",
+                "The build process ended early.".to_owned(),
+            );
+            trace_ui(
+                &self.trace_root,
+                "build",
+                "detached_process_missing",
+                json!({
+                    "setup_id": job.setup_id,
+                    "pid": job.pid,
+                }),
+            );
+            return;
+        }
+
+        self.build_running = true;
+        self.build_status = "Building…".to_owned();
+        self.right_panel_mode = RightPanelMode::Build;
+        self.utility_pane_open = true;
+        self.shell_settings.right_panel_mode = RightPanelMode::Build;
+        self.shell_settings.utility_pane_open = true;
+    }
+
     fn latest_manifest(&self) -> Option<ArtifactManifest> {
         let path = Path::new(&self.artifacts_dir).join(ARTIFACT_MANIFEST_NAME);
         if !path.is_file() {
@@ -410,6 +572,13 @@ impl MakerUiState {
         let _ = save_shell_settings(&self.shell_settings);
     }
 
+    fn persist_current_setup(&mut self) -> Result<PathBuf> {
+        let path = self.app.setup_store().save(&self.current_setup)?;
+        self.refresh_saved_setups();
+        sync_bootstrap_from_state(self);
+        Ok(path)
+    }
+
     fn push_notification(
         &mut self,
         tone: ToastTone,
@@ -431,13 +600,11 @@ impl MakerUiState {
     }
 
     fn save_current_setup(&mut self) {
-        match self.app.setup_store().save(&self.current_setup) {
+        match self.persist_current_setup() {
             Ok(path) => {
                 self.build_status = format!("Saved {}", path.display());
                 self.right_panel_mode = RightPanelMode::Plan;
                 self.utility_pane_open = true;
-                self.refresh_saved_setups();
-                sync_bootstrap_from_state(self);
                 self.push_notification(
                     ToastTone::Success,
                     "Build Saved",
@@ -460,6 +627,83 @@ impl MakerUiState {
                 self.push_notification(ToastTone::Error, "Save Failed", error.to_string());
             }
         }
+    }
+
+    fn spawn_detached_build_job(&mut self) -> Result<DetachedBuildJobRecord> {
+        let setup_path = self.persist_current_setup()?;
+        let job_root = build_jobs_root()?.join(format!(
+            "{}-{}",
+            self.current_setup.setup.slug(),
+            self.current_setup.setup_id
+        ));
+        fs::create_dir_all(&job_root)
+            .with_context(|| format!("failed to create {}", job_root.display()))?;
+        let log_path = job_root.join("build.log");
+        let completion_path = job_root.join("completion.json");
+        let log_file = File::create(&log_path)
+            .with_context(|| format!("failed to create {}", log_path.display()))?;
+        let stderr_file = log_file
+            .try_clone()
+            .with_context(|| format!("failed to clone {}", log_path.display()))?;
+
+        let inputs = self.build_inputs();
+        let current_exe =
+            std::env::current_exe().context("failed to resolve current executable")?;
+        let mut command = Command::new(&current_exe);
+        command
+            .arg("build")
+            .arg("run")
+            .arg("--setup")
+            .arg(&setup_path)
+            .arg("--artifacts-dir")
+            .arg(resolve_runtime_path(Path::new(&self.artifacts_dir)))
+            .arg("--json")
+            .arg("--completion-file")
+            .arg(&completion_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log_file))
+            .stderr(Stdio::from(stderr_file));
+        if let Some(repo_root) = inputs.repo_root.as_ref() {
+            command
+                .arg("--repo-root")
+                .arg(resolve_runtime_path(repo_root));
+        }
+        if let Some(path) = inputs.authorized_keys_file.as_ref() {
+            command.arg("--authorized-keys-file").arg(path);
+        }
+        if let Some(path) = inputs.host_keys_dir.as_ref() {
+            command.arg("--host-keys-dir").arg(path);
+        }
+        if inputs.skip_smoke {
+            command.arg("--skip-smoke");
+        }
+        #[cfg(unix)]
+        {
+            command.process_group(0);
+        }
+
+        let child = command
+            .spawn()
+            .with_context(|| format!("failed to spawn {}", current_exe.display()))?;
+        let job = DetachedBuildJobRecord {
+            setup_id: self.current_setup.setup_id.clone(),
+            setup_name: self.current_setup.setup.name.clone(),
+            setup_path: setup_path.display().to_string(),
+            artifacts_dir: resolve_runtime_path(Path::new(&self.artifacts_dir))
+                .display()
+                .to_string(),
+            repo_root: inputs
+                .repo_root
+                .as_ref()
+                .map(|path| resolve_runtime_path(path).display().to_string()),
+            log_path: log_path.display().to_string(),
+            completion_path: completion_path.display().to_string(),
+            pid: child.id(),
+            started_at_ms: current_millis() as u128,
+        };
+        write_active_build_job(&job)?;
+        self.active_build_job = Some(job.clone());
+        Ok(job)
     }
 
     fn select_setup(&mut self, setup_id: &str) {
@@ -733,16 +977,6 @@ impl FromStr for RightPanelMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum BuildMessage {
-    Event(String),
-    Finished {
-        manifest: ArtifactManifest,
-        payload: String,
-    },
-    Failed(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct RecentArtifactSummary {
     title: String,
     subtitle: String,
@@ -906,6 +1140,18 @@ fn app() -> Element {
                 let snapshot = state.read().clone();
                 sync_bootstrap_from_state(&snapshot);
                 sleep(Duration::from_millis(120)).await;
+            }
+        });
+    }
+
+    {
+        use_future(move || async move {
+            loop {
+                if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
+                    break;
+                }
+                state.with_mut(|ui| ui.poll_active_build_job());
+                sleep(Duration::from_millis(240)).await;
             }
         });
     }
@@ -2691,142 +2937,52 @@ fn start_build(mut state: Signal<MakerUiState>) {
         return;
     }
 
-    {
+    let launch_result = state.with_mut(|ui| -> Result<DetachedBuildJobRecord> {
+        ui.save_current_setup();
+        ui.confirm_close_open = false;
+        ui.build_log.clear();
+        ui.build_result.clear();
+        ui.success_state = None;
+        ui.appearance_panel_open = false;
+        ui.right_panel_mode = RightPanelMode::Build;
+        ui.utility_pane_open = true;
+        ui.shell_settings.utility_pane_open = true;
+        ui.shell_settings.right_panel_mode = RightPanelMode::Build;
+        ui.persist_shell_settings();
+        ui.set_journey_stage(JourneyStage::Build);
+        let job = ui.spawn_detached_build_job()?;
+        ui.build_running = true;
+        ui.build_status = "Building…".to_owned();
+        ui.push_notification(
+            ToastTone::Info,
+            "Build Started",
+            format!("Running {}", ui.current_setup.setup.name),
+        );
+        trace_ui(
+            &ui.trace_root,
+            "build",
+            "start",
+            json!({
+                "setup_id": ui.current_setup.setup_id,
+                "artifacts_dir": ui.artifacts_dir,
+                "repo_root": ui.repo_root,
+                "detached_pid": job.pid,
+                "completion_path": job.completion_path,
+            }),
+        );
+        Ok(job)
+    });
+
+    if let Err(error) = launch_result {
         state.with_mut(|ui| {
-            ui.save_current_setup();
-            ui.build_running = true;
-            ui.build_log.clear();
-            ui.build_result.clear();
-            ui.build_status = "Building…".to_owned();
-            ui.success_state = None;
-            ui.appearance_panel_open = false;
-            ui.right_panel_mode = RightPanelMode::Build;
-            ui.utility_pane_open = true;
-            ui.shell_settings.utility_pane_open = true;
-            ui.shell_settings.right_panel_mode = RightPanelMode::Build;
-            ui.persist_shell_settings();
-            ui.set_journey_stage(JourneyStage::Build);
-            ui.push_notification(
-                ToastTone::Info,
-                "Build Started",
-                format!("Running {}", ui.current_setup.setup.name),
-            );
-            trace_ui(
-                &ui.trace_root,
-                "build",
-                "start",
-                json!({
-                    "setup_id": ui.current_setup.setup_id,
-                    "artifacts_dir": ui.artifacts_dir,
-                    "repo_root": ui.repo_root,
-                }),
-            );
+            ui.active_build_job = None;
+            ui.build_running = false;
+            ui.build_status = format!("Build failed: {error}");
+            ui.build_result = error.to_string();
+            ui.push_notification(ToastTone::Error, "Build Failed", error.to_string());
+            let _ = clear_active_build_job();
         });
     }
-
-    let inputs = state.read().build_inputs();
-    let (tx, rx) = mpsc::channel::<BuildMessage>();
-
-    thread::spawn(move || {
-        let app = match MakerApp::new_for_current_platform() {
-            Ok(app) => app,
-            Err(error) => {
-                let _ = tx.send(BuildMessage::Failed(error.to_string()));
-                return;
-            }
-        };
-
-        let result = app.run_build(inputs, |event| {
-            let line = serde_json::to_string(&event).unwrap_or_else(|_| format!("{event:?}"));
-            let _ = tx.send(BuildMessage::Event(line));
-        });
-
-        match result {
-            Ok(outcome) => {
-                let payload = serde_json::to_string_pretty(&outcome.manifest)
-                    .unwrap_or_else(|error| error.to_string());
-                let _ = tx.send(BuildMessage::Finished {
-                    manifest: outcome.manifest,
-                    payload,
-                });
-            }
-            Err(error) => {
-                let _ = tx.send(BuildMessage::Failed(error.to_string()));
-            }
-        }
-    });
-
-    spawn(async move {
-        loop {
-            let mut saw_message = false;
-            let mut done = false;
-            loop {
-                match rx.try_recv() {
-                    Ok(message) => {
-                        saw_message = true;
-                        state.with_mut(|ui| match message {
-                            BuildMessage::Event(line) => ui.build_log.push(line),
-                            BuildMessage::Finished { manifest, payload } => {
-                                ui.build_running = false;
-                                ui.build_status = "Build finished".to_owned();
-                                ui.build_result = payload;
-                                ui.activate_success_state(&manifest);
-                                ui.refresh_recent_artifacts();
-                                ui.push_notification(
-                                    ToastTone::Success,
-                                    "Files Ready",
-                                    format!("{} is ready.", manifest.setup_name),
-                                );
-                                trace_ui(
-                                    &ui.trace_root,
-                                    "build",
-                                    "success",
-                                    json!({
-                                        "setup_id": ui.current_setup.setup_id,
-                                        "mode": manifest.mode,
-                                        "profile": manifest.build_profile,
-                                    }),
-                                );
-                                done = true;
-                            }
-                            BuildMessage::Failed(error) => {
-                                ui.build_running = false;
-                                ui.build_status = format!("Build failed: {error}");
-                                ui.build_result = error.clone();
-                                ui.push_notification(
-                                    ToastTone::Error,
-                                    "Build Failed",
-                                    error.clone(),
-                                );
-                                trace_ui(
-                                    &ui.trace_root,
-                                    "build",
-                                    "failure",
-                                    json!({
-                                        "setup_id": ui.current_setup.setup_id,
-                                        "error": error,
-                                    }),
-                                );
-                                done = true;
-                            }
-                        });
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        done = true;
-                        break;
-                    }
-                }
-            }
-
-            if done {
-                break;
-            }
-            if !saw_message {
-                sleep(Duration::from_millis(80)).await;
-            }
-        }
-    });
 }
 
 async fn process_pending_app_control_requests(
@@ -3691,15 +3847,17 @@ fn save_shell_settings(settings: &MakerShellSettings) -> Result<()> {
 }
 
 fn default_authorized_keys_file(document: &SetupDocument) -> Option<PathBuf> {
-    let remembered = document
+    let configured = document
         .setup
         .ssh
         .authorized_keys_file
         .build_value()
         .map(|value| value.trim())
-        .filter(|value| !value.is_empty());
-    if remembered.is_some() {
-        return None;
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_file());
+    if configured.is_some() {
+        return configured;
     }
 
     let home = std::env::var("HOME").ok()?;
@@ -3822,6 +3980,61 @@ fn current_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis() as u64
+}
+
+fn build_jobs_root() -> Result<PathBuf> {
+    Ok(maker_data_root()?.join("build-jobs"))
+}
+
+fn active_build_job_path() -> Result<PathBuf> {
+    Ok(maker_data_root()?.join("active-build.json"))
+}
+
+fn read_active_build_job() -> Result<Option<DetachedBuildJobRecord>> {
+    let path = active_build_job_path()?;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let payload = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let record = serde_json::from_slice::<DetachedBuildJobRecord>(&payload)
+        .with_context(|| format!("invalid build job record in {}", path.display()))?;
+    Ok(Some(record))
+}
+
+fn write_active_build_job(record: &DetachedBuildJobRecord) -> Result<()> {
+    let path = active_build_job_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let payload = serde_json::to_vec_pretty(record)?;
+    fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn clear_active_build_job() -> Result<()> {
+    let path = active_build_job_path()?;
+    if path.exists() {
+        fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn pid_is_alive(pid: u32) -> bool {
+    match std::env::consts::OS {
+        "linux" => PathBuf::from(format!("/proc/{pid}")).exists(),
+        _ => true,
+    }
+}
+
+fn resolve_runtime_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
 }
 
 fn normalize_theme_editor_axis(value: f64) -> f32 {
