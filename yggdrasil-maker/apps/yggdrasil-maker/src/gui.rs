@@ -783,9 +783,11 @@ enum OutcomeChoiceKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EcosystemCardKind {
-    Cli,
+    Term,
     Client,
     Sync,
+    Infra,
+    Gaming,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1616,7 +1618,7 @@ fn StudioCanvas(
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
     let setup_id_for_name_sync = state.current_setup.setup_id.clone();
-    let build_story_spotlight_index = ((now_ms / 4500) % 3) as usize;
+    let build_story_spotlight_index = ((now_ms / 7000) % 5) as usize;
     let stage_split_style = if stacked_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -1913,32 +1915,12 @@ fn StudioCanvas(
                                     div {
                                         style: "display:flex; flex-direction:column; gap:4px;",
                                         div { style: label_style(), "While this runs" }
-                                        h3 { style: "margin:0; font-size:18px; line-height:1.12; color:var(--maker-section-title);", "The rest of Yggdrasil comes next." }
-                                        p { style: "margin:0; font-size:12px; line-height:1.65; color:var(--maker-copy);", "The ISO gets the machine ready first. After boot, the rest of the tools help you manage builds, sync changes, and keep the box in shape." }
+                                        h3 { style: "margin:0; font-size:18px; line-height:1.12; color:var(--maker-section-title);", "This ISO is the first move, not the whole system." }
+                                        p { style: "margin:0; font-size:12px; line-height:1.65; color:var(--maker-copy);", "While the build runs, here is how the rest of the Yggdrasil tools fit around the machine you are making." }
                                     }
-                                    div {
-                                        style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
-                                        EcosystemGuideCard {
-                                            title: "yggcli",
-                                            body: "Repeat the same build path from the terminal when you want automation or remote operation.",
-                                            accent: accent.clone(),
-                                            active: build_story_spotlight_index == 0,
-                                            artwork: rsx! { EcosystemArtwork { kind: EcosystemCardKind::Cli, accent: accent.clone() } },
-                                        }
-                                        EcosystemGuideCard {
-                                            title: "yggclient",
-                                            body: "After boot, use the client tools on the machine for day-two admin tasks and guided changes.",
-                                            accent: accent.clone(),
-                                            active: build_story_spotlight_index == 1,
-                                            artwork: rsx! { EcosystemArtwork { kind: EcosystemCardKind::Client, accent: accent.clone() } },
-                                        }
-                                        EcosystemGuideCard {
-                                            title: "yggsync",
-                                            body: "Keep machines and configs aligned once you have more than one box to manage.",
-                                            accent: accent.clone(),
-                                            active: build_story_spotlight_index == 2,
-                                            artwork: rsx! { EcosystemArtwork { kind: EcosystemCardKind::Sync, accent: accent.clone() } },
-                                        }
+                                    BuildStoryDeck {
+                                        page_index: build_story_spotlight_index,
+                                        accent: accent.clone(),
                                     }
                                 }
                             }
@@ -2419,29 +2401,78 @@ fn OutcomeChoiceArtwork(kind: OutcomeChoiceKind, accent: String) -> Element {
 }
 
 #[component]
-fn EcosystemGuideCard(
-    title: &'static str,
-    body: &'static str,
-    accent: String,
-    active: bool,
-    artwork: Element,
-) -> Element {
+fn BuildStoryDeck(page_index: usize, accent: String) -> Element {
+    let total_pages = 5;
+    let (kicker, title, body, note, kind) = match page_index {
+        0 => (
+            "Remote control",
+            "yggterm keeps the machine reachable while you build and debug it.",
+            "Open a terminal into the box, watch services settle, and keep one honest operator surface instead of guessing through ad-hoc SSH tabs.",
+            "Example: laptop 10.0.0.12 -> yggterm -> nas-01 10.0.0.21 -> containers and services.",
+            EcosystemCardKind::Term,
+        ),
+        1 => (
+            "Day-two admin",
+            "yggclient is what you use on the machine after boot.",
+            "It turns the fresh ISO into an operator box you can keep shaping: install roles, inspect services, and make guided changes without rebuilding every time.",
+            "Example: boot server ISO -> install storage role -> enable mail and reverse proxy -> validate health.",
+            EcosystemCardKind::Client,
+        ),
+        2 => (
+            "Fleet sync",
+            "yggsync keeps the same intent moving across more than one host.",
+            "Use one source of truth for configs, then sync to server, client, and backup nodes so the fleet does not drift apart.",
+            "Example: git main -> yggsync -> mail-01 10.0.0.31, proxy-01 10.0.0.32, backup-01 10.0.0.33.",
+            EcosystemCardKind::Sync,
+        ),
+        3 => (
+            "Infra pattern",
+            "One ISO can become the start of a whole service box.",
+            "Typical path: nginx in front, Infisical for secrets, then app services such as mail, dashboards, or internal tools behind it.",
+            "Example: edge-01 10.0.0.40 -> nginx -> infisical 10.0.0.41 + mail 10.0.0.42 + apps 10.0.0.43.",
+            EcosystemCardKind::Infra,
+        ),
+        _ => (
+            "Gaming pattern",
+            "The KDE path can also become a desktop or passthrough gaming box.",
+            "Use the client profile, enable the GPU path you need, then let the box host Steam, media tools, or a passthrough workstation.",
+            "Example: gamer-01 10.0.0.60 -> GPU host -> VFIO guest -> Steam + media + remote play.",
+            EcosystemCardKind::Gaming,
+        ),
+    };
     rsx! {
         div {
-            style: ecosystem_card_style(active, &accent),
+            style: "display:flex; flex-direction:column; gap:12px;",
             div {
-                style: "display:flex; align-items:flex-start; justify-content:space-between; gap:12px;",
+                style: "display:flex; align-items:flex-end; justify-content:space-between; gap:12px;",
                 div {
                     style: "display:flex; flex-direction:column; gap:4px;",
-                    span { style: "font-size:15px; font-weight:800; color:var(--maker-text-strong);", "{title}" }
-                    p { style: "margin:0; font-size:12px; line-height:1.6; color:var(--maker-copy);", "{body}" }
+                    div { style: label_style(), "{kicker}" }
+                    h4 { style: "margin:0; font-size:16px; line-height:1.2; color:var(--maker-section-title);", "{title}" }
+                    p { style: "margin:0; font-size:12px; line-height:1.65; color:var(--maker-copy); max-width:62ch;", "{body}" }
                 }
                 div {
-                    style: "display:flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:999px; background:color-mix(in srgb, var(--maker-card-bg) 84%, transparent); box-shadow:inset 0 0 0 1px var(--maker-card-border); color:var(--maker-muted); font-size:10px; font-weight:800;",
-                    if active { "•" } else { "·" }
+                    style: "display:flex; align-items:center; gap:6px;",
+                    for idx in 0..total_pages {
+                        span {
+                            style: build_story_dot_style(idx == page_index, &accent),
+                        }
+                    }
                 }
             }
-            div { style: "display:flex; align-items:flex-end; min-height:74px;", {artwork} }
+            div {
+                style: "display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(220px, 0.9fr); gap:12px; align-items:stretch;",
+                div {
+                    style: ecosystem_story_panel_style(),
+                    EcosystemArtwork { kind: kind, accent: accent.clone() }
+                }
+                div {
+                    style: ecosystem_story_panel_style(),
+                    div { style: label_style(), "How it helps" }
+                    p { style: "margin:0; font-size:12px; line-height:1.7; color:var(--maker-copy);", "{note}" }
+                    div { style: proof_card_style(), span { style: stat_label_style(), "Why this matters" } span { style: stat_value_style(), "The ISO gets you to first boot. These tools carry the system after that." } }
+                }
+            }
         }
     }
 }
@@ -2450,48 +2481,113 @@ fn EcosystemGuideCard(
 fn EcosystemArtwork(kind: EcosystemCardKind, accent: String) -> Element {
     let glow = format!("color-mix(in srgb, {accent} 18%, transparent)");
     match kind {
-        EcosystemCardKind::Cli => rsx! {
+        EcosystemCardKind::Term => rsx! {
             svg {
-                width: "132",
-                height: "74",
-                view_box: "0 0 132 74",
+                width: "100%",
+                height: "154",
+                view_box: "0 0 360 154",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "10", y: "10", width: "92", height: "50", rx: "12", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1" }
-                path { d: "M26 30L36 38L26 46", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
-                path { d: "M44 46H66", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
-                rect { x: "80", y: "22", width: "34", height: "24", rx: "12", fill: "{glow}" }
+                rect { x: "18", y: "32", width: "92", height: "54", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.2" }
+                text { x: "34", y: "64", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "Laptop" }
+                rect { x: "134", y: "32", width: "92", height: "54", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.24)", stroke_width: "1.2" }
+                text { x: "156", y: "64", fill: "{accent}", font_size: "14", font_weight: "800", "yggterm" }
+                rect { x: "250", y: "20", width: "92", height: "54", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.2" }
+                text { x: "276", y: "52", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "nas-01" }
+                rect { x: "250", y: "84", width: "92", height: "40", rx: "14", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.14)", stroke_width: "1" }
+                text { x: "268", y: "108", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "containers" }
+                path { d: "M110 58H134", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M226 58H250", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M296 74V84", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
         EcosystemCardKind::Client => rsx! {
             svg {
-                width: "132",
-                height: "74",
-                view_box: "0 0 132 74",
+                width: "100%",
+                height: "154",
+                view_box: "0 0 360 154",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "10", y: "8", width: "78", height: "46", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.20)", stroke_width: "1" }
-                rect { x: "20", y: "17", width: "58", height: "26", rx: "10", fill: "color-mix(in srgb, {accent} 12%, rgba(255,255,255,0.04))" }
-                path { d: "M34 58H66", stroke: "rgba(255,255,255,0.12)", stroke_width: "5", stroke_linecap: "round" }
-                circle { cx: "103", cy: "31", r: "13", fill: "{glow}" }
-                path { d: "M96 31H110", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
-                path { d: "M103 24V38", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
+                rect { x: "18", y: "34", width: "96", height: "52", rx: "14", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.18)", stroke_width: "1.1" }
+                text { x: "34", y: "65", fill: "rgba(230,239,247,0.88)", font_size: "14", font_weight: "700", "Fresh ISO" }
+                rect { x: "138", y: "34", width: "96", height: "52", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                text { x: "156", y: "65", fill: "{accent}", font_size: "14", font_weight: "800", "yggclient" }
+                rect { x: "258", y: "20", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "258", y: "64", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "258", y: "108", width: "84", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "280", y: "41", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "storage" }
+                text { x: "286", y: "85", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "proxy" }
+                text { x: "286", y: "129", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail" }
+                path { d: "M114 60H138", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M234 60H258", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M300 54V64M300 98V108", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
         EcosystemCardKind::Sync => rsx! {
             svg {
-                width: "132",
-                height: "74",
-                view_box: "0 0 132 74",
+                width: "100%",
+                height: "154",
+                view_box: "0 0 360 154",
                 fill: "none",
                 xmlns: "http://www.w3.org/2000/svg",
-                rect { x: "12", y: "16", width: "34", height: "24", rx: "10", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.18)", stroke_width: "1" }
-                rect { x: "86", y: "16", width: "34", height: "24", rx: "10", fill: "rgba(255,255,255,0.04)", stroke: "rgba(216,231,244,0.18)", stroke_width: "1" }
-                path { d: "M46 28H86", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round" }
-                path { d: "M78 21L86 28L78 35", stroke: "{accent}", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round" }
-                path { d: "M86 48H46", stroke: "rgba(216,231,244,0.40)", stroke_width: "2", stroke_linecap: "round" }
-                path { d: "M54 41L46 48L54 55", stroke: "rgba(216,231,244,0.40)", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round" }
-                circle { cx: "66", cy: "48", r: "14", fill: "{glow}" }
+                rect { x: "24", y: "54", width: "84", height: "42", rx: "14", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                text { x: "46", y: "79", fill: "{accent}", font_size: "14", font_weight: "800", "yggsync" }
+                rect { x: "154", y: "18", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "154", y: "60", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "154", y: "102", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "264", y: "39", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "264", y: "81", width: "74", height: "34", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "180", y: "40", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail-01" }
+                text { x: "176", y: "82", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "proxy-01" }
+                text { x: "172", y: "124", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "backup-01" }
+                text { x: "289", y: "61", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "desk-01" }
+                text { x: "287", y: "103", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "lab-02" }
+                path { d: "M108 75H154", stroke: "{accent}", stroke_width: "2.3", stroke_linecap: "round" }
+                path { d: "M228 35H264M228 77H264M228 119H264", stroke: "rgba(216,231,244,0.38)", stroke_width: "2", stroke_linecap: "round" }
+            }
+        },
+        EcosystemCardKind::Infra => rsx! {
+            svg {
+                width: "100%",
+                height: "154",
+                view_box: "0 0 360 154",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                rect { x: "18", y: "58", width: "82", height: "36", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "138", y: "58", width: "82", height: "36", rx: "12", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                rect { x: "258", y: "22", width: "82", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "258", y: "62", width: "82", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "258", y: "102", width: "82", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "44", y: "81", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "Internet" }
+                text { x: "165", y: "81", fill: "{accent}", font_size: "13", font_weight: "800", "nginx" }
+                text { x: "278", y: "42", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "infisical" }
+                text { x: "286", y: "82", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "mail" }
+                text { x: "286", y: "122", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "apps" }
+                path { d: "M100 76H138", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M220 76H258", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M299 52V62M299 92V102", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
+            }
+        },
+        EcosystemCardKind::Gaming => rsx! {
+            svg {
+                width: "100%",
+                height: "154",
+                view_box: "0 0 360 154",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                rect { x: "18", y: "58", width: "90", height: "36", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "136", y: "58", width: "92", height: "36", rx: "12", fill: "{glow}", stroke: "rgba(216,231,244,0.20)", stroke_width: "1.1" }
+                rect { x: "256", y: "22", width: "86", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "256", y: "62", width: "86", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                rect { x: "256", y: "102", width: "86", height: "30", rx: "12", fill: "rgba(255,255,255,0.03)", stroke: "rgba(216,231,244,0.15)", stroke_width: "1" }
+                text { x: "38", y: "81", fill: "rgba(230,239,247,0.88)", font_size: "13", font_weight: "700", "KDE ISO" }
+                text { x: "154", y: "81", fill: "{accent}", font_size: "13", font_weight: "800", "GPU host" }
+                text { x: "282", y: "42", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "vfio vm" }
+                text { x: "286", y: "82", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "steam" }
+                text { x: "273", y: "122", fill: "rgba(198,212,224,0.82)", font_size: "12", font_weight: "700", "remote play" }
+                path { d: "M108 76H136", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M228 76H256", stroke: "{accent}", stroke_width: "2.4", stroke_linecap: "round" }
+                path { d: "M299 52V62M299 92V102", stroke: "rgba(216,231,244,0.34)", stroke_width: "2", stroke_linecap: "round" }
             }
         },
     }
@@ -4102,21 +4198,23 @@ fn waiting_story_panel_style() -> &'static str {
     "display:flex; flex-direction:column; gap:14px; padding:16px 18px; border-radius:16px; background:color-mix(in srgb, var(--maker-section-bg) 92%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
-fn ecosystem_card_style(active: bool, accent: &str) -> String {
+fn ecosystem_story_panel_style() -> &'static str {
+    "display:flex; flex-direction:column; gap:12px; justify-content:center; min-height:190px; padding:16px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+}
+
+fn build_story_dot_style(active: bool, accent: &str) -> String {
     format!(
-        "display:flex; flex-direction:column; justify-content:space-between; gap:12px; min-height:168px; padding:14px; border-radius:14px; background:{}; box-shadow:{};",
+        "display:inline-flex; width:{}px; height:8px; border-radius:999px; background:{}; box-shadow:{};",
+        if active { 18 } else { 8 },
         if active {
-            format!("color-mix(in srgb, {} 10%, var(--maker-card-bg))", accent)
+            format!("color-mix(in srgb, {} 68%, transparent)", accent)
         } else {
-            "var(--maker-card-bg)".to_owned()
+            "color-mix(in srgb, var(--maker-muted) 34%, transparent)".to_owned()
         },
         if active {
-            format!(
-                "inset 0 0 0 1px color-mix(in srgb, {} 44%, var(--maker-card-border)), 0 12px 24px color-mix(in srgb, {} 10%, transparent)",
-                accent, accent
-            )
+            format!("0 0 0 1px color-mix(in srgb, {} 30%, transparent)", accent)
         } else {
-            "inset 0 0 0 1px var(--maker-card-border)".to_owned()
+            "none".to_owned()
         }
     )
 }
