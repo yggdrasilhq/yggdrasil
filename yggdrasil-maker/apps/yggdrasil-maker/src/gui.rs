@@ -41,7 +41,7 @@ use yggui::{
     ToastTone, ToastViewport, WindowControlsStrip, append_theme_stop, clamp_theme_spec,
     default_theme_editor_spec, dominant_accent, gradient_css, preview_surface_css, shell_tint,
 };
-use yggui_contract::{UiTheme, YgguiThemeColorStop, YgguiThemeSpec};
+use yggui_contract::{UiTheme, YgguiThemeSpec};
 
 use crate::app_capture::{
     capture_visible_app_surface, describe_window, focus_app_window, record_visible_app_surface,
@@ -587,12 +587,6 @@ impl MakerUiState {
         self.theme_editor_drag_stop = None;
     }
 
-    fn seed_theme_editor(&mut self) {
-        self.theme_editor_draft = default_theme_editor_spec();
-        self.theme_editor_selected_stop = self.theme_editor_draft.colors.first().map(|_| 0);
-        self.theme_editor_drag_stop = None;
-    }
-
     fn add_theme_stop(&mut self, color: Option<&str>) {
         let next = append_theme_stop(&self.theme_editor_draft, color);
         if next.colors.len() == self.theme_editor_draft.colors.len() {
@@ -776,7 +770,7 @@ impl Default for MakerShellSettings {
     fn default() -> Self {
         Self {
             theme: UiTheme::ZedLight,
-            yggui_theme: theme_spec_for_preset(ThemePreset::ArcFrost),
+            yggui_theme: default_theme_editor_spec(),
             finish: ShellFinish::Sleek,
             sidebar_open: true,
             utility_pane_open: true,
@@ -790,27 +784,6 @@ impl Default for MakerShellSettings {
 enum ShellFinish {
     Sleek,
     Crisp,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ThemePreset {
-    ArcFrost,
-    ArcMint,
-    ArcSlate,
-}
-
-impl ThemePreset {
-    fn label(self) -> &'static str {
-        match self {
-            Self::ArcFrost => "Arc Frost",
-            Self::ArcMint => "Arc Mint",
-            Self::ArcSlate => "Arc Slate",
-        }
-    }
-
-    fn all() -> [Self; 3] {
-        [Self::ArcFrost, Self::ArcMint, Self::ArcSlate]
-    }
 }
 
 fn app() -> Element {
@@ -1365,10 +1338,6 @@ fn app() -> Element {
                                                 theme_draft: snapshot.theme_editor_draft.clone(),
                                                 selected_stop: snapshot.theme_editor_selected_stop,
                                                 preview_surface: preview_surface.clone(),
-                                                on_select_preset: move |preset: ThemePreset| state.with_mut(|ui| {
-                                                    ui.theme_editor_draft = theme_spec_for_preset(preset);
-                                                    ui.theme_editor_selected_stop = ui.theme_editor_draft.colors.first().map(|_| 0);
-                                                }),
                                                 on_select_theme: move |theme: UiTheme| state.with_mut(|ui| {
                                                     ui.shell_settings.theme = theme;
                                                     ui.persist_shell_settings();
@@ -1385,7 +1354,6 @@ fn app() -> Element {
                                                 on_add_stop: move |_| state.with_mut(|ui| ui.add_theme_stop(None)),
                                                 on_remove_stop: move |_| state.with_mut(|ui| ui.remove_selected_theme_stop()),
                                                 on_reset: move |_| state.with_mut(|ui| ui.reset_theme_editor()),
-                                                on_seed: move |_| state.with_mut(|ui| ui.seed_theme_editor()),
                                                 on_save: move |_| state.with_mut(|ui| ui.save_theme_editor()),
                                             }
                                         }
@@ -1954,7 +1922,6 @@ fn AppearanceSidebar(
     theme_draft: YgguiThemeSpec,
     selected_stop: Option<usize>,
     preview_surface: String,
-    on_select_preset: EventHandler<ThemePreset>,
     on_select_theme: EventHandler<UiTheme>,
     on_begin_drag_stop: EventHandler<usize>,
     on_drag_stop: EventHandler<(f32, f32)>,
@@ -1968,7 +1935,6 @@ fn AppearanceSidebar(
     on_add_stop: EventHandler<MouseEvent>,
     on_remove_stop: EventHandler<MouseEvent>,
     on_reset: EventHandler<MouseEvent>,
-    on_seed: EventHandler<MouseEvent>,
     on_save: EventHandler<MouseEvent>,
 ) -> Element {
     let active_stop = selected_stop.and_then(|index| theme_draft.colors.get(index).cloned());
@@ -1991,20 +1957,6 @@ fn AppearanceSidebar(
                         div {
                             style: "font-size:13px; color:var(--maker-copy); line-height:1.5;",
                             "Adjust the shared Ygg theme from the right rail."
-                        }
-                    }
-                }
-                div {
-                    style: "display:flex; flex-direction:column; gap:8px;",
-                    div { style: label_style(), "Palette" }
-                    div {
-                        style: "display:flex; flex-wrap:wrap; gap:8px;",
-                        for preset in ThemePreset::all() {
-                            button {
-                                style: small_chip_style(theme_matches_preset(&shell_settings.yggui_theme, preset), &accent),
-                                onclick: move |_| on_select_preset.call(preset),
-                                "{preset.label()}"
-                            }
                         }
                     }
                 }
@@ -2170,12 +2122,7 @@ fn AppearanceSidebar(
                     button {
                         style: tertiary_button_style(),
                         onclick: move |evt| on_reset.call(evt),
-                        "Reset"
-                    }
-                    button {
-                        style: tertiary_button_style(),
-                        onclick: move |evt| on_seed.call(evt),
-                        "Starter"
+                        "Reset Default Theme"
                     }
                 }
                 button {
@@ -3350,51 +3297,6 @@ fn current_millis() -> u64 {
         .as_millis() as u64
 }
 
-fn theme_spec_for_preset(preset: ThemePreset) -> YgguiThemeSpec {
-    let mut spec = default_theme_editor_spec();
-    match preset {
-        ThemePreset::ArcFrost => spec,
-        ThemePreset::ArcMint => {
-            spec.colors = vec![
-                stop("#9fe3d3", 0.16, 0.24, 0.88),
-                stop("#7cc8ff", 0.58, 0.22, 0.78),
-                stop("#dce7ef", 0.82, 0.78, 0.56),
-            ];
-            spec
-        }
-        ThemePreset::ArcSlate => {
-            spec.colors = vec![
-                stop("#8fa7d4", 0.18, 0.18, 0.84),
-                stop("#a8c6c6", 0.72, 0.24, 0.74),
-                stop("#d8dde7", 0.78, 0.8, 0.6),
-            ];
-            spec.brightness = 0.52;
-            spec
-        }
-    }
-}
-
-fn theme_matches_preset(spec: &YgguiThemeSpec, preset: ThemePreset) -> bool {
-    let reference = theme_spec_for_preset(preset);
-    let to_signature = |theme: &YgguiThemeSpec| {
-        theme
-            .colors
-            .iter()
-            .map(|stop| stop.color.clone())
-            .collect::<Vec<_>>()
-    };
-    to_signature(spec) == to_signature(&reference)
-}
-
-fn stop(color: &str, x: f32, y: f32, alpha: f32) -> YgguiThemeColorStop {
-    YgguiThemeColorStop {
-        color: color.to_owned(),
-        x,
-        y,
-        alpha,
-    }
-}
-
 fn normalize_theme_editor_axis(value: f64) -> f32 {
     ((value / THEME_EDITOR_PAD_SIZE).clamp(0.0, 1.0)) as f32
 }
@@ -3678,39 +3580,6 @@ fn left_rail_container_style() -> &'static str {
 
 fn right_rail_container_style() -> &'static str {
     "display:flex; flex-direction:column; height:100%; margin-left:0; padding-left:0; background:transparent; box-shadow:none;"
-}
-
-fn small_chip_style(selected: bool, accent: &str) -> String {
-    if selected {
-        format!(
-            "height:28px; padding:0 10px; border:none; border-radius:10px; background:{}; color:white; font-size:11px; font-weight:700;",
-            accent
-        )
-    } else {
-        utility_button_style(false)
-    }
-}
-
-fn utility_button_style(active: bool) -> String {
-    format!(
-        "display:inline-flex; align-items:center; gap:8px; height:28px; padding:0 11px; border:none; border-radius:10px; \
-         background:{}; color:{}; font-size:11px; font-weight:700; white-space:nowrap; box-shadow:{};",
-        if active {
-            "var(--maker-secondary-bg)"
-        } else {
-            "transparent"
-        },
-        if active {
-            "var(--maker-accent)"
-        } else {
-            "var(--maker-titlebar-muted)"
-        },
-        if active {
-            "inset 0 0 0 1px var(--maker-secondary-border)"
-        } else {
-            "none"
-        }
-    )
 }
 
 fn utility_icon_button_style(active: bool) -> String {
