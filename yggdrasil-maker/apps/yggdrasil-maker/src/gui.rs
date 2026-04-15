@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
 use std::fs::File;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
@@ -34,8 +36,6 @@ use tao::window::ResizeDirection;
 use time::{OffsetDateTime, UtcOffset};
 use tokio::time::sleep;
 use yggterm_core::append_trace_event;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use yggui::{
     ChromePalette, HoveredChromeControl, RailHeader, RailScrollBody, RailSectionTitle,
     SideRailShell, THEME_EDITOR_SWATCHES, TOAST_CSS, TitlebarChrome, ToastItem, ToastPalette,
@@ -1898,13 +1898,18 @@ fn StudioCanvas(
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
     let setup_id_for_name_sync = state.current_setup.setup_id.clone();
-    let auto_story_page =
-        (((now_ms.saturating_sub(story_anchor_ms())) / 30_000) as usize) % total_story_pages;
+    let story_cycle_ms = 30_000_u64;
+    let auto_story_elapsed_ms = now_ms.saturating_sub(story_anchor_ms());
+    let auto_story_page = ((auto_story_elapsed_ms / story_cycle_ms) as usize) % total_story_pages;
     let build_story_spotlight_index = if now_ms < story_pause_until_ms() {
         story_pause_page()
     } else {
         auto_story_page
     };
+    let story_progress_ms = auto_story_elapsed_ms % story_cycle_ms;
+    let story_seconds_remaining =
+        ((story_cycle_ms.saturating_sub(story_progress_ms)).max(1) + 999) / 1000;
+    let story_paused = now_ms < story_pause_until_ms();
     let stage_split_style = if stacked_studio {
         "display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; align-items:start;"
     } else {
@@ -2175,8 +2180,8 @@ fn StudioCanvas(
                     style: "display:flex; flex-direction:column; gap:16px;",
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
-                        h2 { style: section_title_style(), "Launch" }
-                        p { style: section_copy_style(), "Build the ISO on Linux, or save a handoff bundle on other systems. Logs stay on the right." }
+                        h2 { style: section_title_style(), "Build" }
+                        p { style: section_copy_style(), "This is the factual build screen. The right rail stays honest, and the chapter page below shows what the machine can grow into after first boot." }
                     }
                     div {
                         style: build_split_style,
@@ -2198,10 +2203,10 @@ fn StudioCanvas(
                         }
                         div {
                             style: floating_group_style(),
-                            div { style: label_style(), "Build" }
-                            div { style: info_row_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
-                            div { style: info_row_style(), span { style: stat_label_style(), "Right panel" } span { style: stat_value_style(), "Logs and output files stay on the right." } }
-                            div { style: info_row_style(), span { style: stat_label_style(), "After build" } span { style: stat_value_style(), "You can open the files or start a new build." } }
+                            div { style: label_style(), "What happens" }
+                            div { style: info_row_style(), span { style: stat_label_style(), "Linux" } span { style: stat_value_style(), "Builds the ISO locally with Docker." } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "Other systems" } span { style: stat_value_style(), "Can save a builder bundle instead." } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "Details" } span { style: stat_value_style(), "Config, plan, and log stay on the right." } }
                         }
                     }
                     div {
@@ -2222,11 +2227,14 @@ fn StudioCanvas(
                         page_index: build_story_spotlight_index,
                         accent: accent.clone(),
                         running: state.build_running,
+                        paused: story_paused,
+                        seconds_remaining: story_seconds_remaining,
                         on_pause_cycle: move |_| {
                             let displayed_page = if now_ms < story_pause_until_ms() {
                                 story_pause_page()
                             } else {
-                                (((now_ms.saturating_sub(story_anchor_ms())) / 30_000) as usize)
+                                (((now_ms.saturating_sub(story_anchor_ms())) / story_cycle_ms)
+                                    as usize)
                                     % total_story_pages
                             };
                             story_pause_page.set(displayed_page);
@@ -2696,17 +2704,20 @@ fn BuildStorybook(
     page_index: usize,
     accent: String,
     running: bool,
+    paused: bool,
+    seconds_remaining: u64,
     on_pause_cycle: EventHandler<MouseEvent>,
     on_select_page: EventHandler<usize>,
 ) -> Element {
     let chapters = ["What next", "Mail", "Secrets", "Remote", "Sync", "Gaming"];
-    let (kicker, title, body, note, kind) = match page_index {
+    let (kicker, title, body, note, kind, caption) = match page_index {
         0 => (
             "What next",
             "The ISO gets the first machine up. The rest of Yggdrasil keeps it useful.",
             "Build gets you to first boot. After that, yggterm gives you a truthful terminal, yggclient applies guided changes on the machine, and yggsync keeps more than one host aligned.",
             "Typical path: build ISO -> boot host -> open yggterm -> apply roles with yggclient -> sync the same intent to the next box with yggsync.",
             StorybookPageKind::Overview,
+            "How the pieces fit after the ISO lands.",
         ),
         1 => (
             "Mail server",
@@ -2714,6 +2725,7 @@ fn BuildStorybook(
             "Start with one server host, put nginx or another edge proxy in front, keep mail on its own box, and back it up to a second node. The ISO is just the stable first layer.",
             "Example: edge-01 10.0.0.10 -> mail-01 10.0.0.20 -> backup-01 10.0.0.30.",
             StorybookPageKind::Mail,
+            "One simple mail layout with clear boundaries.",
         ),
         2 => (
             "Secrets + apps",
@@ -2721,6 +2733,7 @@ fn BuildStorybook(
             "Put Infisical behind your edge service, let apps read what they need, and keep the relationship visible. This is the sort of layout a plain server ISO can grow into.",
             "Example: proxy-01 10.0.0.10 -> infisical-01 10.0.0.11 -> app-01 10.0.0.21 and app-02 10.0.0.22.",
             StorybookPageKind::Secrets,
+            "A service layout that stays explainable six months later.",
         ),
         3 => (
             "Remote control",
@@ -2728,6 +2741,7 @@ fn BuildStorybook(
             "Use it to reach the host, watch services settle, and work in one deliberate terminal instead of collecting a dozen drifting SSH tabs.",
             "Example: laptop 10.0.0.12 -> yggterm -> nas-01 10.0.0.21 -> containers and services.",
             StorybookPageKind::Remote,
+            "Keep one truthful terminal surface instead of guessing.",
         ),
         4 => (
             "Fleet sync",
@@ -2735,6 +2749,7 @@ fn BuildStorybook(
             "Keep one source of truth in git, then sync to mail, proxy, backup, or desktop nodes so the fleet stays readable and does not drift over time.",
             "Example: git main -> yggsync -> mail-01, proxy-01, backup-01, desk-01.",
             StorybookPageKind::Sync,
+            "One intent, multiple hosts, less drift.",
         ),
         _ => (
             "Gaming",
@@ -2742,6 +2757,7 @@ fn BuildStorybook(
             "Start from the client path, enable the hardware you need, then shape it into a workstation, a Steam host, or a VFIO setup without losing the system story.",
             "Example: kde-01 10.0.0.60 -> gpu host -> vfio vm -> Steam and remote play.",
             StorybookPageKind::Gaming,
+            "The client path can grow into a desktop or gaming rig.",
         ),
     };
 
@@ -2751,29 +2767,34 @@ fn BuildStorybook(
             onmouseenter: move |evt| on_pause_cycle.call(evt),
             onmousemove: move |evt| on_pause_cycle.call(evt),
             div {
-                style: "display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;",
+                style: "display:flex; flex-direction:column; gap:10px;",
                 div {
-                    style: "display:flex; flex-direction:column; gap:4px;",
-                    div { style: label_style(), if running { "While this builds" } else { "What next" } }
-                    h3 { style: "margin:0; font-size:20px; line-height:1.12; color:var(--maker-section-title); max-width:44ch;", "{title}" }
-                    p { style: "margin:0; font-size:12px; line-height:1.7; color:var(--maker-copy); max-width:70ch;", "{body}" }
-                }
-                div {
-                    style: "display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end;",
-                    for (idx, chapter) in chapters.into_iter().enumerate() {
-                        button {
-                            style: story_nav_tab_style(idx == page_index, &accent),
-                            onclick: move |_| on_select_page.call(idx),
-                            "{chapter}"
+                    style: "display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px;",
+                        div { style: label_style(), if running { "While this builds" } else { "What next" } }
+                        h3 { style: "margin:0; font-size:20px; line-height:1.12; color:var(--maker-section-title); max-width:44ch;", "{title}" }
+                        p { style: "margin:0; font-size:12px; line-height:1.7; color:var(--maker-copy); max-width:70ch;", "{body}" }
+                    }
+                    div {
+                        style: "display:flex; flex-direction:column; align-items:flex-end; gap:4px; min-width:120px;",
+                        div { style: label_style(), "Auto page" }
+                        div {
+                            style: "font-size:13px; font-weight:800; color:var(--maker-text-strong);",
+                            if paused { "Paused while you read" } else { "{seconds_remaining}s left" }
                         }
                     }
                 }
+                div {
+                    style: "display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;",
+                    div { style: label_style(), "{kicker}" }
+                    div { style: "font-size:11px; line-height:1.6; color:var(--maker-note);", "{caption}" }
+                }
             }
             div {
-                style: "display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(250px, 0.92fr); gap:16px; align-items:stretch;",
+                style: "display:grid; grid-template-columns:minmax(0, 1.3fr) minmax(250px, 0.9fr); gap:16px; align-items:stretch;",
                 div {
                     style: story_scene_style(),
-                    div { style: label_style(), "{kicker}" }
                     StorybookArtwork { kind: kind, accent: accent.clone() }
                 }
                 div {
@@ -2787,6 +2808,45 @@ fn BuildStorybook(
                         style: story_note_card_style(),
                         div { style: label_style(), "Why it matters" }
                         p { style: "margin:0; font-size:12px; line-height:1.72; color:var(--maker-copy);", "The ISO should feel like the first chapter of a system, not the whole story. These pages show where the machine goes next once it boots." }
+                    }
+                }
+            }
+            div {
+                style: story_footer_style(),
+                div {
+                    style: "display:flex; align-items:center; gap:12px; flex-wrap:wrap;",
+                    div { style: label_style(), "Chapters" }
+                    div {
+                        style: "display:flex; align-items:center; gap:6px; flex-wrap:wrap;",
+                        for (idx, chapter) in chapters.into_iter().enumerate() {
+                            button {
+                                style: story_nav_tab_style(idx == page_index, &accent),
+                                onclick: move |_| on_select_page.call(idx),
+                                "{chapter}"
+                            }
+                        }
+                    }
+                }
+                div {
+                    style: "display:flex; align-items:center; gap:10px;",
+                    div {
+                        style: "width:96px; height:4px; border-radius:999px; background:color-mix(in srgb, var(--maker-note) 18%, transparent); overflow:hidden;",
+                        span {
+                            style: format!(
+                                "display:block; width:{}%; height:100%; border-radius:999px; background:color-mix(in srgb, {} 72%, white 10%);",
+                                if paused {
+                                    100
+                                } else {
+                                    (((30 - seconds_remaining.min(30)) as f64 / 30.0) * 100.0)
+                                        .round() as u64
+                                },
+                                accent
+                            ),
+                        }
+                    }
+                    div {
+                        style: "font-size:11px; color:var(--maker-note);",
+                        if paused { "Move away to resume auto pages." } else { "Pages advance every 30 seconds." }
                     }
                 }
             }
@@ -4501,20 +4561,24 @@ fn floating_group_style() -> &'static str {
 }
 
 fn build_storybook_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:16px; padding:16px 18px 18px 18px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
+    "display:flex; flex-direction:column; gap:16px; padding:18px 18px 14px 18px; border-radius:18px; background:color-mix(in srgb, var(--maker-section-bg) 90%, transparent); box-shadow:var(--maker-section-shadow), inset 0 0 0 1px var(--maker-section-border);"
 }
 
 fn story_scene_style() -> &'static str {
-    "display:flex; flex-direction:column; gap:12px; justify-content:center; min-height:256px; padding:16px; border-radius:16px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
+    "display:flex; flex-direction:column; gap:12px; justify-content:center; min-height:270px; padding:18px; border-radius:18px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
 fn story_note_card_style() -> &'static str {
     "display:flex; flex-direction:column; gap:8px; min-height:122px; padding:14px 15px; border-radius:14px; background:var(--maker-card-bg); box-shadow:inset 0 0 0 1px var(--maker-card-border);"
 }
 
+fn story_footer_style() -> &'static str {
+    "display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; padding-top:10px; border-top:1px solid color-mix(in srgb, var(--maker-section-border) 70%, transparent);"
+}
+
 fn story_nav_tab_style(active: bool, accent: &str) -> String {
     format!(
-        "display:inline-flex; align-items:center; justify-content:center; border:none; background:transparent; padding:0 0 8px 0; min-height:28px; font-size:12px; font-weight:{}; color:{}; box-shadow:{};",
+        "display:inline-flex; align-items:center; justify-content:center; border:none; background:transparent; padding:0 0 8px 0; min-height:28px; font-size:12px; font-weight:{}; color:{}; box-shadow:{}; border-radius:0;",
         if active { 800 } else { 700 },
         if active {
             format!("color-mix(in srgb, {} 78%, white 18%)", accent)
