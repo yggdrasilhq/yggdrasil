@@ -11,8 +11,8 @@ use gtk::prelude::GtkWindowExt;
 use keyboard_types::{Key, Modifiers};
 use maker_app::{BuildInputs, MakerApp, StoredSetupSummary};
 use maker_build::{
-    ARTIFACT_MANIFEST_NAME, ArtifactKind, ArtifactManifest, ArtifactRecord, BuildMode,
-    read_artifact_manifest,
+    ARTIFACT_MANIFEST_NAME, ArtifactKind, ArtifactManifest, ArtifactRecord, BuildEvent, BuildMode,
+    BuildStage, parse_build_event_line, read_artifact_manifest,
 };
 use maker_copy::preset_cards;
 use maker_model::{BuildProfile, JourneyStage, PresetId, SetupDocument};
@@ -597,6 +597,9 @@ impl MakerUiState {
             progress: None,
             persistent: false,
         });
+        if self.shell_settings.notification_sound {
+            emit_alert_tone(tone);
+        }
     }
 
     fn save_current_setup(&mut self) {
@@ -842,6 +845,20 @@ impl MakerUiState {
         self.theme_editor_drag_stop = None;
     }
 
+    fn set_notification_sound(&mut self, enabled: bool) {
+        self.shell_settings.notification_sound = enabled;
+        self.persist_shell_settings();
+        self.push_notification(
+            ToastTone::Info,
+            if enabled { "Sound On" } else { "Sound Off" },
+            if enabled {
+                "Started, done, warning, and failed alerts will play short tones.".to_owned()
+            } else {
+                "Alerts stay visual only.".to_owned()
+            },
+        );
+    }
+
     fn save_theme_editor(&mut self) {
         self.shell_settings.yggui_theme = clamp_theme_spec(&self.theme_editor_draft);
         self.theme_editor_drag_stop = None;
@@ -1033,6 +1050,7 @@ struct MakerShellSettings {
     theme: UiTheme,
     yggui_theme: YgguiThemeSpec,
     finish: ShellFinish,
+    notification_sound: bool,
     sidebar_open: bool,
     utility_pane_open: bool,
     right_panel_mode: RightPanelMode,
@@ -1044,6 +1062,7 @@ impl Default for MakerShellSettings {
             theme: UiTheme::ZedLight,
             yggui_theme: default_theme_editor_spec(),
             finish: ShellFinish::Sleek,
+            notification_sound: true,
             sidebar_open: true,
             utility_pane_open: true,
             right_panel_mode: RightPanelMode::Config,
@@ -1210,6 +1229,10 @@ fn app() -> Element {
     let toast_palette = toast_palette(is_dark, &accent);
     let theme_vars = theme_css_variables(snapshot.shell_settings.theme, &accent, blur_supported);
     let sidebar_tree_rows = build_sidebar_tree_rows(&snapshot);
+    let build_progress =
+        build_progress_state(snapshot.build_log.as_slice(), snapshot.build_running);
+    let build_flow_dots = animated_build_dots(now_ms());
+    let build_flow_label = format!("Building{build_flow_dots}");
 
     let titlebar_left = rsx! {
         div {
@@ -1244,8 +1267,8 @@ fn app() -> Element {
     };
 
     let titlebar_center = rsx! {
-        div {
-            style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; width:min(680px, 100%);",
+            div {
+                style: "display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; width:min(680px, 100%);",
             button {
                 title: "Previous Step",
                 disabled: previous_journey_stage(snapshot.current_setup.journey_stage).is_none(),
@@ -1261,15 +1284,30 @@ fn app() -> Element {
             }
             div {
                 style: titlebar_center_field_style(),
-                for (index, stage) in journey_stages().iter().copied().enumerate() {
+                if snapshot.build_running {
                     span {
-                        style: titlebar_flow_label_style(stage, snapshot.current_setup.journey_stage),
-                        "{stage.label()}"
+                        style: "font-size:15px; font-weight:500; color:var(--maker-titlebar-text); letter-spacing:0.01em;",
+                        "{build_flow_label}"
                     }
-                    if index + 1 < journey_stages().len() {
+                    span {
+                        style: "font-size:13px; font-weight:700; color:var(--maker-titlebar-muted);",
+                        "{build_progress.percent}%"
+                    }
+                    span {
+                        style: "font-size:12px; font-weight:600; color:var(--maker-titlebar-muted);",
+                        "{build_progress.label}"
+                    }
+                } else {
+                    for (index, stage) in journey_stages().iter().copied().enumerate() {
                         span {
-                            style: "font-size:13px; font-weight:500; color:var(--maker-titlebar-muted); opacity:0.9;",
-                            "→"
+                            style: titlebar_flow_label_style(stage, snapshot.current_setup.journey_stage),
+                            "{stage.label()}"
+                        }
+                        if index + 1 < journey_stages().len() {
+                            span {
+                                style: "font-size:13px; font-weight:500; color:var(--maker-titlebar-muted); opacity:0.9;",
+                                "→"
+                            }
                         }
                     }
                 }
@@ -1645,6 +1683,7 @@ fn app() -> Element {
                                                 on_remove_stop: move |_| state.with_mut(|ui| ui.remove_selected_theme_stop()),
                                                 on_reset: move |_| state.with_mut(|ui| ui.reset_theme_editor()),
                                                 on_save: move |_| state.with_mut(|ui| ui.save_theme_editor()),
+                                                on_set_notification_sound: move |enabled: bool| state.with_mut(|ui| ui.set_notification_sound(enabled)),
                                             }
                                         }
                                     }
@@ -2181,7 +2220,7 @@ fn StudioCanvas(
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "Build" }
-                        p { style: section_copy_style(), "This is the factual build screen. The right rail stays honest, and the chapter page below shows what the machine can grow into after first boot." }
+                        p { style: section_copy_style(), "Start the build here. The right rail shows the real config, plan, and log." }
                     }
                     if state.build_running {
                         div {
@@ -2194,7 +2233,7 @@ fn StudioCanvas(
                                         style: "display:flex; flex-direction:column; gap:8px; padding:0 0 14px 0; box-shadow:inset 0 -1px 0 color-mix(in srgb, var(--maker-section-border) 72%, transparent);",
                                         div { style: label_style(), "Live build" }
                                         h3 { style: "margin:0; font-size:30px; line-height:1.02; color:var(--maker-section-title);", "Building now" }
-                                        p { style: "margin:0; max-width:62ch; font-size:13px; line-height:1.72; color:var(--maker-copy);", "The main view stays calm while the real log, config, and plan stream on the right. Closing the window will not stop the build." }
+                                        p { style: "margin:0; max-width:62ch; font-size:13px; line-height:1.72; color:var(--maker-copy);", "The build keeps running even if you close this window. The right rail shows the real log." }
                                     }
                                     div {
                                         style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px 22px;",
@@ -2398,6 +2437,7 @@ fn AppearanceSidebar(
     on_remove_stop: EventHandler<MouseEvent>,
     on_reset: EventHandler<MouseEvent>,
     on_save: EventHandler<MouseEvent>,
+    on_set_notification_sound: EventHandler<bool>,
 ) -> Element {
     let active_stop = selected_stop.and_then(|index| theme_draft.colors.get(index).cloned());
     let brightness_percent = (theme_draft.brightness * 100.0).round() as i32;
@@ -2436,6 +2476,50 @@ fn AppearanceSidebar(
                             style: appearance_segment_button_style(shell_settings.theme == UiTheme::ZedDark, &accent),
                             onclick: move |_| on_select_theme.call(UiTheme::ZedDark),
                             "Dark"
+                        }
+                    }
+                }
+                div {
+                    style: "display:flex; align-items:center; justify-content:space-between; gap:12px;",
+                    div {
+                        style: "display:flex; flex-direction:column; gap:4px;",
+                        div { style: label_style(), "Sound" }
+                        div {
+                            style: "font-size:12px; line-height:1.55; color:var(--maker-copy); max-width:26ch;",
+                            "Play short tones for build started, ready, warning, and failed alerts."
+                        }
+                    }
+                    button {
+                        style: appearance_toggle_style(shell_settings.notification_sound, &accent),
+                        onclick: move |_| on_set_notification_sound.call(!shell_settings.notification_sound),
+                        span {
+                            style: format!(
+                                "font-size:10px; font-weight:700; color:{};",
+                                if shell_settings.notification_sound {
+                                    accent.clone()
+                                } else {
+                                    "var(--maker-muted)".to_owned()
+                                }
+                            ),
+                            if shell_settings.notification_sound { "On" } else { "Off" }
+                        }
+                        div {
+                            style: format!(
+                                "width:34px; height:18px; border-radius:999px; background:{}; display:flex; align-items:center; justify-content:{}; padding:0 2px;",
+                                if shell_settings.notification_sound {
+                                    accent.clone()
+                                } else {
+                                    "rgba(189,201,212,0.92)".to_owned()
+                                },
+                                if shell_settings.notification_sound {
+                                    "flex-end"
+                                } else {
+                                    "flex-start"
+                                }
+                            ),
+                            div {
+                                style: "width:14px; height:14px; border-radius:999px; background:white; box-shadow:0 2px 8px rgba(36,48,58,0.18);",
+                            }
                         }
                     }
                 }
@@ -4082,6 +4166,206 @@ fn current_millis() -> u64 {
         .as_millis() as u64
 }
 
+#[derive(Debug, Clone)]
+struct BuildProgressState {
+    percent: u8,
+    label: String,
+}
+
+fn build_progress_state(lines: &[String], running: bool) -> BuildProgressState {
+    if !running {
+        return BuildProgressState {
+            percent: 0,
+            label: "Ready".to_owned(),
+        };
+    }
+
+    let mut percent = 6u8;
+    let mut label = "Starting".to_owned();
+    let mut build_log_lines = 0usize;
+
+    for line in lines {
+        let Ok(event) = parse_build_event_line(line) else {
+            continue;
+        };
+        match event {
+            BuildEvent::StageStarted { stage } => match stage {
+                BuildStage::Preflight => {
+                    percent = percent.max(10);
+                    label = "Checking inputs".to_owned();
+                }
+                BuildStage::Bundle => {
+                    percent = percent.max(18);
+                    label = "Preparing files".to_owned();
+                }
+                BuildStage::DockerRun => {
+                    percent = percent.max(26);
+                    label = "Starting builder".to_owned();
+                }
+                BuildStage::Build => {
+                    percent = percent.max(36);
+                    label = "Building ISO".to_owned();
+                }
+                BuildStage::Smoke => {
+                    percent = percent.max(90);
+                    label = "Running checks".to_owned();
+                }
+                BuildStage::ArtifactCopy => {
+                    percent = percent.max(96);
+                    label = "Copying files".to_owned();
+                }
+                BuildStage::Complete => {
+                    percent = 100;
+                    label = "Done".to_owned();
+                }
+            },
+            BuildEvent::StageFinished { stage } => match stage {
+                BuildStage::Preflight => percent = percent.max(18),
+                BuildStage::Bundle => percent = percent.max(24),
+                BuildStage::DockerRun => percent = percent.max(32),
+                BuildStage::Build => percent = percent.max(88),
+                BuildStage::Smoke => percent = percent.max(96),
+                BuildStage::ArtifactCopy => percent = percent.max(99),
+                BuildStage::Complete => {
+                    percent = 100;
+                    label = "Done".to_owned();
+                }
+            },
+            BuildEvent::LogLine { .. } => {
+                build_log_lines = build_log_lines.saturating_add(1);
+            }
+            BuildEvent::ArtifactReady { .. } => {
+                percent = 100;
+                label = "Files ready".to_owned();
+            }
+            BuildEvent::Failure { .. } => {
+                label = "Needs attention".to_owned();
+            }
+        }
+    }
+
+    if percent >= 36 && percent < 88 && build_log_lines > 0 {
+        let extra = ((build_log_lines / 18).min(48)) as u8;
+        percent = percent.max(36u8.saturating_add(extra).min(88));
+    }
+
+    BuildProgressState {
+        percent: percent.min(99),
+        label,
+    }
+}
+
+fn animated_build_dots(now_ms: u64) -> &'static str {
+    match ((now_ms / 420) % 4) as u8 {
+        0 => "",
+        1 => ".",
+        2 => "..",
+        _ => "...",
+    }
+}
+
+fn emit_alert_tone(tone: ToastTone) {
+    let script = match tone {
+        ToastTone::Info => {
+            r#"
+            (() => {
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(740, ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(860, ctx.currentTime + 0.11);
+                gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.028, ctx.currentTime + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.2);
+                setTimeout(() => { try { ctx.close(); } catch (_e) {} }, 260);
+              } catch (_e) {}
+            })();
+            "#
+        }
+        ToastTone::Success => {
+            r#"
+            (() => {
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const play = (freq, start, duration) => {
+                  const osc = ctx.createOscillator();
+                  const gain = ctx.createGain();
+                  osc.type = "sine";
+                  osc.frequency.setValueAtTime(freq, start);
+                  gain.gain.setValueAtTime(0.0001, start);
+                  gain.gain.exponentialRampToValueAtTime(0.026, start + 0.02);
+                  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+                  osc.connect(gain);
+                  gain.connect(ctx.destination);
+                  osc.start(start);
+                  osc.stop(start + duration + 0.02);
+                };
+                const t = ctx.currentTime;
+                play(660, t, 0.12);
+                play(940, t + 0.12, 0.16);
+                setTimeout(() => { try { ctx.close(); } catch (_e) {} }, 520);
+              } catch (_e) {}
+            })();
+            "#
+        }
+        ToastTone::Warning => {
+            r#"
+            (() => {
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const play = (freq, start) => {
+                  const osc = ctx.createOscillator();
+                  const gain = ctx.createGain();
+                  osc.type = "triangle";
+                  osc.frequency.setValueAtTime(freq, start);
+                  gain.gain.setValueAtTime(0.0001, start);
+                  gain.gain.exponentialRampToValueAtTime(0.03, start + 0.015);
+                  gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+                  osc.connect(gain);
+                  gain.connect(ctx.destination);
+                  osc.start(start);
+                  osc.stop(start + 0.14);
+                };
+                const t = ctx.currentTime;
+                play(620, t);
+                play(620, t + 0.16);
+                setTimeout(() => { try { ctx.close(); } catch (_e) {} }, 480);
+              } catch (_e) {}
+            })();
+            "#
+        }
+        ToastTone::Error => {
+            r#"
+            (() => {
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(520, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(260, ctx.currentTime + 0.24);
+                gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.034, ctx.currentTime + 0.018);
+                gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.26);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.28);
+                setTimeout(() => { try { ctx.close(); } catch (_e) {} }, 360);
+              } catch (_e) {}
+            })();
+            "#
+        }
+    };
+    let _ = document::eval(script);
+}
+
 fn build_jobs_root() -> Result<PathBuf> {
     Ok(maker_data_root()?.join("build-jobs"))
 }
@@ -4809,6 +5093,25 @@ fn appearance_segment_button_style(selected: bool, accent: &str) -> String {
     } else {
         "flex:1; height:28px; border:none; border-radius:999px; background:transparent; color:var(--maker-muted); font-size:11px; font-weight:700;".to_owned()
     }
+}
+
+fn appearance_toggle_style(enabled: bool, accent: &str) -> String {
+    format!(
+        "display:flex; align-items:center; gap:10px; padding:6px 8px; border:none; border-radius:999px; background:{}; box-shadow:inset 0 0 0 1px {};",
+        if enabled {
+            "color-mix(in srgb, var(--maker-card-bg) 88%, transparent)".to_owned()
+        } else {
+            "color-mix(in srgb, var(--maker-card-bg) 72%, transparent)".to_owned()
+        },
+        if enabled {
+            format!(
+                "color-mix(in srgb, {} 42%, var(--maker-card-border))",
+                accent
+            )
+        } else {
+            "color-mix(in srgb, var(--maker-card-border) 82%, transparent)".to_owned()
+        }
+    )
 }
 
 fn appearance_range_style() -> &'static str {

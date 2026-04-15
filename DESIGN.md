@@ -222,6 +222,32 @@ Notifications are reusable shell components, not one-off project afterthoughts.
 - Background jobs should not be silent; if the work may take more than a moment, the shell should make that work legible.
 - Job notifications should coalesce by task identity instead of stacking duplicate progress cards.
 
+### Audio alerts
+
+Audio alerts are a shell-level contract, not app-specific improvisation.
+
+- Audio should be optional, user-toggleable, and easy to silence.
+- The preferred control is a simple `Sound` toggle inside the shell’s appearance or notification surface.
+- Audio is for state changes that matter, not for ordinary navigation.
+
+Use this tone language:
+
+- `Info`: one short soft rise
+  - use for job start or gentle attention
+- `Success`: two quick rising tones
+  - use for build ready, update ready, or completed work
+- `Warning`: two even attention tones
+  - use for recoverable issues or states that need a look soon
+- `Error`: one short descending urgent tone
+  - use for build failure, sync failure, or action blocked
+
+Avoid:
+
+- sounds on hover
+- sounds on every click
+- novelty effects
+- multiple different sound languages across Ygg apps
+
 ### Update system
 
 Update UX is a reusable shell concern, not project-specific glue.
