@@ -266,12 +266,12 @@ pub enum JourneyStage {
 impl JourneyStage {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Outcome => "Outcome",
-            Self::Profile => "Profile",
-            Self::Personalize => "Personalize",
-            Self::Review => "Review",
+            Self::Outcome => "Choose",
+            Self::Profile => "Type",
+            Self::Personalize => "Name",
+            Self::Review => "Check",
             Self::Build => "Build",
-            Self::Boot => "Boot",
+            Self::Boot => "Done",
         }
     }
 }

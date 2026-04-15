@@ -129,7 +129,7 @@ hostname="$(json_eval "$LOG_DIR/state.json" '
 print(data["data"]["current_setup"]["hostname"])
 ')"
 
-[[ "$journey_stage" == "Personalize" ]] || fail "expected Personalize stage, got $journey_stage"
+[[ "$journey_stage" == "Name" ]] || fail "expected Name stage, got $journey_stage"
 [[ "$hostname" == "latency-check" ]] || fail "expected hostname latency-check, got $hostname"
 [[ "$before_count" == "$after_count" ]] || fail "hostname edit triggered slow preview refresh ($before_count -> $after_count)"
 

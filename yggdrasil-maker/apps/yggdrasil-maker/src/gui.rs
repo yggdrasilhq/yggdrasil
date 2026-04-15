@@ -200,7 +200,7 @@ impl MakerBootstrap {
         let current_setup = if let Some(first) = saved_setups.first() {
             app.setup_store().load(&first.setup_id)?
         } else {
-            app.create_setup_document("Lab NAS".to_owned(), PresetId::Nas, None, None)
+            app.create_setup_document("Server Build".to_owned(), PresetId::Nas, None, None)
         };
 
         let mut state = MakerUiState::new(app.clone(), trace_root.clone(), shell_settings);
@@ -267,7 +267,7 @@ impl MakerUiState {
             trace_root,
             shell_settings,
             saved_setups: Vec::new(),
-            current_setup: SetupDocument::new("New Yggdrasil".to_owned(), PresetId::Nas),
+            current_setup: SetupDocument::new("New Build".to_owned(), PresetId::Nas),
             artifacts_dir: "./artifacts".to_owned(),
             repo_root: String::new(),
             config_preview: String::new(),
@@ -446,8 +446,8 @@ impl MakerUiState {
                 sync_bootstrap_from_state(self);
                 self.push_notification(
                     ToastTone::Success,
-                    "Setup Saved",
-                    format!("Persisted {}", self.current_setup.setup.name),
+                    "Build Saved",
+                    format!("Saved {}", self.current_setup.setup.name),
                 );
                 trace_ui(
                     &self.trace_root,
@@ -487,7 +487,7 @@ impl MakerUiState {
     fn start_another_setup(&mut self) {
         self.current_setup =
             self.app
-                .create_setup_document("New Yggdrasil".to_owned(), PresetId::Nas, None, None);
+                .create_setup_document("New Build".to_owned(), PresetId::Nas, None, None);
         self.set_journey_stage(JourneyStage::Outcome);
         self.build_status = "Ready to build".to_owned();
         self.build_result.clear();
@@ -531,7 +531,7 @@ impl MakerUiState {
             .as_ref()
             .and_then(|artifact| Path::new(&artifact.path).file_name())
             .and_then(|value| value.to_str())
-            .unwrap_or("Artifact")
+            .unwrap_or("File")
             .to_owned();
         let artifact_path = primary
             .as_ref()
@@ -539,10 +539,10 @@ impl MakerUiState {
             .unwrap_or_else(|| self.artifacts_dir.clone());
         let proof = match manifest.mode {
             BuildMode::LocalDocker => {
-                "Verified the build manifest after a local Docker run and copied the resulting artifacts."
+                "Built the files locally and copied them into the output folder."
             }
             BuildMode::ExportOnly => {
-                "Prepared a truthful export bundle for a Linux builder, including native config, persisted setup, and handoff instructions."
+                "Saved the files needed to finish this build on a Linux machine."
             }
         }
         .to_owned();
@@ -550,9 +550,9 @@ impl MakerUiState {
         self.success_state = Some(BuildSuccessState {
             setup_id: self.current_setup.setup_id.clone(),
             title: if manifest.mode == BuildMode::ExportOnly {
-                "Export bundle ready".to_owned()
+                "Builder files ready".to_owned()
             } else {
-                "Artifact ready".to_owned()
+                "Build files ready".to_owned()
             },
             proof,
             artifact_name,
@@ -610,7 +610,7 @@ impl MakerUiState {
         self.push_notification(
             ToastTone::Success,
             "Theme Updated",
-            "Yggui shell theme applied.".to_owned(),
+            "Theme saved.".to_owned(),
         );
     }
 
@@ -711,10 +711,10 @@ pub(crate) enum RightPanelMode {
 impl RightPanelMode {
     fn label(self) -> &'static str {
         match self {
-            Self::Appearance => "Appearance",
+            Self::Appearance => "Theme",
             Self::Config => "Config",
             Self::Plan => "Plan",
-            Self::Build => "Build",
+            Self::Build => "Log",
         }
     }
 
@@ -977,7 +977,7 @@ fn app() -> Element {
                 "☰"
             }
             button {
-                title: "New Setup",
+                title: "New Build",
                 style: titlebar_icon_button_style(false),
                 onmousedown: |evt| evt.stop_propagation(),
                 ondoubleclick: |evt| evt.stop_propagation(),
@@ -1043,7 +1043,7 @@ fn app() -> Element {
         div {
             style: "display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; width:100%;",
             button {
-                title: "Appearance",
+                title: "Theme",
                 style: utility_icon_button_style(snapshot.right_panel_mode == RightPanelMode::Appearance),
                 onmousedown: |evt| evt.stop_propagation(),
                 ondoubleclick: |evt| evt.stop_propagation(),
@@ -1072,7 +1072,7 @@ fn app() -> Element {
                 }
             }
             button {
-                title: "Shell Truth",
+                title: "Details",
                 style: utility_icon_button_style(snapshot.utility_pane_open && snapshot.right_panel_mode != RightPanelMode::Appearance),
                 onmousedown: |evt| evt.stop_propagation(),
                 ondoubleclick: |evt| evt.stop_propagation(),
@@ -1181,7 +1181,7 @@ fn app() -> Element {
                             div {
                                 style: left_rail_container_style(),
                                 RailHeader {
-                                    title: "Setups".to_owned(),
+                                    title: "Builds".to_owned(),
                                     color: if is_dark {
                                         "#d1dfec".to_owned()
                                     } else {
@@ -1201,7 +1201,7 @@ fn app() -> Element {
                                                 if snapshot.alt_overlay_active {
                                                     span { style: shortcut_badge_style(), "N" }
                                                 }
-                                                "New Setup"
+                                                "New Build"
                                             }
                                         }
                                         div {
@@ -1244,7 +1244,7 @@ fn app() -> Element {
                                                         }
                                                     });
                                                 },
-                                                span { "Recent Artifacts" }
+                                                span { "Recent Files" }
                                                 span {
                                                     style: "font-size:11px; color:var(--maker-muted);",
                                                     if snapshot.recent_artifacts_expanded { "▾" } else { "▸" }
@@ -1254,7 +1254,7 @@ fn app() -> Element {
                                                 if snapshot.recent_artifacts.is_empty() {
                                                     div {
                                                         style: empty_note_style(),
-                                                        "No artifact manifests yet."
+                                                        "No files yet."
                                                     }
                                                 } else {
                                                     for artifact in snapshot.recent_artifacts.iter().cloned() {
@@ -1293,7 +1293,7 @@ fn app() -> Element {
                                             state.with_mut(|ui| {
                                                 ui.push_notification(
                                                     ToastTone::Info,
-                                                    "Revealed Artifact",
+                                                    "Opened Files",
                                                     success.output_path.clone(),
                                                 );
                                                 trace_ui(
@@ -1355,7 +1355,7 @@ fn app() -> Element {
                                 style: right_rail_container_style(),
                                 if snapshot.right_panel_mode == RightPanelMode::Appearance {
                                     RailHeader {
-                                        title: "Appearance".to_owned(),
+                                        title: "Theme".to_owned(),
                                         color: if is_dark {
                                             "#cbd9e6".to_owned()
                                         } else {
@@ -1393,7 +1393,7 @@ fn app() -> Element {
                                     }
                                 } else {
                                     RailHeader {
-                                        title: "Shell Truth".to_owned(),
+                                        title: "Details".to_owned(),
                                         color: if is_dark {
                                             "#cbd9e6".to_owned()
                                         } else {
@@ -1420,7 +1420,7 @@ fn app() -> Element {
                                         content: rsx! {
                                             if snapshot.right_panel_mode == RightPanelMode::Config {
                                                 RailSectionTitle {
-                                                    title: "Native Config".to_owned(),
+                                                    title: "Config File".to_owned(),
                                                     muted_color: if is_dark {
                                                         "#afc0d1".to_owned()
                                                     } else {
@@ -1448,7 +1448,7 @@ fn app() -> Element {
                                             }
                                             if snapshot.right_panel_mode == RightPanelMode::Build {
                                                 RailSectionTitle {
-                                                    title: "Build Stream".to_owned(),
+                                                    title: "Build Log".to_owned(),
                                                     muted_color: if is_dark {
                                                         "#afc0d1".to_owned()
                                                     } else {
@@ -1462,7 +1462,7 @@ fn app() -> Element {
                                                 }
                                                 if !snapshot.build_result.trim().is_empty() {
                                                     RailSectionTitle {
-                                                        title: "Artifact Manifest".to_owned(),
+                                                        title: "Files".to_owned(),
                                                         muted_color: if is_dark {
                                                             "#afc0d1".to_owned()
                                                         } else {
@@ -1477,11 +1477,11 @@ fn app() -> Element {
                                                 if snapshot.build_log.is_empty() {
                                                     div {
                                                         style: rail_empty_note_style(),
-                                                        "Logs will appear here once the build starts."
+                                                        "The log will show up here after the build starts."
                                                     }
                                                 } else {
                                                     RailSectionTitle {
-                                                        title: "Live Output".to_owned(),
+                                                        title: "Log Output".to_owned(),
                                                         muted_color: if is_dark {
                                                             "#afc0d1".to_owned()
                                                         } else {
@@ -1663,8 +1663,8 @@ fn StudioCanvas(
                         style: "display:flex; flex-direction:column; gap:16px;",
                         div {
                             style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
-                            h2 { style: section_title_style(), "Choose the build profile" }
-                            p { style: section_copy_style(), "Pick one profile, then adjust hardware only if needed." }
+                            h2 { style: section_title_style(), "Choose build type" }
+                            p { style: section_copy_style(), "Pick one type, then change hardware only if you need to." }
                         }
                         div {
                             style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; align-items:stretch;",
@@ -1696,8 +1696,8 @@ fn StudioCanvas(
                                     style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;",
                                     div {
                                         style: "display:flex; flex-direction:column; gap:4px; text-align:left;",
-                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "NVIDIA path" }
-                                        span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "Only for machines that need NVIDIA support." }
+                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "NVIDIA" }
+                                        span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "Turn this on only if the machine needs NVIDIA support." }
                                     }
                                     span {
                                         style: outcome_choice_badge_style(state.current_setup.setup.hardware.with_nvidia, &accent),
@@ -1712,8 +1712,8 @@ fn StudioCanvas(
                                     style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;",
                                     div {
                                         style: "display:flex; flex-direction:column; gap:4px; text-align:left;",
-                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "LTS kernel" }
-                                        span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "Use the long-term kernel for steadier machines." }
+                                        span { style: "font-size:14px; font-weight:700; color:var(--maker-text-strong);", "Long-term kernel" }
+                                        span { style: "font-size:12px; line-height:1.45; color:var(--maker-copy);", "Use the longer support kernel for steadier machines." }
                                     }
                                     span {
                                         style: outcome_choice_badge_style(state.current_setup.setup.hardware.with_lts, &accent),
@@ -1770,7 +1770,7 @@ fn StudioCanvas(
                             div { style: label_style(), "What the machine will be called" }
                             h3 { style: "margin:0; font-size:24px; line-height:1.08; color:var(--maker-section-title);", "{hostname_draft()}" }
                             p { style: "margin:0; font-size:13px; line-height:1.65; color:var(--maker-copy);", "This name goes into the config and shows up after boot." }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Shown in sidebar as" } span { style: stat_value_style(), "{setup_name_draft()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Shown in list as" } span { style: stat_value_style(), "{setup_name_draft()}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "File name" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
                         }
@@ -1784,7 +1784,7 @@ fn StudioCanvas(
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "Review" }
-                        p { style: section_copy_style(), "Check the paths before you build. The right side shows the config and build plan." }
+                        p { style: section_copy_style(), "Check the folders before you build. The right side shows the config file and build plan." }
                     }
                     div {
                         style: stage_split_style,
@@ -1834,12 +1834,12 @@ fn StudioCanvas(
                         button {
                             style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
-                            "Save Setup"
+                            "Save Build"
                         }
                         button {
                             style: primary_button_style(&accent),
                             onclick: move |_| on_set_stage.call(JourneyStage::Build),
-                            "Continue to Launch"
+                            "Continue"
                         }
                     }
                 }
@@ -1851,7 +1851,7 @@ fn StudioCanvas(
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
                         h2 { style: section_title_style(), "Launch" }
-                        p { style: section_copy_style(), "Launch the local Docker build on Linux, or export the truthful handoff bundle on the other platforms. Raw logs stay in Shell Truth; the main canvas stays focused on the outcome." }
+                        p { style: section_copy_style(), "Build the ISO on Linux, or save a handoff bundle on other systems. Logs stay on the right." }
                     }
                     div {
                         style: build_split_style,
@@ -1861,22 +1861,22 @@ fn StudioCanvas(
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;",
                                 div { style: proof_card_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
                                 div { style: proof_card_style(), span { style: stat_label_style(), "Status" } span { style: stat_value_style(), "{state.build_status}" } }
-                                div { style: proof_card_style(), span { style: stat_label_style(), "Artifacts" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
+                                div { style: proof_card_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
                             }
                             if !state.build_result.trim().is_empty() {
                                 div {
                                     style: status_card_style(),
-                                    div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Latest result" }
+                                    div { style: "font-size:12px; font-weight:700; color:var(--maker-status-text);", "Last result" }
                                     div { style: "font-size:11px; line-height:1.6; color:var(--maker-status-muted);", "{latest_result_summary(&state)}" }
                                 }
                             }
                         }
                         div {
                             style: floating_group_style(),
-                            div { style: label_style(), "Launch" }
-                            div { style: info_row_style(), span { style: stat_label_style(), "OS path" } span { style: stat_value_style(), "{build_mode_label()}" } }
-                            div { style: info_row_style(), span { style: stat_label_style(), "Truth rail" } span { style: stat_value_style(), "Structured logs and manifest stay on the right." } }
-                            div { style: info_row_style(), span { style: stat_label_style(), "After build" } span { style: stat_value_style(), "Dedicated success handoff with artifact actions." } }
+                            div { style: label_style(), "Build" }
+                            div { style: info_row_style(), span { style: stat_label_style(), "Mode" } span { style: stat_value_style(), "{build_mode_label()}" } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "Right panel" } span { style: stat_value_style(), "Logs and output files stay on the right." } }
+                            div { style: info_row_style(), span { style: stat_label_style(), "After build" } span { style: stat_value_style(), "You can open the files or start a new build." } }
                         }
                     }
                     div {
@@ -1884,7 +1884,7 @@ fn StudioCanvas(
                         button {
                             style: tertiary_button_style(),
                             onclick: move |_| on_save.call(()),
-                            "Save Setup"
+                            "Save Build"
                         }
                         button {
                             style: primary_button_style(&accent),
@@ -1901,15 +1901,15 @@ fn StudioCanvas(
                     style: "display:flex; flex-direction:column; gap:16px;",
                     div {
                         style: "display:flex; flex-direction:column; gap:4px; padding:6px 2px 0 2px;",
-                        h2 { style: section_title_style(), "Boot" }
-                        p { style: section_copy_style(), "This is the handoff moment after a truthful build or export. If the dedicated success surface is not active yet, return to Build and rerun or inspect the latest artifacts." }
+                        h2 { style: section_title_style(), "Done" }
+                        p { style: section_copy_style(), "Your build is finished here. If the file list is empty, go back and run the build again." }
                     }
                     div {
                         style: stage_split_style,
                         div {
                             style: floating_group_style(),
                             if state.recent_artifacts.is_empty() {
-                                div { style: empty_note_style(), "No recent artifact summary is available yet for this setup." }
+                                div { style: empty_note_style(), "No build files yet for this build." }
                             } else {
                                 div {
                                     style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;",
@@ -1925,15 +1925,15 @@ fn StudioCanvas(
                         }
                         div {
                             style: floating_group_style(),
-                            div { style: label_style(), "Handoff" }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Primary action" } span { style: stat_value_style(), "Reveal artifact, inspect details, or start the next setup." } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Current setup" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
+                            div { style: label_style(), "Next" }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "You can" } span { style: stat_value_style(), "Open the files, inspect the build, or start a new build." } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Current build" } span { style: stat_value_style(), "{state.current_setup.setup.name}" } }
                         }
                     }
                     button {
                         style: primary_button_style(&accent),
                         onclick: move |_| on_set_stage.call(JourneyStage::Build),
-                        "Open Build Stage"
+                        "Back to Build"
                     }
                 }
             }
@@ -1961,7 +1961,7 @@ fn SuccessScreen(
                 ),
                 div {
                     style: format!("font-size:12px; font-weight:800; letter-spacing:0.1em; color:{};", accent),
-                    "SUCCESS"
+                    "DONE"
                 }
                 h1 {
                     style: "margin:10px 0 8px 0; font-size:42px; line-height:1.02; color:var(--maker-section-title);",
@@ -1973,15 +1973,15 @@ fn SuccessScreen(
                 }
                 div {
                     style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:18px;",
-                    div { style: success_stat_style(), span { style: stat_label_style(), "Artifact" } span { style: stat_value_style(), "{success.artifact_name}" } }
+                    div { style: success_stat_style(), span { style: stat_label_style(), "File" } span { style: stat_value_style(), "{success.artifact_name}" } }
                     div { style: success_stat_style(), span { style: stat_label_style(), "Profile" } span { style: stat_value_style(), "{success.profile_label}" } }
                     div { style: success_stat_style(), span { style: stat_label_style(), "Path" } span { style: stat_value_style(), "{success.output_path}" } }
                 }
                 div {
                     style: "display:flex; flex-wrap:wrap; gap:12px;",
-                    button { style: primary_button_style(&accent), onclick: move |_| on_reveal.call(()), "Reveal Artifact" }
-                    button { style: secondary_button_style(), onclick: move |_| on_open_details.call(()), "Open Build Details" }
-                    button { style: tertiary_button_style(), onclick: move |_| on_start_another.call(()), "Start Another Setup" }
+                    button { style: primary_button_style(&accent), onclick: move |_| on_reveal.call(()), "Open Files" }
+                    button { style: secondary_button_style(), onclick: move |_| on_open_details.call(()), "Open Build Log" }
+                    button { style: tertiary_button_style(), onclick: move |_| on_start_another.call(()), "New Build" }
                 }
             }
         }
@@ -2026,11 +2026,11 @@ fn AppearanceSidebar(
                         style: "display:flex; flex-direction:column; gap:4px;",
                         div {
                             style: format!("font-size:11px; font-weight:800; letter-spacing:0.08em; color:{};", accent),
-                            "APPEARANCE"
+                            "THEME"
                         }
                         div {
                             style: "font-size:13px; color:var(--maker-copy); line-height:1.5;",
-                            "Adjust the shared Ygg theme from the right rail."
+                            "Change the app theme here."
                         }
                     }
                 }
@@ -2434,7 +2434,7 @@ fn start_build(mut state: Signal<MakerUiState>) {
                                 ui.refresh_recent_artifacts();
                                 ui.push_notification(
                                     ToastTone::Success,
-                                    "Artifact Ready",
+                                    "Files Ready",
                                     format!("{} is ready.", manifest.setup_name),
                                 );
                                 trace_ui(
@@ -2975,11 +2975,11 @@ fn toggle_lts(mut state: Signal<MakerUiState>) {
 
 fn build_summary(state: &MakerUiState) -> String {
     if state.build_running {
-        "Structured events stream here while the build is active.".to_owned()
+        "The build log is streaming now.".to_owned()
     } else if let Some(success) = state.success_state.as_ref() {
         format!("{} · {}", success.title, success.profile_label)
     } else {
-        "No build in flight.".to_owned()
+        "No build is running.".to_owned()
     }
 }
 
@@ -3212,7 +3212,7 @@ fn latest_result_summary(state: &MakerUiState) -> String {
     if let Some(success) = state.success_state.as_ref() {
         format!("{} at {}", success.artifact_name, success.output_path)
     } else if state.build_running {
-        "Build events are streaming in Shell Truth.".to_owned()
+        "The build log is updating.".to_owned()
     } else {
         state
             .build_result
@@ -3316,10 +3316,10 @@ fn artifact_title(artifact: &ArtifactRecord) -> String {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or(match artifact.kind {
-            ArtifactKind::Iso => "ISO artifact",
-            ArtifactKind::NativeConfig => "Native config",
-            ArtifactKind::SetupDocument => "Setup document",
-            ArtifactKind::HandoffReadme => "Handoff README",
+            ArtifactKind::Iso => "ISO file",
+            ArtifactKind::NativeConfig => "Config file",
+            ArtifactKind::SetupDocument => "Build file",
+            ArtifactKind::HandoffReadme => "Build notes",
         })
         .to_owned()
 }
@@ -3328,8 +3328,8 @@ fn artifact_kind_label(kind: ArtifactKind) -> &'static str {
     match kind {
         ArtifactKind::Iso => "ISO",
         ArtifactKind::NativeConfig => "Config",
-        ArtifactKind::SetupDocument => "Setup",
-        ArtifactKind::HandoffReadme => "Handoff",
+        ArtifactKind::SetupDocument => "Build",
+        ArtifactKind::HandoffReadme => "Notes",
     }
 }
 
