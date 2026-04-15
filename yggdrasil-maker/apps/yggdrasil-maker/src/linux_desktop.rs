@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use yggterm_core::{AppIconAssets, install_linux_icon_assets};
 
 use crate::window_icon::{YGGDRASIL_MAKER_ICON_PNG_512, YGGDRASIL_MAKER_ICON_SVG};
@@ -114,7 +114,11 @@ fn escape_desktop_value(path: &Path) -> String {
 }
 
 fn try_run(program: &str, args: &[&std::ffi::OsStr]) {
-    let _ = Command::new(program).args(args).status();
+    let _ = Command::new(program)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 fn refresh_kde_desktop_caches() {

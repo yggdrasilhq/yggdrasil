@@ -6,7 +6,6 @@ use dioxus::document;
 use dioxus::prelude::*;
 use dioxus_core::schedule_update;
 use dioxus_desktop::DesktopContext;
-use dioxus_desktop::UserWindowEvent;
 #[cfg(target_os = "linux")]
 use gtk::prelude::GtkWindowExt;
 use keyboard_types::{Key, Modifiers};
@@ -29,9 +28,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tao::event_loop::{EventLoop, EventLoopBuilder};
 #[cfg(target_os = "linux")]
-use tao::platform::unix::{EventLoopBuilderExtUnix, WindowExtUnix};
+use tao::platform::unix::WindowExtUnix;
 use tao::window::ResizeDirection;
 use time::{OffsetDateTime, UtcOffset};
 use tokio::time::sleep;
@@ -54,7 +52,7 @@ use crate::app_control::{
 };
 #[cfg(target_os = "linux")]
 use crate::linux_desktop::{
-    YGGDRASIL_MAKER_DESKTOP_APP_ID, YGGDRASIL_MAKER_WM_CLASS, refresh_dev_desktop_integration,
+    YGGDRASIL_MAKER_WM_CLASS, refresh_dev_desktop_integration,
 };
 use crate::window_icon;
 
@@ -155,7 +153,6 @@ pub fn launch() -> Result<()> {
         .with_min_inner_size(LogicalSize::new(1120.0, 760.0));
 
     let config = Config::new()
-        .with_event_loop(configured_event_loop())
         .with_window(window_builder)
         .with_close_behaviour(WindowCloseBehaviour::WindowCloses)
         .with_exits_when_last_window_closes(true);
@@ -164,18 +161,6 @@ pub fn launch() -> Result<()> {
         .with_cfg(config)
         .launch(app);
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn configured_event_loop() -> EventLoop<UserWindowEvent> {
-    let mut builder = EventLoopBuilder::<UserWindowEvent>::with_user_event();
-    builder.with_app_id(YGGDRASIL_MAKER_DESKTOP_APP_ID);
-    builder.build()
-}
-
-#[cfg(not(target_os = "linux"))]
-fn configured_event_loop() -> EventLoop<UserWindowEvent> {
-    EventLoopBuilder::<UserWindowEvent>::with_user_event().build()
 }
 
 #[derive(Clone)]
