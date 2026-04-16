@@ -109,7 +109,9 @@ fn sync_bootstrap_from_state(state: &MakerUiState) {
 }
 
 pub fn launch() -> Result<()> {
-    let bootstrap = MakerBootstrap::load()?;
+    let launch_started_ms = current_millis();
+    let mut bootstrap = MakerBootstrap::load()?;
+    bootstrap.launch_started_ms = launch_started_ms;
     trace_ui(
         &bootstrap.trace_root,
         "startup",
@@ -168,6 +170,7 @@ pub fn launch() -> Result<()> {
 struct MakerBootstrap {
     app: MakerApp,
     trace_root: PathBuf,
+    launch_started_ms: u64,
     shell_settings: MakerShellSettings,
     saved_setups: Vec<StoredSetupSummary>,
     current_setup: SetupDocument,
@@ -198,7 +201,6 @@ impl MakerBootstrap {
         let mut state = MakerUiState::new(app.clone(), trace_root.clone(), shell_settings);
         state.saved_setups = saved_setups.clone();
         state.current_setup = current_setup.clone();
-        state.refresh_previews();
         state.refresh_recent_artifacts();
         if renamed_current_setup {
             let _ = state.persist_current_setup();
@@ -207,13 +209,14 @@ impl MakerBootstrap {
         Ok(Self {
             app,
             trace_root,
+            launch_started_ms: 0,
             shell_settings: state.shell_settings,
             saved_setups,
             current_setup,
             artifacts_dir: state.artifacts_dir,
             repo_root: state.repo_root,
-            config_preview: state.config_preview,
-            plan_preview: state.plan_preview,
+            config_preview: "Loading config file...".to_owned(),
+            plan_preview: "Loading build plan...".to_owned(),
             recent_artifacts: state.recent_artifacts,
         })
     }
@@ -271,8 +274,8 @@ impl MakerUiState {
             },
             artifacts_dir: "./artifacts".to_owned(),
             repo_root: String::new(),
-            config_preview: String::new(),
-            plan_preview: String::new(),
+            config_preview: "Loading config file...".to_owned(),
+            plan_preview: "Loading build plan...".to_owned(),
             build_log: Vec::new(),
             build_status: "Ready to build".to_owned(),
             build_result: String::new(),
@@ -1160,6 +1163,7 @@ enum ShellFinish {
 fn app() -> Element {
     let bootstrap =
         cloned_bootstrap().expect("maker bootstrap should be initialized before launch");
+    let launch_started_ms = bootstrap.launch_started_ms;
     let mut state = use_signal(|| MakerUiState::from_bootstrap(bootstrap));
     let mount_generation = use_hook(|| APP_MOUNT_GENERATION.fetch_add(1, Ordering::Relaxed) + 1);
     let desktop = use_window();
@@ -1167,6 +1171,8 @@ fn app() -> Element {
     let now_ms = use_signal(current_millis);
     let window_icon_applied =
         use_hook(|| Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
+    let startup_traced = use_hook(|| Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
+    let preview_warmed = use_hook(|| Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
 
     {
         let desktop = desktop.clone();
@@ -1192,6 +1198,48 @@ fn app() -> Element {
                     gtk_window.set_icon_name(Some(YGGDRASIL_MAKER_WM_CLASS));
                 }
                 let _ = window_icon_applied;
+            });
+        });
+    }
+
+    {
+        let trace_root = state.read().trace_root.clone();
+        let startup_traced = startup_traced.clone();
+        use_effect(move || {
+            if startup_traced.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            trace_ui(
+                &trace_root,
+                "startup",
+                "window_spawned",
+                json!({
+                    "elapsed_ms": current_millis().saturating_sub(launch_started_ms),
+                }),
+            );
+        });
+    }
+
+    {
+        let trace_root = state.read().trace_root.clone();
+        let preview_warmed = preview_warmed.clone();
+        use_effect(move || {
+            if preview_warmed.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let trace_root = trace_root.clone();
+            spawn(async move {
+                sleep(Duration::from_millis(32)).await;
+                let started = Instant::now();
+                state.with_mut(|ui| ui.refresh_previews());
+                trace_ui(
+                    &trace_root,
+                    "startup",
+                    "previews_ready",
+                    json!({
+                        "elapsed_ms": started.elapsed().as_millis(),
+                    }),
+                );
             });
         });
     }
@@ -1966,7 +2014,13 @@ fn StudioCanvas(
 ) -> Element {
     let current_stage = state.current_setup.journey_stage;
     let total_story_pages = 6;
-    let mut setup_name_draft = use_signal(|| state.current_setup.setup.name.clone());
+    let mut setup_name_draft = use_signal(|| {
+        if state.current_setup.setup.name_template.trim().is_empty() {
+            state.current_setup.setup.name.clone()
+        } else {
+            state.current_setup.setup.name_template.clone()
+        }
+    });
     let mut hostname_draft =
         use_signal(|| state.current_setup.setup.personalization.hostname.clone());
     let mut artifacts_dir_draft = use_signal(|| state.artifacts_dir.clone());
@@ -1981,11 +2035,13 @@ fn StudioCanvas(
             String::new(),
             String::new(),
             String::new(),
+            String::new(),
         )
     });
     {
         let setup_id = state.current_setup.setup_id.clone();
         let setup_name = state.current_setup.setup.name.clone();
+        let setup_name_template = state.current_setup.setup.name_template.clone();
         let hostname = state.current_setup.setup.personalization.hostname.clone();
         let artifacts_dir = state.artifacts_dir.clone();
         let repo_root = state.repo_root.clone();
@@ -1993,13 +2049,18 @@ fn StudioCanvas(
             let next_key = (
                 setup_id.clone(),
                 setup_name.clone(),
+                setup_name_template.clone(),
                 hostname.clone(),
                 artifacts_dir.clone(),
                 repo_root.clone(),
             );
             if draft_sync_key() != next_key {
                 draft_sync_key.set(next_key);
-                setup_name_draft.set(setup_name.clone());
+                setup_name_draft.set(if setup_name_template.trim().is_empty() {
+                    setup_name.clone()
+                } else {
+                    setup_name_template.clone()
+                });
                 hostname_draft.set(hostname.clone());
                 artifacts_dir_draft.set(artifacts_dir.clone());
                 repo_root_draft.set(repo_root.clone());
@@ -2032,6 +2093,17 @@ fn StudioCanvas(
         .find(|card| card.id == state.current_setup.setup.preset)
         .copied();
     let setup_id_for_name_sync = state.current_setup.setup_id.clone();
+    let setup_name_draft_value = setup_name_draft();
+    let setup_name_preview = resolve_build_name_scheme(
+        if setup_name_draft_value.trim().is_empty() {
+            DEFAULT_BUILD_NAME_TEMPLATE
+        } else {
+            setup_name_draft_value.as_str()
+        },
+        &hostname_draft(),
+        &setup_id_for_name_sync,
+    );
+    let setup_name_help = "Use plain text, or tokens like $MACHINE_NAME-{%date%}.";
     let story_cycle_ms = 30_000_u64;
     let auto_story_elapsed_ms = now_ms.saturating_sub(story_anchor_ms());
     let auto_story_page = ((auto_story_elapsed_ms / story_cycle_ms) as usize) % total_story_pages;
@@ -2191,7 +2263,7 @@ fn StudioCanvas(
                                 style: "display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px;",
                                 div {
                                     style: "display:flex; flex-direction:column; gap:6px;",
-                                    label { style: label_style(), "Saved build name" }
+                                    label { style: label_style(), "Build name pattern" }
                                     input {
                                         id: "maker-setup-name",
                                         r#type: "text",
@@ -2199,6 +2271,10 @@ fn StudioCanvas(
                                         style: input_style(),
                                         oninput: move |evt| setup_name_draft.set(evt.value()),
                                         onchange: move |_| on_update_setup_name.call(setup_name_draft()),
+                                    }
+                                    span {
+                                        style: "font-size:11px; line-height:1.5; color:var(--maker-copy);",
+                                        "{setup_name_help}"
                                     }
                                 }
                                 div {
@@ -2239,8 +2315,8 @@ fn StudioCanvas(
                             div { style: label_style(), "What the machine will be called" }
                             h3 { style: "margin:0; font-size:24px; line-height:1.08; color:var(--maker-section-title);", "{hostname_draft()}" }
                             p { style: "margin:0; font-size:13px; line-height:1.65; color:var(--maker-copy);", "This name goes into the config and shows up after boot." }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "Shown in list as" } span { style: stat_value_style(), "{setup_name_draft()}" } }
-                            div { style: proof_card_style(), span { style: stat_label_style(), "File name" } span { style: stat_value_style(), "{state.current_setup.setup.slug()}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "Saved as" } span { style: stat_value_style(), "{setup_name_preview}" } }
+                            div { style: proof_card_style(), span { style: stat_label_style(), "File name" } span { style: stat_value_style(), "{build_name_slug(&setup_name_preview)}" } }
                             div { style: proof_card_style(), span { style: stat_label_style(), "Output folder" } span { style: stat_value_style(), "{state.artifacts_dir}" } }
                         }
                     }
@@ -3590,6 +3666,7 @@ fn describe_app_state_snapshot(state: &MakerUiState, desktop: &DesktopContext) -
         "current_setup": {
             "setup_id": state.current_setup.setup_id,
             "name": state.current_setup.setup.name,
+            "name_template": state.current_setup.setup.name_template,
             "slug": state.current_setup.setup.slug(),
             "preset": state.current_setup.setup.preset.slug(),
             "profile": state.current_setup.setup.profile_override.unwrap_or_else(|| state.current_setup.setup.preset.recommended_profile()).slug(),
@@ -3781,6 +3858,21 @@ fn normalize_setup_build_name(document: &mut SetupDocument) -> bool {
         document.setup.name = resolved;
     }
     changed
+}
+
+fn build_name_slug(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned()
 }
 
 fn resolve_build_name_scheme(value: &str, hostname: &str, setup_id: &str) -> String {
