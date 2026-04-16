@@ -4772,7 +4772,7 @@ fn right_rail_container_style() -> &'static str {
 }
 
 fn shell_body_row_style() -> &'static str {
-    "display:flex; flex:1; min-height:0; overflow:hidden; background:color-mix(in srgb, var(--maker-shell-clarity-fill) 18%, transparent);"
+    "display:flex; flex:1; min-height:0; overflow:hidden; background:transparent;"
 }
 
 fn utility_icon_button_style(active: bool) -> String {
