@@ -185,7 +185,7 @@ impl MakerBootstrap {
         let shell_settings = load_shell_settings().unwrap_or_default();
         let mut saved_setups = app.setup_store().list()?;
         saved_setups.sort_by(|left, right| right.modified_unix_secs.cmp(&left.modified_unix_secs));
-        let current_setup = if let Some(first) = saved_setups.first() {
+        let mut current_setup = if let Some(first) = saved_setups.first() {
             app.setup_store().load(&first.setup_id)?
         } else {
             let mut document =
@@ -193,12 +193,16 @@ impl MakerBootstrap {
             apply_default_build_name(&mut document);
             document
         };
+        let renamed_current_setup = normalize_setup_build_name(&mut current_setup);
 
         let mut state = MakerUiState::new(app.clone(), trace_root.clone(), shell_settings);
         state.saved_setups = saved_setups.clone();
         state.current_setup = current_setup.clone();
         state.refresh_previews();
         state.refresh_recent_artifacts();
+        if renamed_current_setup {
+            let _ = state.persist_current_setup();
+        }
 
         Ok(Self {
             app,
@@ -397,8 +401,12 @@ impl MakerUiState {
         let Some(job) = read_active_build_job().ok().flatten() else {
             return;
         };
-        if let Ok(document) = self.app.setup_store().load(&job.setup_id) {
+        if let Ok(mut document) = self.app.setup_store().load(&job.setup_id) {
+            let renamed = normalize_setup_build_name(&mut document);
             self.current_setup = document;
+            if renamed {
+                let _ = self.persist_current_setup();
+            }
         }
         self.artifacts_dir = job.artifacts_dir.clone();
         self.repo_root = job.repo_root.clone().unwrap_or_default();
@@ -450,9 +458,13 @@ impl MakerUiState {
         };
 
         if self.current_setup.setup_id != job.setup_id
-            && let Ok(document) = self.app.setup_store().load(&job.setup_id)
+            && let Ok(mut document) = self.app.setup_store().load(&job.setup_id)
         {
+            let renamed = normalize_setup_build_name(&mut document);
             self.current_setup = document;
+            if renamed {
+                let _ = self.persist_current_setup();
+            }
         }
         self.artifacts_dir = job.artifacts_dir.clone();
         self.repo_root = job.repo_root.clone().unwrap_or_default();
@@ -739,11 +751,15 @@ impl MakerUiState {
     }
 
     fn select_setup(&mut self, setup_id: &str) {
-        if let Ok(document) = self.app.setup_store().load(setup_id) {
+        if let Ok(mut document) = self.app.setup_store().load(setup_id) {
+            let renamed = normalize_setup_build_name(&mut document);
             self.current_setup = document;
             self.success_state = None;
             self.sync_truth_surface_for_stage();
             self.refresh_previews();
+            if renamed {
+                let _ = self.persist_current_setup();
+            }
             sync_bootstrap_from_state(self);
             trace_ui(
                 &self.trace_root,
@@ -1187,8 +1203,12 @@ fn app() -> Element {
                 if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
                     break;
                 }
-                sleep(Duration::from_millis(250)).await;
-                now_ms.set(current_millis());
+                if state.read().build_running {
+                    now_ms.set(current_millis());
+                    sleep(Duration::from_millis(250)).await;
+                } else {
+                    sleep(Duration::from_millis(1200)).await;
+                }
             }
         });
     }
@@ -1201,15 +1221,17 @@ fn app() -> Element {
                 }
                 let maximized = window().is_maximized();
                 let window_width = window().inner_size().width;
-                state.with_mut(|ui| {
-                    if ui.maximized != maximized {
+                let needs_update = {
+                    let snapshot = state.read();
+                    snapshot.maximized != maximized || snapshot.window_width != window_width
+                };
+                if needs_update {
+                    state.with_mut(|ui| {
                         ui.maximized = maximized;
-                    }
-                    if ui.window_width != window_width {
                         ui.window_width = window_width;
-                    }
-                });
-                sleep(Duration::from_millis(160)).await;
+                    });
+                }
+                sleep(Duration::from_millis(240)).await;
             }
         });
     }
@@ -1222,7 +1244,7 @@ fn app() -> Element {
                 }
                 let snapshot = state.read().clone();
                 sync_bootstrap_from_state(&snapshot);
-                sleep(Duration::from_millis(120)).await;
+                sleep(Duration::from_millis(420)).await;
             }
         });
     }
@@ -1233,8 +1255,16 @@ fn app() -> Element {
                 if APP_MOUNT_GENERATION.load(Ordering::Relaxed) != mount_generation {
                     break;
                 }
-                state.with_mut(|ui| ui.poll_active_build_job());
-                sleep(Duration::from_millis(240)).await;
+                let should_poll = {
+                    let snapshot = state.read();
+                    snapshot.build_running || snapshot.active_build_job.is_some()
+                };
+                if should_poll {
+                    state.with_mut(|ui| ui.poll_active_build_job());
+                    sleep(Duration::from_millis(240)).await;
+                } else {
+                    sleep(Duration::from_millis(1200)).await;
+                }
             }
         });
     }
@@ -1996,6 +2026,7 @@ fn StudioCanvas(
         .setup
         .profile_override
         .unwrap_or_else(|| state.current_setup.setup.preset.recommended_profile());
+    let setup_name_template = state.current_setup.setup.name_template.clone();
     let selected_preset = preset_cards()
         .iter()
         .find(|card| card.id == state.current_setup.setup.preset)
@@ -2179,15 +2210,20 @@ fn StudioCanvas(
                                         style: input_style(),
                                         oninput: move |evt| {
                                             let next_hostname = evt.value();
-                                            let previous_hostname = hostname_draft();
-                                            let current_build_name = setup_name_draft();
                                             hostname_draft.set(next_hostname.clone());
-                                            if should_follow_default_build_name(
-                                                &current_build_name,
-                                                &previous_hostname,
-                                                &setup_id_for_name_sync,
-                                            ) {
-                                                setup_name_draft.set(default_build_name(
+                                            let template = if setup_name_template.trim().is_empty() {
+                                                DEFAULT_BUILD_NAME_TEMPLATE
+                                            } else {
+                                                setup_name_template.as_str()
+                                            };
+                                            if template.contains("$MACHINE_NAME")
+                                                || template.contains("$HOSTNAME")
+                                                || template.contains("{%date%}")
+                                                || template.contains("{%DATE%}")
+                                                || template.contains("$DATE")
+                                            {
+                                                setup_name_draft.set(resolve_build_name_scheme(
+                                                    template,
                                                     &next_hostname,
                                                     &setup_id_for_name_sync,
                                                 ));
@@ -3350,8 +3386,14 @@ async fn process_pending_app_control_requests(
                     apply_default_build_name(&mut ui.current_setup);
                 }
                 if let Some(name) = name {
+                    let template = if name.trim().is_empty() {
+                        DEFAULT_BUILD_NAME_TEMPLATE.to_owned()
+                    } else {
+                        name.trim().to_owned()
+                    };
+                    ui.current_setup.setup.name_template = template.clone();
                     ui.current_setup.setup.name = resolve_build_name_scheme(
-                        &name,
+                        &template,
                         &ui.current_setup.setup.personalization.hostname,
                         &ui.current_setup.setup_id,
                     );
@@ -3653,8 +3695,14 @@ fn handle_keyup(evt: KeyboardEvent, mut state: Signal<MakerUiState>) {
 
 fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
+        let template = if value.trim().is_empty() {
+            DEFAULT_BUILD_NAME_TEMPLATE.to_owned()
+        } else {
+            value.trim().to_owned()
+        };
+        ui.current_setup.setup.name_template = template.clone();
         ui.current_setup.setup.name = resolve_build_name_scheme(
-            &value,
+            &template,
             &ui.current_setup.setup.personalization.hostname,
             &ui.current_setup.setup_id,
         );
@@ -3667,19 +3715,15 @@ fn update_setup_name(mut state: Signal<MakerUiState>, value: String) {
 
 fn update_hostname(mut state: Signal<MakerUiState>, value: String) {
     state.with_mut(|ui| {
-        let previous_hostname = ui.current_setup.setup.personalization.hostname.clone();
-        let should_refresh_build_name = should_follow_default_build_name(
-            &ui.current_setup.setup.name,
-            &previous_hostname,
+        ui.current_setup.setup.personalization.hostname = value;
+        if ui.current_setup.setup.name_template.trim().is_empty() {
+            ui.current_setup.setup.name_template = DEFAULT_BUILD_NAME_TEMPLATE.to_owned();
+        }
+        ui.current_setup.setup.name = resolve_build_name_scheme(
+            &ui.current_setup.setup.name_template,
+            &ui.current_setup.setup.personalization.hostname,
             &ui.current_setup.setup_id,
         );
-        ui.current_setup.setup.personalization.hostname = value;
-        if should_refresh_build_name {
-            ui.current_setup.setup.name = default_build_name(
-                &ui.current_setup.setup.personalization.hostname,
-                &ui.current_setup.setup_id,
-            );
-        }
         if ui.current_setup.journey_stage != JourneyStage::Personalize {
             ui.set_journey_stage(JourneyStage::Personalize);
         }
@@ -3712,13 +3756,31 @@ fn update_repo_root(mut state: Signal<MakerUiState>, value: String) {
 }
 
 fn apply_default_build_name(document: &mut SetupDocument) {
-    document.setup.name =
-        default_build_name(&document.setup.personalization.hostname, &document.setup_id);
+    document.setup.name_template = DEFAULT_BUILD_NAME_TEMPLATE.to_owned();
+    document.setup.name = resolve_build_name_scheme(
+        &document.setup.name_template,
+        &document.setup.personalization.hostname,
+        &document.setup_id,
+    );
 }
 
-fn should_follow_default_build_name(current_name: &str, hostname: &str, setup_id: &str) -> bool {
-    let trimmed = current_name.trim();
-    trimmed.is_empty() || trimmed == default_build_name(hostname, setup_id)
+fn normalize_setup_build_name(document: &mut SetupDocument) -> bool {
+    let template = if document.setup.name_template.trim().is_empty() {
+        DEFAULT_BUILD_NAME_TEMPLATE.to_owned()
+    } else {
+        document.setup.name_template.trim().to_owned()
+    };
+    let resolved = resolve_build_name_scheme(
+        &template,
+        &document.setup.personalization.hostname,
+        &document.setup_id,
+    );
+    let changed = document.setup.name_template != template || document.setup.name != resolved;
+    if changed {
+        document.setup.name_template = template;
+        document.setup.name = resolved;
+    }
+    changed
 }
 
 fn resolve_build_name_scheme(value: &str, hostname: &str, setup_id: &str) -> String {
@@ -5227,5 +5289,18 @@ mod tests {
         assert!(name.starts_with("lab-box-"));
         assert!(!name.contains("$MACHINE_NAME"));
         assert!(!name.contains("{%date%}"));
+    }
+
+    #[test]
+    fn normalize_setup_build_name_recovers_missing_template() {
+        let mut document = SetupDocument::new("legacy-build".to_owned(), PresetId::Nas);
+        document.setup_id = "setup-1776251028091-0".to_owned();
+        document.setup.personalization.hostname = "mainin".to_owned();
+        document.setup.name_template.clear();
+        document.setup.name = "detached-build-check-2".to_owned();
+
+        assert!(normalize_setup_build_name(&mut document));
+        assert_eq!(document.setup.name_template, DEFAULT_BUILD_NAME_TEMPLATE);
+        assert!(document.setup.name.starts_with("mainin-"));
     }
 }

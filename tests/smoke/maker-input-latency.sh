@@ -6,10 +6,10 @@ WORKSPACE_DIR="$ROOT_DIR/yggdrasil-maker"
 APP_BIN="$WORKSPACE_DIR/target/debug/yggdrasil-maker"
 TMP_DIR="$(mktemp -d)"
 LOG_DIR="$TMP_DIR/logs"
-mkdir -p "$LOG_DIR"
+APP_HOME="$TMP_DIR/app-home"
+SETUPS_DIR="$APP_HOME/setups"
+mkdir -p "$LOG_DIR" "$SETUPS_DIR"
 trap 'rm -rf "$TMP_DIR"; if [[ -n "${APP_PID:-}" ]]; then kill "$APP_PID" >/dev/null 2>&1 || true; wait "$APP_PID" >/dev/null 2>&1 || true; fi' EXIT
-
-APP_HOME="${YGGDRASIL_MAKER_SETUP_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/yggdrasil-maker}"
 
 fail() {
   printf '[maker-input-latency] %s\n' "$*" >&2
@@ -19,8 +19,32 @@ fail() {
 appctl() {
   (
     cd "$WORKSPACE_DIR"
-    "$APP_BIN" server app "$@"
+    YGGDRASIL_MAKER_SETUP_ROOT="$SETUPS_DIR" \
+      YGGDRASIL_MAKER_APP_PID="${YGGDRASIL_MAKER_APP_PID:-}" \
+      "$APP_BIN" server app "$@"
   )
+}
+
+measure_ms() {
+  local output_file="$1"
+  shift
+  python3 - "$output_file" "$@" <<'PY'
+import pathlib
+import subprocess
+import sys
+import time
+
+output = pathlib.Path(sys.argv[1])
+command = sys.argv[2:]
+started = time.perf_counter()
+completed = subprocess.run(command, capture_output=True, text=True)
+elapsed_ms = round((time.perf_counter() - started) * 1000)
+output.write_text(completed.stdout, encoding="utf-8")
+sys.stderr.write(completed.stderr)
+if completed.returncode != 0:
+    raise SystemExit(completed.returncode)
+print(elapsed_ms)
+PY
 }
 
 json_eval() {
@@ -101,11 +125,35 @@ PY
 printf '[maker-input-latency] building desktop binary\n'
 (cd "$WORKSPACE_DIR" && cargo build -p yggdrasil-maker --features desktop-ui >/dev/null)
 
+printf '[maker-input-latency] creating isolated setup\n'
+(
+  cd "$WORKSPACE_DIR"
+  YGGDRASIL_MAKER_SETUP_ROOT="$SETUPS_DIR" \
+    "$APP_BIN" setup new \
+      --name latency-check \
+      --preset nas \
+      --profile server \
+      --hostname yggdrasil \
+      --output "$LOG_DIR/bootstrap-setup.json" >/dev/null
+)
+python3 - "$LOG_DIR/bootstrap-setup.json" "$SETUPS_DIR" <<'PY'
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+setups_dir = pathlib.Path(sys.argv[2])
+data = json.loads(source.read_text(encoding="utf-8"))
+target = setups_dir / f'{data["setup"]["name"].lower().replace(" ", "-")}--{data["setup_id"]}.maker.json'
+target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+source.unlink()
+PY
+
 appctl clients > "$LOG_DIR/clients-before.json" || true
 printf '[maker-input-latency] launching GUI\n'
 (
   cd "$WORKSPACE_DIR"
-  exec "$APP_BIN"
+  exec env YGGDRASIL_MAKER_SETUP_ROOT="$SETUPS_DIR" "$APP_BIN"
 ) >"$LOG_DIR/app.log" 2>&1 &
 APP_PID=$!
 
@@ -116,9 +164,10 @@ fi
 [[ -n "$CLIENT_PID" ]] || fail "no GUI client appeared"
 export YGGDRASIL_MAKER_APP_PID="$CLIENT_PID"
 
-appctl set-stage personalize --timeout-ms 8000 > "$LOG_DIR/set-stage.json"
+set_stage_ms="$(measure_ms "$LOG_DIR/set-stage.json" env YGGDRASIL_MAKER_SETUP_ROOT="$SETUPS_DIR" YGGDRASIL_MAKER_APP_PID="$CLIENT_PID" "$APP_BIN" server app set-stage personalize --timeout-ms 8000)"
+set_panel_ms="$(measure_ms "$LOG_DIR/set-panel.json" env YGGDRASIL_MAKER_SETUP_ROOT="$SETUPS_DIR" YGGDRASIL_MAKER_APP_PID="$CLIENT_PID" "$APP_BIN" server app set-right-panel plan --timeout-ms 8000)"
 before_count="$(count_slow_preview_events)"
-appctl set-hostname latency-check --timeout-ms 8000 > "$LOG_DIR/set-hostname.json"
+set_hostname_ms="$(measure_ms "$LOG_DIR/set-hostname.json" env YGGDRASIL_MAKER_SETUP_ROOT="$SETUPS_DIR" YGGDRASIL_MAKER_APP_PID="$CLIENT_PID" "$APP_BIN" server app set-hostname latency-check --timeout-ms 8000)"
 after_count="$(count_slow_preview_events)"
 appctl state --timeout-ms 8000 > "$LOG_DIR/state.json"
 
@@ -128,9 +177,16 @@ print(data["data"]["current_setup"]["journey_stage"])
 hostname="$(json_eval "$LOG_DIR/state.json" '
 print(data["data"]["current_setup"]["hostname"])
 ')"
+build_name="$(json_eval "$LOG_DIR/state.json" '
+print(data["data"]["current_setup"]["name"])
+')"
 
 [[ "$journey_stage" == "Name" ]] || fail "expected Name stage, got $journey_stage"
 [[ "$hostname" == "latency-check" ]] || fail "expected hostname latency-check, got $hostname"
+[[ "$build_name" == latency-check-* ]] || fail "expected dynamic build name after hostname edit, got $build_name"
 [[ "$before_count" == "$after_count" ]] || fail "hostname edit triggered slow preview refresh ($before_count -> $after_count)"
+(( set_stage_ms <= 450 )) || fail "set-stage latency too high: ${set_stage_ms}ms"
+(( set_panel_ms <= 450 )) || fail "set-right-panel latency too high: ${set_panel_ms}ms"
+(( set_hostname_ms <= 450 )) || fail "set-hostname latency too high: ${set_hostname_ms}ms"
 
 printf '[maker-input-latency] ok\n'

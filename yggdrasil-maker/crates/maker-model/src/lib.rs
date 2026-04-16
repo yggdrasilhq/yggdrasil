@@ -309,6 +309,8 @@ impl FromStr for JourneyStage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Setup {
     pub name: String,
+    #[serde(default)]
+    pub name_template: String,
     pub preset: PresetId,
     pub profile_override: Option<BuildProfile>,
     pub personalization: Personalization,
@@ -322,6 +324,7 @@ impl Setup {
     pub fn new(name: String, preset: PresetId) -> Self {
         Self {
             name,
+            name_template: String::new(),
             preset,
             profile_override: None,
             personalization: Personalization::default(),
