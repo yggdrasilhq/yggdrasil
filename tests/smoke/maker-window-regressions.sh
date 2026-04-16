@@ -165,7 +165,7 @@ import sys
 source = pathlib.Path(sys.argv[1])
 setups_dir = pathlib.Path(sys.argv[2])
 data = json.loads(source.read_text(encoding="utf-8"))
-data["journey_stage"] = "build"
+data["journey_stage"] = "review"
 target = setups_dir / f'{data["setup"]["name"].lower().replace(" ", "-")}--{data["setup_id"]}.maker.json'
 target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 source.unlink()
@@ -190,7 +190,46 @@ appctl state --timeout-ms 12000 > "$LOG_DIR/state-initial.json"
 journey_stage="$(json_eval "$LOG_DIR/state-initial.json" '
 print(data["data"]["current_setup"]["journey_stage"])
 ')"
-[[ "$journey_stage" != "Build" ]] || fail "cold relaunch reopened on Build without an active job"
+[[ "$journey_stage" == "Choose" ]] || fail "cold relaunch should reopen on Choose, got $journey_stage"
+
+appctl screenshot "$LOG_DIR/startup-shell.png" --timeout-ms 12000 > "$LOG_DIR/screenshot-startup.json"
+python3 - "$LOG_DIR/startup-shell.png" <<'PY'
+from PIL import Image
+import sys
+
+path = sys.argv[1]
+img = Image.open(path).convert("RGBA")
+width, height = img.size
+left_seam = 8 + 248
+right_seam = width - (8 + 318)
+sample_ys = [int(height * 0.68), int(height * 0.82)]
+threshold = 16
+
+def channel_delta(a, b):
+    return max(abs(a[i] - b[i]) for i in range(3))
+
+def patch_color(x, y):
+    pixels = []
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            px = min(max(x + dx, 0), width - 1)
+            py = min(max(y + dy, 0), height - 1)
+            pixels.append(img.getpixel((px, py))[:3])
+    return tuple(round(sum(pixel[i] for pixel in pixels) / len(pixels)) for i in range(3))
+
+def seam_jump(seam_x, y):
+    xs = [seam_x - 24, seam_x - 16, seam_x - 8, seam_x, seam_x + 8, seam_x + 16, seam_x + 24]
+    colors = [patch_color(x, y) for x in xs]
+    return max(channel_delta(colors[i], colors[i + 1]) for i in range(len(colors) - 1))
+
+for seam_x in (left_seam, right_seam):
+    for y in sample_ys:
+        jump = seam_jump(seam_x, y)
+        if jump > threshold:
+            raise SystemExit(
+                f"shell seam too abrupt at x={seam_x}, y={y}, jump={jump}, threshold={threshold}"
+            )
+PY
 
 printf '[maker-window-regressions] probing stale active-build restore contract\n'
 kill "$APP_PID" >/dev/null 2>&1 || true

@@ -42,7 +42,7 @@ use yggui::{
     ToastTone, ToastViewport, WindowControlsStrip, append_theme_stop, clamp_theme_spec,
     default_theme_editor_spec, dominant_accent, gradient_css, preview_surface_css, shell_tint,
 };
-use yggui_contract::{UiTheme, YgguiThemeSpec};
+use yggui_contract::{UiTheme, YgguiThemeColorStop, YgguiThemeSpec};
 
 use crate::app_capture::{
     capture_visible_app_surface, describe_window, focus_app_window, record_visible_app_surface,
@@ -418,10 +418,7 @@ impl MakerUiState {
             return false;
         }
 
-        let normalized_stage = match self.current_setup.journey_stage {
-            JourneyStage::Build | JourneyStage::Boot => JourneyStage::Review,
-            stage => stage,
-        };
+        let normalized_stage = JourneyStage::Outcome;
         if normalized_stage == self.current_setup.journey_stage {
             return false;
         }
@@ -903,7 +900,7 @@ impl MakerUiState {
     }
 
     fn reset_theme_editor(&mut self) {
-        self.theme_editor_draft = default_theme_editor_spec();
+        self.theme_editor_draft = maker_default_theme_editor_spec();
         self.theme_editor_selected_stop = self.theme_editor_draft.colors.first().map(|_| 0);
         self.theme_editor_drag_stop = None;
     }
@@ -1092,7 +1089,7 @@ impl Default for MakerShellSettings {
     fn default() -> Self {
         Self {
             theme: UiTheme::ZedLight,
-            yggui_theme: default_theme_editor_spec(),
+            yggui_theme: maker_default_theme_editor_spec(),
             finish: ShellFinish::Sleek,
             notification_sound: true,
             sidebar_open: true,
@@ -1100,6 +1097,41 @@ impl Default for MakerShellSettings {
             right_panel_mode: RightPanelMode::Config,
         }
     }
+}
+
+fn maker_default_theme_editor_spec() -> YgguiThemeSpec {
+    YgguiThemeSpec {
+        colors: vec![
+            YgguiThemeColorStop {
+                color: "#9caed8".to_owned(),
+                x: 0.34,
+                y: 0.24,
+                alpha: 0.62,
+            },
+            YgguiThemeColorStop {
+                color: "#b8a1ff".to_owned(),
+                x: 0.56,
+                y: 0.32,
+                alpha: 0.46,
+            },
+            YgguiThemeColorStop {
+                color: "#dfe8ef".to_owned(),
+                x: 0.74,
+                y: 0.74,
+                alpha: 0.34,
+            },
+        ],
+        brightness: 0.50,
+        grain: 0.08,
+    }
+}
+
+fn normalize_shell_settings(settings: MakerShellSettings) -> MakerShellSettings {
+    let mut next = settings;
+    if next.yggui_theme == default_theme_editor_spec() {
+        next.yggui_theme = maker_default_theme_editor_spec();
+    }
+    next
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1497,7 +1529,7 @@ fn app() -> Element {
                     on_toggle_maximized: move |_| toggle_maximized(state),
                 }
                 div {
-                    style: "display:flex; flex:1; min-height:0; overflow:hidden;",
+                    style: shell_body_row_style(),
                     SideRailShell {
                         visible: snapshot.sidebar_open,
                         width_px: LEFT_RAIL_WIDTH,
@@ -4047,7 +4079,8 @@ fn load_shell_settings() -> Result<MakerShellSettings> {
         return Ok(MakerShellSettings::default());
     }
     let payload = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    Ok(serde_json::from_slice(&payload)?)
+    let settings = serde_json::from_slice(&payload)?;
+    Ok(normalize_shell_settings(settings))
 }
 
 fn save_shell_settings(settings: &MakerShellSettings) -> Result<()> {
@@ -4736,6 +4769,10 @@ fn left_rail_container_style() -> &'static str {
 
 fn right_rail_container_style() -> &'static str {
     "display:flex; flex-direction:column; height:100%; margin-left:0; padding-left:0; background:transparent; box-shadow:none;"
+}
+
+fn shell_body_row_style() -> &'static str {
+    "display:flex; flex:1; min-height:0; overflow:hidden; background:color-mix(in srgb, var(--maker-shell-clarity-fill) 18%, transparent);"
 }
 
 fn utility_icon_button_style(active: bool) -> String {
