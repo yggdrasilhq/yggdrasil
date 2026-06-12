@@ -174,6 +174,7 @@ echo "Starting build pipeline for profile: $PROFILE"
 retry_cleanup_hash_mismatch() {
   echo "Transient Debian archive mismatch detected, clearing live-build caches before retry..."
   rm -rf     ./cache/indices.bootstrap     ./cache/packages.bootstrap     ./cache/packages.chroot     ./cache/bootstrap/var/lib/apt/lists     ./chroot/var/lib/apt/lists     ./chroot/var/cache/apt/archives 2>/dev/null || true
+  rm -rf     ./cache/indices.binary     ./cache/packages.binary     ./binary/var/cache/apt/archives     ./binary/var/lib/apt/lists 2>/dev/null || true
 }
 
 run_with_hash_mismatch_retry() {
