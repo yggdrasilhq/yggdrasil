@@ -419,6 +419,7 @@ ca-certificates
 ssl-cert
 
 # Core networking
+chrony
 network-manager
 wpasupplicant
 wireless-regdb
