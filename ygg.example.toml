@@ -36,3 +36,28 @@ intel_arc_sriov_vf_count = 7
 intel_arc_sriov_pf_pci = ""
 intel_arc_sriov_device_id = "0x56a0"
 intel_arc_sriov_bind_vfs = "vfio-pci"
+
+# --- Disk health alerting -------------------------------------------------
+# smartd watches every disk and mails when reallocated / pending / uncorrectable
+# sector counts GROW, or when a drive crosses the critical temperature.
+# Delivery needs a smarthost: the image has no local MTA, it relays via msmtp.
+# Leave alert_email empty to install smartd but send no mail.
+alert_email = ""                        # e.g. "alerts@example.com"
+smtp_relay_host = ""                    # e.g. "192.0.2.25" -- a reachable MTA
+smtp_relay_port = 25
+mail_from = "root@yggdrasil.example"
+# EHLO must be an FQDN. A bare hostname makes strict MTAs reject with
+# "550 Invalid EHLO domain" and every alert is silently lost.
+mail_ehlo_domain = "yggdrasil.example"
+
+# --- Jewel backup ---------------------------------------------------------
+# Incremental `zfs send` replication of the datasets you cannot re-download,
+# onto a SECOND pool. Received copies are readonly and never mount, so they
+# can never shadow the live paths. Full send on first run, -I incrementals after.
+jewel_backup_enable = false
+jewel_backup_dest = ""                  # receiving dataset, e.g. "bpool/backup"
+jewel_backup_datasets = ""              # space separated, e.g. "rpool/data/docs rpool/data/photos"
+jewel_backup_src_strip_prefix = ""      # trimmed from each source to form the dest path, e.g. "rpool/data/"
+jewel_backup_oncalendar = "*-*-* 04:30:00 UTC"
+jewel_backup_keep_src = 3               # snapshots kept on the source (incremental base + slack)
+jewel_backup_keep_dst = 30              # snapshots kept on the destination (the backup history)
