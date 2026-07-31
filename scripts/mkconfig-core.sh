@@ -711,6 +711,64 @@ EOF
 chmod +777 config/hooks/normal/9108-setup-nas-users.hook.chroot
 fi
 
+# --- Time Synchronisation ---
+#
+# `chrony` is already in ygg.list.chroot, but the package alone is not enough:
+# the image shipped no /etc/chrony/chrony.conf and never enabled the unit, so a
+# booted host ran with NO time daemon at all (`timedatectl` → "NTP service:
+# n/a"). Measured on manin 2026-07-31: the clock was 72 s slow, and because its
+# LXCs share the host's CLOCK_REALTIME, that one wrong clock made every TOTP on
+# the fleet impossible — 72 s is 2.4 TOTP windows and servers accept at most ±1.
+# A live image cannot keep a fix made at runtime, so both the config and the
+# enablement have to be baked here.
+
+YGG_NTP_SERVERS="${YGG_NTP_SERVERS:-time.cloudflare.com time.google.com}"
+YGG_NTP_ALLOW="${YGG_NTP_ALLOW:-192.168.0.0/22 10.0.3.0/24}"
+
+mkdir -p config/includes.chroot/etc/chrony
+{
+    cat <<'EOF'
+# Managed by yggdrasil mkconfig — edit scripts/mkconfig-core.sh, not this file.
+
+pool 2.debian.pool.ntp.org iburst
+EOF
+    for ntp_server in $YGG_NTP_SERVERS; do
+        echo "server ${ntp_server} iburst"
+    done
+    cat <<'EOF'
+
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+ntsdumpdir /var/lib/chrony
+
+# STEP, do not slew, and keep doing so.
+#
+# The default `makestep 1.0 3` steps only during the first three updates. A live
+# image boots every time with an unsynced clock, and any drift appearing after
+# those three updates is then slewed at chrony's ~83 ppm ceiling — a 72 s offset
+# would take ~10 days to close. Unbounded stepping is the correct trade here.
+makestep 1.0 -1
+
+# Keep the RTC aligned so a boot before the network is up starts close.
+rtcsync
+EOF
+    if [[ -n "${YGG_NTP_ALLOW// /}" ]]; then
+        echo ""
+        echo "# Serve time to the LAN and the LXC bridge."
+        for ntp_allow in $YGG_NTP_ALLOW; do
+            echo "allow ${ntp_allow}"
+        done
+    fi
+} > config/includes.chroot/etc/chrony/chrony.conf
+
+tee config/hooks/normal/9109-enable-chrony.hook.chroot <<'EOF'
+#!/bin/bash
+# The package ships the unit disabled; without this the image boots with no time
+# daemon and nothing ever corrects the clock.
+systemctl enable chrony
+EOF
+chmod +777 config/hooks/normal/9109-enable-chrony.hook.chroot
+
 # --- Enhanced SSH Server Configuration ---
 
 # 1. Configure sshd_config for key-based root login
