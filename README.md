@@ -343,4 +343,20 @@ Keep your real values in `ygg.local.toml` and other gitignored local config file
 
 ## License
 
-Apache-2.0
+- Code: **GPL-3.0-or-later**, full text in `LICENSE`
+- Documentation: **CC BY-SA 4.0**, see `LICENSE-CC-BY-SA-4.0`
+- Names and logos: neither licence covers them — see `TRADEMARKS.md`
+
+Copyright 2026 Avikalpa Kundu <avi@gour.top>.
+
+Yggdrasil was Apache-2.0 until 2026-08-01. Anything published under that licence
+stays available under it; everything from the relicensing commit onward is
+GPL-3.0-or-later.
+
+This licence covers *this repository* — the build configuration, scripts, and
+docs. An image built from it also contains Debian packages and other upstream
+software, each of which keeps its own licence and carries it into the image.
+
+Contributions need a signed CLA, because this project is also licensed
+commercially. See `CONTRIBUTING.md` and `CLA.md` — it is a page, you keep your
+copyright, and it takes one line to sign.
