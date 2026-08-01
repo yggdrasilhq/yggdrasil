@@ -17,8 +17,6 @@ dist/
 runtime-cache/
 runtime-target/
 target/
-yggdrasil-maker/artifacts/
-yggdrasil-maker/target/
 
 *.iso
 *.hybrid.iso

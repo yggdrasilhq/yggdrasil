@@ -1,0 +1,35 @@
+# Its own workspace root. yggdrasil is a Debian live-build repo, not a Rust
+# one, so this package must not be inherited into whatever workspace happens to
+# sit above the checkout.
+[workspace]
+
+[package]
+name = "yggdrasil-maker"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "The front door to building a Yggdrasil image, as a libyggterm app in the yggterm viewport."
+license = "GPL-3.0-or-later"
+repository = "https://github.com/yggdrasilhq/yggdrasil"
+readme = "README.md"
+
+[[bin]]
+name = "yggdrasil-maker"
+path = "src/main.rs"
+
+[dependencies]
+# STANDARD engine with padding — this is what the yggterm daemon's declare
+# parser decodes with, so anything else silently fails to parse.
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Synchronous, tiny, and it accepts an already-bound TcpListener — which is
+# what lets us learn the port before we announce it, with no bind/close race.
+tiny_http = "0.12"
+# The overlay's ✕ writes \x03 to the PTY, so SIGINT is the PRIMARY user-facing
+# exit path, not an edge case. SIGTERM must unwind the same way or a logout
+# leaves the daemon holding a surface nobody is serving.
+signal-hook = "0.3"
+
+[profile.release]
+strip = true

@@ -404,213 +404,66 @@ Examples:
 
 This section is intentionally project-specific.
 
+`yggdrasil-maker` is a libyggterm app. It does not own a window, a titlebar, a
+theme editor or a window-manager story: it declares a web surface on its own PTY
+and yggterm renders it. Everything the previous desktop app specified about
+shell chrome, custom titlebars, meta-key layers and app-control probes now
+belongs to yggterm, and this overlay is deliberately much smaller as a result.
+
 ### Main artifact
 
-- a guided build studio for shaping, validating, and exporting Debian live systems
+The build itself — what this checkout would produce, what it would run to get
+there, and what happened when it ran.
 
 ### Navigation model
 
-- a left rail of saved setups first, with a secondary recent-artifacts section beneath them
+One viewport surface with a segmented Home / Plan / Run switch.
+
+- Not three surfaces: the flows are one task at three depths.
+- Not a sidebar: the surface is the whole viewport, and yggterm already owns the
+  one control that must not be duplicated — the ⌨ Terminal toggle that brings
+  the PTY back to the front.
+- The segmented pill follows `Core System` → `Control language`.
 
 ### Preferred user-facing terms
 
-- `Setup`
-- `Build`
-- `Artifact`
-- `Profile`
-- `Preset`
+| Prefer | Over |
+| --- | --- |
+| checkout | workspace, project |
+| config | setup, preset |
+| profile | variant, flavour, edition |
+| knob | option, setting, field |
+| plan | preview, simulate |
+| stage | step, phase, task |
 
-Avoid by default:
+### Honesty rules
 
-- `Workspace`
-- `Project`
-- `Session`
-- `Pipeline`
-- `Job`
+These are visual rules because they are mostly about what may be *drawn*.
 
-### Navigation behavior
+- **No simulated progress.** A stage that has not started has no percentage, so
+  no bar is drawn for it. Progress is only ever shown for something really
+  running that really reports it.
+- **A cost is always visible.** Every stage carries what it really costs —
+  seconds and rootless, needs root, or root and tens of minutes — so nothing
+  looks one click away when it is forty minutes and a password away.
+- **An unavailable fact says so.** When something cannot be read from the
+  checkout, the UI shows that it could not be read, with the error. It never
+  falls back to a plausible remembered value.
+- **A command line is never hidden.** Any flow that would run something shows
+  the argv it would run.
 
-- the primary navigation object is the saved setup, not a file tree
-- the top of the rail should prioritize active and recent setups
-- the lower part of the rail may show recent artifacts, but those should remain secondary to setup creation and editing
-- the rail should not read like a filesystem browser, logs viewer, or package manager
-- a saved setup row should make the journey stage legible at a glance
-- artifact rows should feel like outputs from setups, not peer objects with equal weight
-- the `Recent Artifacts` section should be collapsible in v1
-- `Recent Artifacts` may auto-expand when there is a fresh successful output, but should otherwise stay visually secondary
-- on compact windows, collapse the right utility surface before collapsing the left rail
-- the left rail should remain visible longer because it is the user’s orientation system
+### Log surface
 
-### Creation language
+The run log is the one place monospace dominates.
 
-- primary quick actions should stay concrete and literal:
-  - `New Setup`
-  - `Build / Export`
-  - `Open Artifact`
-  - `Reveal Artifact`
-
-### Shared YggUI Portability Rules
-
-`yggdrasil-maker` is intentionally a simpler app than `yggterm`, but it should still act as a portability harness for the shared Ygg UI stack.
-
-- do not fork the shell language just because the app is simpler
-- prefer shared `yggui` primitives over app-local one-off replacements whenever a primitive exists or is being stabilized
-- treat `yggdrasil-maker` as a proving ground for the reusable Ygg shell, not a separate visual system
-- when a shell feature feels too heavy for maker, simplify the behavior, not the design language
-
-### Shell Theme And Background
-
-The app should inherit the Ygg shell treatment rather than inventing a flatter substitute.
-
-- keep the shared interface font and monospace defaults from the core system
-- support the `yggui` custom window background system, including the calm tinted shell background, blur, and sleek surface treatment
-- prefer an Arc-like shell-mode or theme selector with a sane default rather than a raw settings form
-- defaults should always look finished, calm, and premium before any user theme customization
-- the main workspace should stay calmer and more neutral than the surrounding shell chrome
-- maker may ship with a narrower theming surface than yggterm, but the underlying shell language should remain compatible
-- in v1, keep the full shared theming system under the hood but expose only a minimal selector surface
-
-### Custom Titlebar
-
-The app should use the shared Ygg custom titlebar direction, not generic native chrome plus app content underneath.
-
-- use the Ygg custom titlebar as the default reference
-- titlebar content should stay concise and operational:
-  - app identity
-  - active setup name
-  - current journey stage or build status
-  - the primary shell-truth toggle or equivalent utility affordance
-- the titlebar should feel like part of the shell scaffold, not a separate toolbar
-- if shared `yggui` titlebar primitives exist, prefer them over maker-local markup
-
-### Header behavior
-
-- the main header system should be shared between the titlebar and the main studio canvas
-- the setup name in chrome is the primary re-entry anchor
-- the journey stage should stay visible without duplicating loud status cards
-- shell-truth access should always be nearby, but it should not permanently crush the main canvas on compact windows
-- a compact shell should prefer a toggleable utility overlay or drawer rather than a permanently docked right rail
-- header copy should remain operational and brief, never aspirational or marketing-heavy
-
-### Alt / Meta-Key Type System
-
-`yggdrasil-maker` should preserve the Ygg keyboard-discovery language even if the action set is smaller than in `yggterm`.
-
-- `Alt` should remain the entry point into visible command-hint mode
-- hint chips should appear on the live controls they target
-- maker can use a smaller command vocabulary, but it should not invent a different meta-key grammar
-- overlays should stay lightweight, reversible with `Esc`, and compatible with the broader Ygg shell expectations
-
-V1 command vocabulary:
-
-- `New Setup`
-- `Build / Export`
-- `Shell Truth`
-- `Focus Studio`
-
-### Observability And App Control
-
-The app should keep the Ygg local observability posture because this repo is also testing the portable shell stack.
-
-- retain the dtrace-like local observability and interaction-debugging mindset from the Ygg ecosystem
-- maker should stay compatible with the `yggui-app-control` style of inspection where practical, such as app state, focus, and screenshot-oriented debugging
-- debug instrumentation should explain layout, overlay, and interaction failures without contaminating the product UI
-- local observability is part of the design system because it helps stabilize reusable shell behavior across apps
-
-### Main workspace behavior
-
-- the main workspace should feel like a guided studio, not a dashboard mosaic
-- the main task is shaping a setup toward a truthful build/export outcome
-- the canvas should privilege sequence, clarity, and confidence over dense operational detail
-- the workspace should feel compatible with Ygg shell primitives while still being quieter and simpler than yggterm
-- the guided flow should remain explicit:
-  - `Outcome`
-  - `Profile`
-  - `Personalize`
-  - `Review`
-  - `Build`
-  - `Boot`
-- each stage should feel like progress toward a real machine, not like a tabbed settings taxonomy
-- the main canvas should avoid nested card stacks wherever a simpler sectional layout will do
-
-### Artifact and export surfaces
-
-- artifact surfaces should feel like outputs of setups, not like detached files
-- exported artifacts should remain legible, revealable, and easy to inspect from the shell
-- build truth, artifact manifests, and output paths should use the shared utility-surface logic rather than ad hoc panels
-- successful completion should advance into a dedicated post-build success step, not collapse into a toast or raw manifest dump
-- the success step should feel like “artifact ready” rather than “job complete”
-- non-Linux and export-only cases should still feel honest and complete, not like degraded failure states
-- raw logs should remain available, but should never be the first thing a normal user sees after success
-
-### Right rail modes
-
-The canonical utility-surface modes for maker are:
-
-- `Config`
-- `Plan`
-- `Build`
-
-Rules:
-
-- avoid a vague `Inspector` label in the product UI
-- avoid splitting `Artifacts` into a peer top-level mode unless the artifact surface grows beyond what `Build` can hold cleanly
-- `Build` may contain artifact-manifest, output-path, and reveal/open affordances as part of one truthful output surface
-- on compact windows, these modes should move into a toggleable overlay or drawer rather than stay permanently docked
-
-### Success moment
-
-The canonical success moment for maker is a dedicated screen or journey step after `Build`.
-
-It should:
-
-- clearly announce that the artifact is ready
-- make the primary next actions obvious
-- summarize proof and output truth without dumping raw logs first
-- feel calm, confident, and slightly celebratory
-
-It should not:
-
-- rely on a toast as the main success communication
-- force the user to parse raw manifest text before they can act
-- look like a generic CI job completion panel
-
-V1 primary actions:
-
-- `Reveal Artifact`
-- `Open Build Details`
-- `Start Another Setup`
-
-V1 success content should include:
-
-- artifact name and output type
-- profile used
-- smoke-test result or equivalent proof summary
-- output path
-- the three primary actions above
-
-### Build details surface
-
-The `Build` utility mode should show:
-
-- current build status
-- the truthful next action when idle, running, failed, or complete
-- artifact manifest or export summary when available
-- raw event stream below the summary layer, not above it
-
-The order should be:
-
-1. status
-2. proof / outcome summary
-3. action affordances
-4. manifest or output details
-5. raw stream
+- `JetBrains Mono`, per `Core System`.
+- stderr is tinted with the warning colour; stdout stays default ink.
+- The exit line is quiet, not celebratory. A build finishing is information.
+- It follows the tail only when the reader is already at the tail.
 
 ### Domain content typography
 
-Maker should stay conservative and crisp.
-
-- use the shared interface font for all standard UI copy
-- use the shared monospace font for config, paths, manifests, and build/event text
-- do not introduce a third decorative display face in v1
-- success and stage headlines should rely on scale, spacing, and copy quality rather than novelty typography
+- Config keys, values, paths and command lines are monospace.
+- Prose, labels and section headers are the interface font.
+- A knob's `# hint` from the TOML is prose, not code, even though its source is a
+  comment in a config file.

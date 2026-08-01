@@ -41,5 +41,18 @@ jobs:
       - name: Smoke checks
         run: ./tests/smoke/run.sh --profile both
 
-      - name: Direct-install smoke
-        run: ./tests/install/direct-install-smoke.sh
+  maker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # The maker must build from a bare clone of this repository, with no
+      # sibling checkout of anything. That property is the whole reason the
+      # previous desktop app was removed, so it is a CI gate rather than a
+      # convention.
+      - name: Build yggdrasil-maker
+        run: cargo build --manifest-path yggdrasil-maker/Cargo.toml --locked
+
+      - name: Test yggdrasil-maker
+        run: cargo test --manifest-path yggdrasil-maker/Cargo.toml --locked

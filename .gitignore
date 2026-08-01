@@ -56,3 +56,6 @@ chroot.packages.*
 config/includes.chroot/root/.ssh/
 .gstack/
 .agents_chat/
+
+# yggdrasil-maker build output
+yggdrasil-maker/target/

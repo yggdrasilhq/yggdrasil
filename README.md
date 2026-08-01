@@ -4,16 +4,16 @@
 
 It produces a Debian sid live ISO for the machine that becomes your storage spine, your LXC host, your recovery anchor, and often the quiet box in the corner that the rest of your setup eventually depends on.
 
-This repository now carries both halves of that story:
+This repository carries both halves of that story:
 
-- `yggdrasil-maker` is the guided front door for people who want a premium app and a native config they can keep
-- `mkconfig.sh` remains the direct operator path for people who want to stay close to the shell truth
+- `mkconfig.sh` is the direct operator path, and the whole build truth
+- `yggdrasil-maker` is a front door onto that same path, in the yggterm viewport
 
 The public contract is simple:
 
-- GUI first
-- native config stays real
-- Docker is an execution substrate, not the product
+- the shell path is the product; the maker is a way in, not a gate
+- native config stays real, and nothing is stored in a format only the maker reads
+- the maker shows you the command lines it would run, so you can run them yourself
 - the app's job ends when your custom ISO is ready and you know how to boot it
 - long-form docs still belong in `yggdocs`
 
@@ -21,7 +21,7 @@ The public contract is simple:
 
 A simple mental model:
 
-- `yggdrasil-maker` personalizes and builds the ISO
+- `yggdrasil-maker` is the front door that plans and drives the build
 - `yggdrasil` contains the native build truth and host runtime wiring
 - `yggclient` configures the machines you use every day
 - `yggsync` moves data between them
@@ -47,10 +47,11 @@ A simple mental model:
            +-------------------------+----------------------+
                                      ^
                                      |
-                               +-----------+
-                               | maker app |
-                               | GUI first |
-                               +-----------+
+                              +--------------+
+                              |  maker app   |
+                              | in the ygg-  |
+                              | term viewport|
+                              +--------------+
 ```
 
 Mermaid version:
@@ -58,7 +59,7 @@ Mermaid version:
 ```mermaid
 flowchart TD
   D[yggdocs<br/>quickstart, wiki, dev]
-  C[yggdrasil-maker<br/>guided ISO studio]
+  C[yggdrasil-maker<br/>build front door]
   S[yggdrasil<br/>server ISO + host runtime]
   Y[yggsync<br/>sync engine]
   L[yggclient laptop]
@@ -112,21 +113,21 @@ Use this repository directly if:
 
 Use `yggdrasil-maker` if:
 
-- you want sensible defaults first
-- you want a guided personalization flow
-- you are new to the ecosystem
-- you want a premium ISO studio that still emits the native config file
+- you want to see what a build would run before it runs
+- you want the checkout's profiles, configs and knobs listed for you
+- you are new to the ecosystem and want the shape of it in one view
+- you already live in yggterm and would rather not leave it
 
 The important design rule is this:
 
-- `yggdrasil-maker` is the canonical guided path
+- the shell path is the truth; the maker never hides it
 - the native config files stay real and editable
 - the path from beginner to operator stays open
 
 ## Repository Boundaries
 
 - `yggdrasil`: ISO composition, hooks, package lists, host runtime wiring
-- `yggdrasil-maker`: guided GUI plus a stable secondary automation CLI
+- `yggdrasil-maker`: the build front door, as a libyggterm app in the yggterm viewport
 - `yggclient`: endpoint automation for laptops, desktops, and Android/Termux
 - `yggsync`: sync engine and job runner
 - `yggdocs`: quickstart, wiki, recipes, and developer references
@@ -148,68 +149,33 @@ That means a power user can stay here permanently without `yggdrasil-maker`, whi
 
 ## Quick Start
 
-### Guided path with `yggdrasil-maker`
+### Front door with `yggdrasil-maker`
 
-Download the latest native build from GitHub Releases:
-
-- Linux and macOS: `yggdrasil-maker-<platform>.tar.gz`
-- Windows: `yggdrasil-maker-<platform>.zip`
-- automation metadata: checksums plus `yggdrasil-maker-release-manifest.json`
-
-The public rule is simple:
-
-- native downloads are the main path
-- the GUI is the canonical product
-- `curl | sh` and `irm ... | iex` exist for automation and direct installs
-
-Direct install for automation and power users:
+`yggdrasil-maker` is a libyggterm app: run it inside a yggterm terminal and it
+takes over the viewport; run it anywhere else and it serves the same UI on
+loopback and prints the URL.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/yggdrasil/main/scripts/install.sh | sh
+cargo build --release --manifest-path yggdrasil-maker/Cargo.toml
+./yggdrasil-maker/target/release/yggdrasil-maker
 ```
 
-On Windows:
+It has three flows:
 
-```powershell
-irm https://raw.githubusercontent.com/yggdrasilhq/yggdrasil/main/scripts/install.ps1 | iex
-```
+- **Home** lists what this checkout actually contains: the profiles parsed from
+  `mkconfig.sh`'s own usage block, every `ygg*.toml` with its knobs, package
+  lists, hooks, built ISOs, and whether `lb` is installed
+- **Plan** renders exactly what a build would run without running it, including
+  the resolved environment and the config delta against `ygg.example.toml`
+- **Run** executes the config stage for real and streams the log
 
-The packaging scripts that generate the native release assets live in:
+The maker is a front door, never a proprietary format trap, and never charged
+for. Everything it does, `./mkconfig.sh` also does from a shell — which is why
+the Plan flow shows you the command lines rather than hiding them. The image
+stages still need root and tens of minutes, and the maker shows them as staged
+steps rather than pretending to run them.
 
-- [scripts/package-maker-platform-release.sh](/home/user/gh/yggdrasil/scripts/package-maker-platform-release.sh)
-- [scripts/package-maker-release-manifest.sh](/home/user/gh/yggdrasil/scripts/package-maker-release-manifest.sh)
-- [docs/yggdrasil-maker-distribution.md](/home/user/gh/yggdrasil/docs/yggdrasil-maker-distribution.md)
-
-The first foundation release exposes a stable automation-facing CLI while the GUI shell is being built. The build contract is already the intended one:
-
-- `yggdrasil-maker` owns named setups, preset mapping, native config materialization, and Docker invocation planning
-- the version-matched build container runs the existing shell truth
-- non-Linux users stay on the honest export/handoff path until local-build support is proven
-
-The current app shape is now:
-
-- packaged native builds enable the first desktop shell by default
-- the CLI remains available as the stable automation surface
-- saved setups live in the app data directory and strip sensitive fields unless the user explicitly chooses to remember them
-- Linux `build run` performs real Docker-backed local builds
-- non-Linux `build run` produces an export bundle plus handoff manifest instead of pretending a local build happened
-
-Example in-repo foundation flow:
-
-```bash
-cargo run --manifest-path yggdrasil-maker/Cargo.toml --bin yggdrasil-maker -- setup new --name "Lab NAS" --preset nas --output ./lab-nas.maker.json
-cargo run --manifest-path yggdrasil-maker/Cargo.toml --bin yggdrasil-maker -- build plan --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --json
-./scripts/build-maker-image.sh
-cargo run --manifest-path yggdrasil-maker/Cargo.toml --bin yggdrasil-maker -- build run --setup ./lab-nas.maker.json --authorized-keys-file ~/.ssh/authorized_keys --repo-root "$(pwd)"
-./scripts/package-maker-platform-release.sh linux-x86_64
-./scripts/package-maker-release-manifest.sh
-```
-
-For desktop development right now, keep a sibling checkout of `~/gh/yggterm`. `yggdrasil-maker` reuses the in-flight `yggui` crates directly from that repo until the shared shell layer is split into its own portable home.
-
-Sensitive paths are permission-gated by design, so the automation CLI accepts runtime flags such as `--authorized-keys-file` instead of silently persisting those values unless the user explicitly opts in later.
-
-For GUI builds, packaging now compiles with the `desktop-ui` feature so the shipped `yggdrasil-maker` binary opens the native shell when launched without subcommands.
+Design notes and the full control-flow map: `yggdrasil-maker/docs/adr-0001-libyggterm-app.md`.
 
 ### Direct path with `mkconfig.sh`
 
