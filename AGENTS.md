@@ -8,6 +8,12 @@ Build and release dual-profile Debian live ISOs (`server` and `kde`) with ZFS + 
 
 - Always build both profiles.
 - Never ship if smoke tests fail for either profile.
+- Treat stale artifact execution as destructive. Do not execute archived ISO builders, old release binaries, cached helper tools, or retained artifacts just to inspect their version. Never glob-run historical artifacts. Read metadata, manifests, filenames, checksums, changelogs, and git tags first; execute only the intended current build/tool path.
+- Before building, publishing, or installing any ISO/helper update, prove the intended version from canonical sources: current branch, commit SHA, changelog/release notes, build config, package lists, generated checksums, and smoke output. If any source says an older version than expected, stop and investigate instead of "just trying" the artifact.
+- Never replace a running or published Yggdrasil component with an older artifact unless the user explicitly requests rollback. If rollback is requested, write down the target version/date, snapshot relevant config/state first, and keep the rollback artifact clearly named so it cannot masquerade as the latest build.
+- When using external tools such as `ygg-cli`, verify the active executable path and version from the canonical install/checkout, not from stale caches or old release directories.
+- ⛔ **Never commit a dirty `config/`. This repo is PUBLIC and `config/` is generated output that carries SITE VALUES.** `mkconfig.sh` renders it from `scripts/mkconfig-core.sh` plus whatever `ygg.local.toml` (gitignored) and the `YGG_*` environment supply, so a tree generated on a real machine holds that machine's macvlan CIDR, alert recipients and NTP server, while the committed copy holds only the generic defaults. Regenerating therefore *always* leaves `config/` dirty, and it is never a diff worth staging: `git checkout -- config/` and delete the untracked files instead. Checked on 2026-08-02, a routine post-build tree carried 7 such lines.
+- `config/` is also generated **per profile**, so a tree from a server-only run shows the KDE hooks (`9200-kde`, `9201-set-users`) and the broad laptop firmware as deletions. Those are not removals to commit; they come back with `--with-kde`. Fix build behaviour in `scripts/mkconfig-core.sh`, never in the rendered file, which the next run overwrites.
 - Keep profile-specific ISO retention policy:
   - latest ISO from last 3 days
   - last 2 older releases
