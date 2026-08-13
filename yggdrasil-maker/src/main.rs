@@ -12,6 +12,7 @@
 mod discover;
 mod plan;
 mod run;
+mod schema;
 mod server;
 mod surface;
 
@@ -110,9 +111,12 @@ fn real_main() -> Result<(), String> {
     surface::write_launcher_manifest();
 
     let runner = run::Runner::new(root.clone());
+    let stamp = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let ui = server::Ui {
         root: root.clone(),
         runner,
+        view: std::sync::Mutex::new(schema::View::default()),
+        stamp: std::sync::Arc::clone(&stamp),
     };
     std::thread::spawn(move || server::serve(listener, ui));
 
@@ -135,7 +139,7 @@ fn real_main() -> Result<(), String> {
             eprintln!("[yggdrasil-maker] {url}");
             eprintln!("[yggdrasil-maker] press Ctrl-C, or the surface's ✕, to close.");
             surface::Surface::new(session, &url, &title)
-                .hold_until_signalled()
+                .hold_until_signalled(&stamp)
                 .map_err(|err| format!("could not install signal handlers: {err}"))?;
             Ok(())
         }
