@@ -288,6 +288,25 @@ The normal output is a bootable live ISO that carries the host runtime choices b
 - optional KDE profile when requested
 - optional SSH key embedding when configured
 
+## Backup Legs
+
+The host's data has two independent backup legs — the stick is the one that
+survives losing the machine:
+
+1. **Leg 1 — live replication:** daily incremental ZFS replication of the
+   irreplaceable datasets onto a second pool on the same machine
+   (`jewel-backup`).
+2. **Leg 2 — the recovery stick:** `scripts/data-snapshot-export.sh`
+   exports each protected dataset's newest backup snapshot as standalone
+   ZFS stream files into a spool; the Ventoy stick carries the ISO **and**
+   the spool, so a rebuilt host restores its data with `zfs recv` — no
+   network, no second pool.
+
+Site values (dataset list, spool, stick mount) live in
+`/etc/yggdrasil/data-export.conf`, generated locally, never committed.
+Full mechanics and the restore procedure:
+`docs/data-snapshot-export.md`.
+
 ## Privacy And Public Hygiene
 
 Do not commit:
