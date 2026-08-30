@@ -19,6 +19,11 @@
 #   zfs recv -F <ds> < full-*.zfs && zfs recv -F <ds> < incr-*.zfs ...
 set -uo pipefail
 
+# One writer at a time — two concurrent exports would interleave `send` into
+# the same stream file and produce a corrupt recovery artifact.
+exec 9>/run/lock/data-snapshot-export.lock
+flock -n 9 || { echo "data-export: another export is running; exiting" >&2; exit 0; }
+
 CONF=/etc/yggdrasil/data-export.conf
 [ -r "$CONF" ] || { echo "data-export: missing config $CONF" >&2; exit 1; }
 # shellcheck source=/dev/null
