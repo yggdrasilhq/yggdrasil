@@ -1,0 +1,49 @@
+{
+  "name": "@ygghq/yggdrasil-maker",
+  "version": "0.1.0",
+  "description": "The yggterm front door to building a Yggdrasil image",
+  "files": [
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "optionalDependencies": {
+    "@ygghq/yggdrasil-maker-linux-x64": "0.1.0",
+    "@ygghq/yggdrasil-maker-linux-arm64": "0.1.0",
+    "@ygghq/yggdrasil-maker-darwin-x64": "0.1.0",
+    "@ygghq/yggdrasil-maker-darwin-arm64": "0.1.0",
+    "@ygghq/yggdrasil-maker-win32-x64": "0.1.0",
+    "@ygghq/yggdrasil-maker-win32-arm64": "0.1.0"
+  },
+  "yggterm": {
+    "app": {
+      "name": "yggdrasil-maker",
+      "label": "Yggdrasil Maker",
+      "icon": "🌲",
+      "binary": "yggdrasil-maker",
+      "verbs": [
+        {
+          "id": "open",
+          "label": "Open Yggdrasil Maker",
+          "args": [],
+          "row_spawn": true
+        }
+      ],
+      "context_menu": {
+        "enabled": true,
+        "contexts": ["workspace", "session"],
+        "verbs": ["open"]
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yggdrasilhq/yggdrasil.git",
+    "directory": "yggdrasil-maker"
+  },
+  "license": "GPL-3.0-or-later",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

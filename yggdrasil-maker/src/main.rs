@@ -108,8 +108,6 @@ fn real_main() -> Result<(), String> {
         // write does not have to think about it.
         let _ = std::fs::create_dir_all(&dir);
     }
-    surface::write_launcher_manifest();
-
     let runner = run::Runner::new(root.clone());
     let stamp = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let ui = server::Ui {
