@@ -55,7 +55,8 @@ jobs:
             win32-x64) pkg_os=win32; pkg_cpu=x64 ;;
             win32-arm64) pkg_os=win32; pkg_cpu=arm64 ;;
           esac
-          printf '{"name":"@ygghq/yggdrasil-maker-%s","version":"0.1.0","bin":{"yggdrasil-maker":"bin/yggdrasil-maker"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/yggdrasil.git","directory":"yggdrasil-maker"}}\n' "$TARGET" "$pkg_os" "$pkg_cpu" > "../pack/@ygghq/yggdrasil-maker-$TARGET/package.json"
+          VER=$(node -p "require('./package.json').version")
+          printf '{"name":"@ygghq/yggdrasil-maker-%s","version":"%s","bin":{"yggdrasil-maker":"bin/yggdrasil-maker"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/yggdrasil.git","directory":"yggdrasil-maker"}}\n' "$TARGET" "$VER" "$pkg_os" "$pkg_cpu" > "../pack/@ygghq/yggdrasil-maker-$TARGET/package.json"
       - name: Publish platform package
         shell: bash
         working-directory: pack/@ygghq/yggdrasil-maker-${{ matrix.target }}

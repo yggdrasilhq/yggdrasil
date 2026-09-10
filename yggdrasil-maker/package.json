@@ -1,6 +1,6 @@
 {
   "name": "@ygghq/yggdrasil-maker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The yggterm front door to building a Yggdrasil image",
   "files": [
     "README.md",
@@ -8,14 +8,20 @@
     "NOTICE"
   ],
   "optionalDependencies": {
-    "@ygghq/yggdrasil-maker-linux-x64": "0.1.0",
-    "@ygghq/yggdrasil-maker-linux-arm64": "0.1.0",
-    "@ygghq/yggdrasil-maker-darwin-x64": "0.1.0",
-    "@ygghq/yggdrasil-maker-darwin-arm64": "0.1.0",
-    "@ygghq/yggdrasil-maker-win32-x64": "0.1.0",
-    "@ygghq/yggdrasil-maker-win32-arm64": "0.1.0"
+    "@ygghq/yggdrasil-maker-linux-x64": "0.1.1",
+    "@ygghq/yggdrasil-maker-linux-arm64": "0.1.1",
+    "@ygghq/yggdrasil-maker-darwin-x64": "0.1.1",
+    "@ygghq/yggdrasil-maker-darwin-arm64": "0.1.1",
+    "@ygghq/yggdrasil-maker-win32-x64": "0.1.1",
+    "@ygghq/yggdrasil-maker-win32-arm64": "0.1.1"
+  },
+  "ynpm": {
+    "build": "cargo build --release",
+    "bins": { "yggdrasil-maker": "target/release/yggdrasil-maker" },
+    "watch": "@ygghq/yggdrasil-maker"
   },
   "yggterm": {
+    "schema": 1,
     "app": {
       "name": "yggdrasil-maker",
       "label": "Yggdrasil Maker",
