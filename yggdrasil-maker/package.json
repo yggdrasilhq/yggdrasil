@@ -2,7 +2,11 @@
   "name": "@ygghq/yggdrasil-maker",
   "version": "0.1.1",
   "description": "The yggterm front door to building a Yggdrasil image",
+  "bin": {
+    "yggdrasil-maker": "bin/yggdrasil-maker"
+  },
   "files": [
+    "bin/",
     "README.md",
     "LICENSE",
     "NOTICE"
