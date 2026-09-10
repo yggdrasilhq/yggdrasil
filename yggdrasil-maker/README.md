@@ -5,6 +5,13 @@ The front door to building a Yggdrasil image, in the yggterm viewport.
 Run it inside a yggterm terminal and it contributes its panes to the GUI. Run it
 anywhere else and it serves the same UI over loopback and prints the URL.
 
+## Quick start
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/yggterm/main/scripts/install.sh | sh
+ynpx @ygghq/yggdrasil-maker
+```
+
 ## It ships no UI code inside yggterm
 
 The maker used to declare a **web surface** — a child web engine, with its own
@@ -24,11 +31,8 @@ invented for it, and there is no context menu anywhere in it.
 The loopback web UI is unchanged and still serves the standalone path, because
 the app is a normal local web app that happens to know how to ask for a surface.
 
-```sh
-cd yggdrasil-maker
-cargo build --release
-./target/release/yggdrasil-maker            # from anywhere inside the checkout
-```
+For source development, run `cargo build --release` in this directory and
+publish or distribute the dev build with `ynpm dev`.
 
 | Flag | Meaning |
 | --- | --- |

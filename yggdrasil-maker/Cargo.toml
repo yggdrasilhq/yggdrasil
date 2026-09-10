@@ -5,7 +5,7 @@
 
 [package]
 name = "yggdrasil-maker"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.82"
 description = "The front door to building a Yggdrasil image, as a libyggterm app in the yggterm viewport."
