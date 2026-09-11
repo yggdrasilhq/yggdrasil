@@ -1,0 +1,85 @@
+name: ynpm publish yggdrasil-maker
+
+on:
+  push:
+    tags: ["yggdrasil-maker-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux-x64, os: ubuntu-24.04, triple: ""}
+          - {target: linux-arm64, os: ubuntu-24.04-arm, triple: aarch64-unknown-linux-gnu}
+          - {target: darwin-x64, os: macos-15, triple: ""}
+          - {target: darwin-arm64, os: macos-14, triple: ""}
+          - {target: win32-x64, os: windows-2025, triple: ""}
+          - {target: win32-arm64, os: windows-2025, triple: aarch64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: yggdrasil-maker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - name: Build release
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TRIPLE: ${{ matrix.triple }}
+        run: |
+          set -e
+          if [ -n "$TRIPLE" ]; then
+            cargo build --release --target "$TRIPLE"
+            built="target/$TRIPLE/release"
+          else
+            cargo build --release
+            built="target/release"
+          fi
+          case "$TARGET" in win32-*) exe="yggdrasil-maker.exe" ;; *) exe="yggdrasil-maker" ;; esac
+          mkdir -p "../pack/@ygghq/yggdrasil-maker-$TARGET/bin"
+          cp "$built/$exe" "../pack/@ygghq/yggdrasil-maker-$TARGET/bin/yggdrasil-maker"
+          case "$TARGET" in
+            linux-x64) pkg_os=linux; pkg_cpu=x64 ;;
+            linux-arm64) pkg_os=linux; pkg_cpu=arm64 ;;
+            darwin-x64) pkg_os=darwin; pkg_cpu=x64 ;;
+            darwin-arm64) pkg_os=darwin; pkg_cpu=arm64 ;;
+            win32-x64) pkg_os=win32; pkg_cpu=x64 ;;
+            win32-arm64) pkg_os=win32; pkg_cpu=arm64 ;;
+          esac
+          VER=$(node -p "require('./package.json').version")
+          printf '{"name":"@ygghq/yggdrasil-maker-%s","version":"%s","bin":{"yggdrasil-maker":"bin/yggdrasil-maker"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/yggdrasil.git","directory":"yggdrasil-maker"}}\n' "$TARGET" "$VER" "$pkg_os" "$pkg_cpu" > "../pack/@ygghq/yggdrasil-maker-$TARGET/package.json"
+      - name: Publish platform package
+        shell: bash
+        working-directory: pack/@ygghq/yggdrasil-maker-${{ matrix.target }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
+          npm publish --access public --provenance
+
+  publish-main:
+    needs: build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: yggdrasil-maker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance

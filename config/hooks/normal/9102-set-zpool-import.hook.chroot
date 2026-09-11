@@ -1,0 +1,66 @@
+#!/bin/bash
+
+mkdir -p /opt/ygg
+
+tee <<'EOL' /opt/ygg/import-zpool-at-boot
+#!/bin/bash
+
+# change to maybe 'zones' or 'zroot'
+POOL_NAME="zroot"
+
+# Site pools rendered into /etc/default/ygg-import-zpool (YGG_EXTRA_POOLS)
+[ -f /etc/default/ygg-import-zpool ] && . /etc/default/ygg-import-zpool
+
+# Check if the named pool exists
+if ! zpool list "$POOL_NAME" >/dev/null 2>&1; then
+   # Try importing without force
+   zpool import "$POOL_NAME" || {
+       echo "Pool $POOL_NAME not found or cannot be imported"
+       exit 0
+   }
+fi
+
+# Set mountpoint only if pool is imported
+if zpool list "$POOL_NAME" >/dev/null 2>&1; then
+   current_mount=$(zfs get -H -o value mountpoint "$POOL_NAME" 2>/dev/null || echo "")
+   if [ "$current_mount" != "/$POOL_NAME" ]; then
+       zfs set mountpoint="/$POOL_NAME" "$POOL_NAME"
+   fi
+
+   # Handle /var dataset if it exists
+   if zfs list -H -o name | grep -q "^$POOL_NAME/var$"; then
+       current_var_mount=$(zfs get -H -o value mountpoint "$POOL_NAME/var" 2>/dev/null || echo "")
+       if [ "$current_var_mount" != "/var" ]; then
+           zfs set mountpoint=/var "$POOL_NAME/var"
+       fi
+   fi
+fi
+# Extra site pools (EXTRA_POOLS from /etc/default/ygg-import-zpool):
+# e.g. data pools cross-mounted into /zroot/data. Best-effort import so a
+# missing disk never blocks lxc-autostart (which Requires= this service).
+for extra_pool in ${EXTRA_POOLS:-}; do
+    if ! zpool list "$extra_pool" >/dev/null 2>&1; then
+        zpool import "$extra_pool" 2>/dev/null || echo "$extra_pool not present at boot; skipping"
+    fi
+done
+EOL
+chmod +777 /opt/ygg/import-zpool-at-boot
+
+# --- ZFS Service Configuration ---
+tee <<'EOL' /etc/systemd/system/ygg-import-zpool-at-boot.service
+[Unit]
+Description=Import the main zfs zpool after boot
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ygg/import-zpool-at-boot
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-import-zpool-at-boot.service

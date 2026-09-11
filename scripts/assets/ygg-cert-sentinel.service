@@ -1,0 +1,12 @@
+[Unit]
+Description=Yggdrasil certificate wire sentinel (TLS expiry on the wire)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/ygg/cert-sentinel.env
+ExecStart=/usr/local/sbin/cert-sentinel.sh
+
+[Install]
+WantedBy=multi-user.target

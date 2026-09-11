@@ -1,0 +1,91 @@
+#!/bin/bash
+
+install -d -m 0755 /etc/ygg /usr/local/sbin /var/log
+
+tee <<'EOL' /usr/local/sbin/ygg-boot-telemetry-mark
+#!/bin/bash
+set -euo pipefail
+
+install -d -m 0755 /run/ygg
+date +%s > /run/ygg/boot-telemetry-start.epoch
+date --iso-8601=seconds > /run/ygg/boot-telemetry-start.wall
+EOL
+chmod +x /usr/local/sbin/ygg-boot-telemetry-mark
+
+tee <<'EOL' /usr/local/sbin/ygg-boot-telemetry-report
+#!/bin/bash
+set -euo pipefail
+
+out=/var/log/ygg-boot-telemetry.log
+start_epoch=""
+if [[ -f /run/ygg/boot-telemetry-start.epoch ]]; then
+    start_epoch="$(cat /run/ygg/boot-telemetry-start.epoch 2>/dev/null || true)"
+fi
+now_epoch="$(date +%s)"
+
+{
+    printf '=== ygg boot telemetry %s ===\n' "$(date --iso-8601=seconds)"
+    printf 'hostname=%s\n' "$(hostname)"
+    printf 'kernel=%s\n' "$(uname -r)"
+    printf 'boot_id=%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
+    if [[ -n "$start_epoch" ]] && [[ "$start_epoch" =~ ^[0-9]+$ ]]; then
+        printf 'elapsed_since_marker_sec=%s\n' "$(( now_epoch - start_epoch ))"
+    fi
+    printf '\n-- systemd-analyze time --\n'
+    systemd-analyze time || true
+    printf '\n-- systemd-analyze blame (top 30) --\n'
+    systemd-analyze blame | head -n 30 || true
+    printf '\n-- systemd-analyze critical-chain --\n'
+    systemd-analyze critical-chain || true
+    printf '\n-- failed units --\n'
+    systemctl --failed --no-pager || true
+    printf '\n-- ygg-lxc-autostart logs --\n'
+    journalctl -u ygg-lxc-autostart.service -b --no-pager -n 200 || true
+    printf '\n-- active containers --\n'
+    lxc-ls --active 2>/dev/null || true
+    printf '\n-- autostart configs --\n'
+    for c in /zroot/lxc/*/config; do
+        [[ -f "$c" ]] || continue
+        n="$(basename "$(dirname "$c")")"
+        a="$(sed -n 's/^[[:space:]]*lxc.start.auto[[:space:]]*=[[:space:]]*//p' "$c" | tail -n1)"
+        o="$(sed -n 's/^[[:space:]]*lxc.start.order[[:space:]]*=[[:space:]]*//p' "$c" | tail -n1)"
+        d="$(sed -n 's/^[[:space:]]*lxc.start.delay[[:space:]]*=[[:space:]]*//p' "$c" | tail -n1)"
+        printf '%s auto=%s order=%s delay=%s\n' "$n" "${a:-0}" "${o:-}" "${d:-}"
+    done | sort
+    printf '\n'
+} >> "$out"
+EOL
+chmod +x /usr/local/sbin/ygg-boot-telemetry-report
+
+tee <<'EOL' /etc/systemd/system/ygg-boot-telemetry-mark.service
+[Unit]
+Description=Yggdrasil boot telemetry early marker
+DefaultDependencies=no
+After=local-fs.target
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-boot-telemetry-mark
+
+[Install]
+WantedBy=basic.target
+EOL
+
+tee <<'EOL' /etc/systemd/system/ygg-boot-telemetry-report.service
+[Unit]
+Description=Yggdrasil boot telemetry report
+After=ygg-lxc-autostart.service network.target
+Wants=ygg-lxc-autostart.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-boot-telemetry-report
+TimeoutSec=45s
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-boot-telemetry-mark.service ygg-boot-telemetry-report.service

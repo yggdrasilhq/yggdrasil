@@ -1,0 +1,9 @@
+[Unit]
+Description=Run cert sentinel daily at 07:20 local
+
+[Timer]
+OnCalendar=*-*-* 07:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

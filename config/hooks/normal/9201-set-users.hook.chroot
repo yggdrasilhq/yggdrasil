@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+useradd -m -s /bin/bash pi
+echo "pi:yggdrasil" | chpasswd
+usermod -aG sudo pi
+install -d -m 0750 /etc/sudoers.d
+echo 'pi ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-pi-nopasswd
+chmod 0440 /etc/sudoers.d/90-pi-nopasswd
+
+# Vim configuration
+echo 'set nocp' > /home/pi/.vimrc
+
+cat <<'EOL' >> /home/pi/.bashrc
+alias ls='ls --color=auto'
+alias ll='ls -alhF'
+EOL
+

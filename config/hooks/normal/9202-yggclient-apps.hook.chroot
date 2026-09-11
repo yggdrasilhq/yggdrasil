@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+
+# Latest yggterm release (github) — system binaries incl. ynpm
+cd /tmp
+DEB_URL="$(curl -fsSL https://api.github.com/repos/yggdrasilhq/yggterm/releases/latest | grep -oE '"browser_download_url": *"[^"]*yggterm_[^"]*_amd64[.]deb"' | head -1 | cut -d'"' -f4)"
+[ -n "$DEB_URL" ] || { echo "no yggterm amd64 deb found in latest release"; exit 1; }
+curl -fsSL -o /tmp/yggterm.deb "$DEB_URL"
+dpkg -i /tmp/yggterm.deb || apt-get -f install -y
+
+# Fleet apt proxy (rendered include) for user-space fetches
+export https_proxy="$(awk -F'"' '/https::Proxy/{print $2; exit}' /etc/apt/apt.conf.d/02proxy 2>/dev/null || true)"
+export http_proxy="$(awk -F'"' '/http::Proxy/{print $2; exit}' /etc/apt/apt.conf.d/02proxy 2>/dev/null || true)"
+
+# ynpm apps for the provisioned user (per-user installs, not root)
+runuser -u pi -- /usr/bin/ynpm install @ygghq/yedit @ygghq/ychrome @ygghq/ymacs @ygghq/ydesign
+rm -f /tmp/yggterm.deb

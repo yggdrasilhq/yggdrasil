@@ -1,0 +1,63 @@
+# Generalized public configuration example.
+# Copy to ygg.local.toml (gitignored).
+
+build_profile = "both"            # server | kde | both
+enable_qemu_smoke = true
+with_nvidia = false
+with_lts = false
+
+setup_mode = "recommended"        # recommended
+apt_proxy_mode = "off"            # off | explicit | host
+infisical_boot_mode = "disabled"  # disabled | container
+infisical_container_name = "infisical"
+embed_ssh_keys = true
+ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
+ssh_host_keys_dir = ""
+
+hostname = "yggdrasil"
+net_mode = "dhcp"                 # dhcp | static
+lxc_parent_if = "eno1"
+macvlan_cidr = "198.51.100.250/24"
+macvlan_route = "198.51.100.0/24"
+
+# Used when net_mode = "static"
+static_iface = "eno1"
+static_ip = ""
+static_gateway = ""
+static_dns = "1.1.1.1 8.8.8.8"
+
+apt_http_proxy = ""
+apt_https_proxy = ""
+apt_proxy_bypass_host = ""
+
+enable_intel_arc_sriov = false
+intel_arc_sriov_release = "2026.03.05"
+intel_arc_sriov_vf_count = 7
+intel_arc_sriov_pf_pci = ""
+intel_arc_sriov_device_id = "0x56a0"
+intel_arc_sriov_bind_vfs = "vfio-pci"
+
+# --- Disk health alerting -------------------------------------------------
+# smartd watches every disk and mails when reallocated / pending / uncorrectable
+# sector counts GROW, or when a drive crosses the critical temperature.
+# Delivery needs a smarthost: the image has no local MTA, it relays via msmtp.
+# Leave alert_email empty to install smartd but send no mail.
+alert_email = ""                        # e.g. "alerts@example.com"
+smtp_relay_host = ""                    # e.g. "192.0.2.25" -- a reachable MTA
+smtp_relay_port = 25
+mail_from = "root@yggdrasil.example"
+# EHLO must be an FQDN. A bare hostname makes strict MTAs reject with
+# "550 Invalid EHLO domain" and every alert is silently lost.
+mail_ehlo_domain = "yggdrasil.example"
+
+# --- Jewel backup ---------------------------------------------------------
+# Incremental `zfs send` replication of the datasets you cannot re-download,
+# onto a SECOND pool. Received copies are readonly and never mount, so they
+# can never shadow the live paths. Full send on first run, -I incrementals after.
+jewel_backup_enable = false
+jewel_backup_dest = ""                  # receiving dataset, e.g. "bpool/backup"
+jewel_backup_datasets = ""              # space separated, e.g. "rpool/data/docs rpool/data/photos"
+jewel_backup_src_strip_prefix = ""      # trimmed from each source to form the dest path, e.g. "rpool/data/"
+jewel_backup_oncalendar = "*-*-* 04:30:00 UTC"
+jewel_backup_keep_src = 3               # snapshots kept on the source (incremental base + slack)
+jewel_backup_keep_dst = 30              # snapshots kept on the destination (the backup history)

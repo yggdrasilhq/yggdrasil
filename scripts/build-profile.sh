@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: ./scripts/build-profile.sh --profile server|kde [--config PATH]
+  --config accepts either .toml or env (YGG_*) format.
+USAGE
+}
+
+PROFILE=""
+USER_CONFIG=""
+USER_CONFIG_ENV=""
+TEMP_CONFIG_ENV=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile)
+      PROFILE="${2:-}"
+      shift 2
+      ;;
+    --config)
+      USER_CONFIG="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$PROFILE" != "server" && "$PROFILE" != "kde" ]]; then
+  echo "--profile must be server or kde" >&2
+  exit 1
+fi
+
+if [[ -n "$USER_CONFIG" && ! -f "$USER_CONFIG" ]]; then
+  echo "Config file not found: $USER_CONFIG" >&2
+  exit 1
+fi
+
+if ! command -v lb >/dev/null 2>&1; then
+  echo "Missing dependency: lb (live-build)." >&2
+  exit 1
+fi
+
+cleanup() {
+  if [[ -n "${TEMP_CONFIG_ENV:-}" && -f "$TEMP_CONFIG_ENV" ]]; then
+    rm -f "$TEMP_CONFIG_ENV"
+  fi
+}
+trap cleanup EXIT
+
+if [[ -n "$USER_CONFIG" ]]; then
+  USER_CONFIG_ENV="$USER_CONFIG"
+  if [[ "$USER_CONFIG" == *.toml ]]; then
+    TEMP_CONFIG_ENV="$(mktemp /tmp/ygg-config-XXXXXX.env)"
+    ./scripts/toml-to-env.sh "$USER_CONFIG" > "$TEMP_CONFIG_ENV"
+    USER_CONFIG_ENV="$TEMP_CONFIG_ENV"
+  fi
+  # shellcheck disable=SC1090
+  source "$USER_CONFIG_ENV"
+fi
+
+bool_or_default() {
+  local value="$1"
+  local fallback="$2"
+  case "$value" in
+    true|false) echo "$value" ;;
+    "") echo "$fallback" ;;
+    *) echo "$fallback" ;;
+  esac
+}
+
+YGG_SETUP_MODE="${YGG_SETUP_MODE:-recommended}"
+YGG_EMBED_SSH_KEYS="$(bool_or_default "${YGG_EMBED_SSH_KEYS:-}" "true")"
+YGG_SSH_AUTHORIZED_KEYS_FILE="${YGG_SSH_AUTHORIZED_KEYS_FILE:-/root/.ssh/authorized_keys}"
+YGG_SSH_HOST_KEYS_DIR="${YGG_SSH_HOST_KEYS_DIR:-}"
+YGG_NET_MODE="${YGG_NET_MODE:-dhcp}"
+YGG_LXC_PARENT_IF="${YGG_LXC_PARENT_IF:-eno1}"
+YGG_MACVLAN_CIDR="${YGG_MACVLAN_CIDR:-198.51.100.250/24}"
+YGG_MACVLAN_ROUTE="${YGG_MACVLAN_ROUTE:-198.51.100.0/24}"
+YGG_STATIC_IFACE="${YGG_STATIC_IFACE:-$YGG_LXC_PARENT_IF}"
+YGG_STATIC_IP="${YGG_STATIC_IP:-}"
+YGG_STATIC_GATEWAY="${YGG_STATIC_GATEWAY:-}"
+YGG_STATIC_DNS="${YGG_STATIC_DNS:-}"
+YGG_HOSTNAME="${YGG_HOSTNAME:-}"
+YGG_APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
+YGG_APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
+YGG_APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-$YGG_APT_HTTP_PROXY}"
+YGG_APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
+YGG_WITH_NVIDIA="$(bool_or_default "${YGG_WITH_NVIDIA:-${YGG_ENABLE_NVIDIA:-}}" "true")"
+YGG_WITH_LTS="$(bool_or_default "${YGG_WITH_LTS:-}" "false")"
+YGG_ENABLE_INTEL_ARC_SRIOV="$(bool_or_default "${YGG_ENABLE_INTEL_ARC_SRIOV:-}" "false")"
+YGG_INTEL_ARC_SRIOV_RELEASE="${YGG_INTEL_ARC_SRIOV_RELEASE:-2026.03.05}"
+YGG_INTEL_ARC_SRIOV_VF_COUNT="${YGG_INTEL_ARC_SRIOV_VF_COUNT:-7}"
+YGG_INTEL_ARC_SRIOV_PF_PCI="${YGG_INTEL_ARC_SRIOV_PF_PCI:-}"
+YGG_INTEL_ARC_SRIOV_DEVICE_ID="${YGG_INTEL_ARC_SRIOV_DEVICE_ID:-0x56a0}"
+YGG_INTEL_ARC_SRIOV_BIND_VFS="${YGG_INTEL_ARC_SRIOV_BIND_VFS:-vfio-pci}"
+YGG_ALERT_EMAIL="${YGG_ALERT_EMAIL:-}"
+YGG_SMTP_RELAY_HOST="${YGG_SMTP_RELAY_HOST:-}"
+YGG_SMTP_RELAY_PORT="${YGG_SMTP_RELAY_PORT:-25}"
+YGG_MAIL_FROM="${YGG_MAIL_FROM:-root@yggdrasil.example}"
+YGG_MAIL_EHLO_DOMAIN="${YGG_MAIL_EHLO_DOMAIN:-yggdrasil.example}"
+YGG_JEWEL_BACKUP_ENABLE="$(bool_or_default "${YGG_JEWEL_BACKUP_ENABLE:-}" "false")"
+YGG_JEWEL_BACKUP_DEST="${YGG_JEWEL_BACKUP_DEST:-}"
+YGG_JEWEL_BACKUP_DATASETS="${YGG_JEWEL_BACKUP_DATASETS:-}"
+YGG_JEWEL_BACKUP_SRC_STRIP_PREFIX="${YGG_JEWEL_BACKUP_SRC_STRIP_PREFIX:-}"
+YGG_JEWEL_BACKUP_ONCALENDAR="${YGG_JEWEL_BACKUP_ONCALENDAR:-*-*-* 04:30:00 UTC}"
+YGG_JEWEL_BACKUP_KEEP_SRC="${YGG_JEWEL_BACKUP_KEEP_SRC:-3}"
+YGG_JEWEL_BACKUP_KEEP_DST="${YGG_JEWEL_BACKUP_KEEP_DST:-30}"
+
+if [[ "$YGG_SETUP_MODE" != "recommended" ]]; then
+  echo "Invalid YGG_SETUP_MODE: $YGG_SETUP_MODE" >&2
+  exit 1
+fi
+
+if [[ "$YGG_NET_MODE" != "dhcp" && "$YGG_NET_MODE" != "static" ]]; then
+  echo "Invalid YGG_NET_MODE: $YGG_NET_MODE (use dhcp or static)" >&2
+  exit 1
+fi
+
+if [[ "$YGG_NET_MODE" == "static" && -z "$YGG_STATIC_IP" ]]; then
+  echo "YGG_STATIC_IP is required when YGG_NET_MODE=static" >&2
+  exit 1
+fi
+
+if ! [[ "$YGG_INTEL_ARC_SRIOV_VF_COUNT" =~ ^[0-9]+$ ]]; then
+  echo "YGG_INTEL_ARC_SRIOV_VF_COUNT must be an integer" >&2
+  exit 1
+fi
+
+if [[ "$YGG_INTEL_ARC_SRIOV_BIND_VFS" != "vfio-pci" && "$YGG_INTEL_ARC_SRIOV_BIND_VFS" != "none" ]]; then
+  echo "YGG_INTEL_ARC_SRIOV_BIND_VFS must be vfio-pci or none" >&2
+  exit 1
+fi
+
+if [[ "$YGG_JEWEL_BACKUP_ENABLE" == "true" ]]; then
+  if [[ -z "$YGG_JEWEL_BACKUP_DEST" ]]; then
+    echo "YGG_JEWEL_BACKUP_DEST is required when YGG_JEWEL_BACKUP_ENABLE=true" >&2
+    exit 1
+  fi
+  if [[ -z "$YGG_JEWEL_BACKUP_DATASETS" ]]; then
+    echo "YGG_JEWEL_BACKUP_DATASETS is required when YGG_JEWEL_BACKUP_ENABLE=true" >&2
+    exit 1
+  fi
+fi
+
+# A relay host without a recipient (or vice versa) silently delivers nothing.
+if [[ -n "$YGG_ALERT_EMAIL" && -z "$YGG_SMTP_RELAY_HOST" ]]; then
+  echo "YGG_SMTP_RELAY_HOST is required when YGG_ALERT_EMAIL is set" >&2
+  exit 1
+fi
+
+export \
+  YGG_SETUP_MODE \
+  YGG_EMBED_SSH_KEYS \
+  YGG_SSH_AUTHORIZED_KEYS_FILE \
+  YGG_SSH_HOST_KEYS_DIR \
+  YGG_NET_MODE \
+  YGG_LXC_PARENT_IF \
+  YGG_MACVLAN_CIDR \
+  YGG_MACVLAN_ROUTE \
+  YGG_STATIC_IFACE \
+  YGG_STATIC_IP \
+  YGG_STATIC_GATEWAY \
+  YGG_STATIC_DNS \
+  YGG_HOSTNAME \
+  YGG_APT_PROXY_MODE \
+  YGG_APT_HTTP_PROXY \
+  YGG_APT_HTTPS_PROXY \
+  YGG_APT_PROXY_BYPASS_HOST \
+  YGG_WITH_LTS \
+  YGG_ENABLE_INTEL_ARC_SRIOV \
+  YGG_INTEL_ARC_SRIOV_RELEASE \
+  YGG_INTEL_ARC_SRIOV_VF_COUNT \
+  YGG_INTEL_ARC_SRIOV_PF_PCI \
+  YGG_INTEL_ARC_SRIOV_DEVICE_ID \
+  YGG_INTEL_ARC_SRIOV_BIND_VFS \
+  YGG_ALERT_EMAIL \
+  YGG_SMTP_RELAY_HOST \
+  YGG_SMTP_RELAY_PORT \
+  YGG_MAIL_FROM \
+  YGG_EXTRA_POOLS \
+  YGG_MAIL_EHLO_DOMAIN \
+  YGG_JEWEL_BACKUP_ENABLE \
+  YGG_JEWEL_BACKUP_DEST \
+  YGG_JEWEL_BACKUP_DATASETS \
+  YGG_JEWEL_BACKUP_SRC_STRIP_PREFIX \
+  YGG_JEWEL_BACKUP_ONCALENDAR \
+  YGG_JEWEL_BACKUP_KEEP_SRC \
+  YGG_JEWEL_BACKUP_KEEP_DST
+
+cmd=("./scripts/mkconfig-core.sh")
+if [[ "$PROFILE" == "server" ]]; then
+  cmd+=("--with-kvm")
+fi
+if [[ "$PROFILE" == "kde" ]]; then
+  cmd+=("--with-kde")
+fi
+if [[ "$YGG_WITH_NVIDIA" != "true" ]]; then
+  cmd+=("--without-nvidia")
+fi
+if [[ "$YGG_WITH_LTS" == "true" ]]; then
+  cmd+=("--with-lts")
+fi
+
+echo "Starting build pipeline for profile: $PROFILE"
+
+retry_cleanup_hash_mismatch() {
+  echo "Transient Debian archive mismatch detected, clearing live-build caches before retry..."
+  rm -rf     ./cache/indices.bootstrap     ./cache/packages.bootstrap     ./cache/packages.chroot     ./cache/bootstrap/var/lib/apt/lists     ./chroot/var/lib/apt/lists     ./chroot/var/cache/apt/archives 2>/dev/null || true
+  rm -rf     ./cache/indices.binary     ./cache/packages.binary     ./binary/var/cache/apt/archives     ./binary/var/lib/apt/lists 2>/dev/null || true
+}
+
+run_with_hash_mismatch_retry() {
+  local -a build_cmd=("$@")
+  local attempt max_attempts rc
+  local tmp_log
+
+  max_attempts=3
+  for attempt in $(seq 1 "$max_attempts"); do
+    tmp_log="$(mktemp /tmp/ygg-build-attempt-XXXXXX.log)"
+    set +e
+    "${build_cmd[@]}" 2>&1 | tee "$tmp_log"
+    rc=${PIPESTATUS[0]}
+    set -e
+
+    if [[ "$rc" -eq 0 ]]; then
+      rm -f "$tmp_log"
+      return 0
+    fi
+
+    if grep -q 'Hash Sum mismatch' "$tmp_log" && [[ "$attempt" -lt "$max_attempts" ]]; then
+      retry_cleanup_hash_mismatch
+      rm -f "$tmp_log"
+      sleep 15
+      continue
+    fi
+
+    rm -f "$tmp_log"
+    return "$rc"
+  done
+}
+
+run_with_hash_mismatch_retry "${cmd[@]}"
+
+./scripts/prune-isos.sh
+
+mkdir -p artifacts
+if [[ "$PROFILE" == "server" ]]; then
+  latest_iso="$(ls -1t yggdrasil-*-amd64.hybrid.iso 2>/dev/null | rg -v -- '-kde-amd64\\.hybrid\\.iso$' | head -n1 || true)"
+  if [[ -n "${latest_iso:-}" && -f "$latest_iso" ]]; then
+    cp -f "$latest_iso" "artifacts/server-latest.iso"
+  fi
+else
+  latest_iso="$(ls -1t yggdrasil-*-kde-amd64.hybrid.iso 2>/dev/null | head -n1 || true)"
+  if [[ -n "${latest_iso:-}" && -f "$latest_iso" ]]; then
+    cp -f "$latest_iso" "artifacts/kde-latest.iso"
+  fi
+fi
+
+echo "Build complete for profile: $PROFILE"

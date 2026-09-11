@@ -1,0 +1,106 @@
+#!/bin/bash
+
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostart
+#!/bin/bash
+set -euo pipefail
+
+# No container roots/configs yet is a valid first-boot state.
+if [[ ! -d /zroot/lxc ]]; then
+    exit 0
+fi
+
+if ! find /zroot/lxc -mindepth 2 -maxdepth 2 -type f -name config | grep -q .; then
+    exit 0
+fi
+
+if /usr/bin/systemctl is-active --quiet ygg-lxc-autostart-worker.service; then
+    exit 0
+fi
+
+exec /usr/bin/systemd-run \
+    --unit=ygg-lxc-autostart-worker.service \
+    --no-block \
+    --collect \
+    --property=Type=exec \
+    --property=IOSchedulingClass=idle \
+    --property=Nice=19 \
+    /usr/local/sbin/ygg-lxc-autostart-worker
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostart
+
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostart-worker
+#!/bin/bash
+set -euo pipefail
+
+if command -v ionice >/dev/null 2>&1; then
+    exec /usr/bin/ionice -c3 /usr/bin/nice -n 19 /usr/bin/lxc-autostart
+fi
+
+exec /usr/bin/nice -n 19 /usr/bin/lxc-autostart
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostart-worker
+
+tee <<'EOL' /usr/local/sbin/ygg-lxc-autostop
+#!/bin/bash
+set -euo pipefail
+
+if [[ ! -d /zroot/lxc ]]; then
+    exit 0
+fi
+
+mapfile -t names < <(/usr/bin/lxc-autostart -L 2>/dev/null | awk 'NF { print $1 }')
+
+if [[ ${#names[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+/usr/bin/lxc-autostart -s -a -t 8 || true
+
+for name in "${names[@]}"; do
+    state="$(/usr/bin/lxc-info -sH -n "$name" 2>/dev/null || true)"
+    if [[ "$state" == "RUNNING" ]]; then
+        /usr/bin/lxc-stop -n "$name" -k || true
+    fi
+done
+EOL
+chmod +x /usr/local/sbin/ygg-lxc-autostop
+
+tee <<'EOL' /etc/systemd/system/ygg-lxc-autostart.service
+[Unit]
+Description=Yggdrasil LXC Autostart
+Documentation=man:lxc-autostart(1)
+
+# CAVEAT 1: This is the most important part for you.
+# It ensures this service runs only AFTER your ZFS pool is imported AND its filesystems are mounted.
+# If the ZFS pool import fails, this service will not be started.
+Requires=ygg-import-zpool-at-boot.service zfs-mount.service
+
+# Pull in networking and LXC early but don't block on the slow network-online target.
+Wants=lxc.service network-online.target
+After=ygg-import-zpool-at-boot.service zfs-mount.service lxc.service network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Dispatch autostart into a transient worker so boot does not block on every
+# container reaching its runtime state before graphical and remote services.
+ExecStart=/usr/local/sbin/ygg-lxc-autostart
+
+# CAVEAT 2: Define a clean shutdown command.
+# This will be executed on host shutdown/reboot.
+# -s tells it to honor stop order and delays.
+# -a tells it to stop all autostarted containers.
+# -t tells it to wait before hard-stopping.
+ExecStop=/usr/local/sbin/ygg-lxc-autostop
+
+# CAVEAT 3: Keep a generous but finite timeout so broken autostarts do not
+# stall boot forever.
+TimeoutSec=10min
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl daemon-reload
+systemctl enable ygg-lxc-autostart.service

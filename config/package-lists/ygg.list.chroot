@@ -1,0 +1,83 @@
+# Locale generation set (1030-generate-locales.hook.chroot runs locale-gen)
+locales
+
+# Security and certificates
+ca-certificates
+ssl-cert
+
+# Core networking
+chrony
+network-manager
+wpasupplicant
+wireless-regdb
+iw
+rfkill
+iputils-ping
+
+# Essential utilities
+coreutils
+bash
+cpio
+gpg
+gpg-agent
+gpm
+ripgrep
+openssh-server
+squashfs-tools
+gdisk
+zstd
+dmsetup
+libdevmapper1.02.1
+exfat-fuse
+exfatprogs
+fuse3
+lxc
+distrobuilder
+apcupsd
+apparmor
+apparmor-utils
+# unattended-upgrades # has a lot of dependencies including python
+
+# Disk health monitoring + alert delivery.
+# All three are required for a smartd alert to actually leave the machine:
+# smartmontools raises it, msmtp-mta provides /usr/sbin/sendmail, and
+# bsd-mailx provides /usr/bin/mail -- which is what Debian's
+# /etc/smartmontools/run.d/10mail actually invokes. Drop bsd-mailx and smartd
+# fails with "does not have /usr/bin/mail" and mails nothing.
+smartmontools
+msmtp
+msmtp-mta
+bsd-mailx
+
+# Intel media stack for Arc/VAAPI
+intel-media-va-driver
+libigdgmm12
+libva2
+vainfo
+
+# System monitoring
+htop
+ipmitool
+lm-sensors
+nvtop
+
+# zfs
+zfsutils-linux
+zfs-dkms
+
+# minimal userland
+# cockpit
+curl
+less
+git
+vim
+sudo
+bash-completion
+mokutil
+
+# KDE packages
+tasksel
+virt-manager
+chromium
+helium-browser
+plasma-nm

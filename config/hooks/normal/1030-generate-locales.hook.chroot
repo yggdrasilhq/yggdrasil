@@ -1,0 +1,9 @@
+#!/bin/sh
+
+set -e
+
+if command -v locale-gen >/dev/null 2>&1; then
+    touch /etc/locale.gen
+    grep -qE '^en_US\.UTF-8 UTF-8$' /etc/locale.gen || echo 'en_US.UTF-8 UTF-8' >>/etc/locale.gen
+    locale-gen >/dev/null
+fi

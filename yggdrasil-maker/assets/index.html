@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yggdrasil Maker</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="chrome">
+  <div class="identity">
+    <span class="mark">🌲</span>
+    <div>
+      <h1>Yggdrasil Maker</h1>
+      <p class="root" id="repo-root">reading the checkout…</p>
+    </div>
+  </div>
+  <nav class="segmented" role="tablist" aria-label="Flow">
+    <button role="tab" data-view="home" class="active" aria-selected="true">Home</button>
+    <button role="tab" data-view="plan" aria-selected="false">Plan</button>
+    <button role="tab" data-view="run" aria-selected="false">Run</button>
+  </nav>
+</header>
+
+<main class="canvas">
+  <section id="view-home" class="view active">
+    <div id="home-body" class="loading">Reading the repository…</div>
+  </section>
+
+  <section id="view-plan" class="view">
+    <div class="controls">
+      <label>Config
+        <select id="plan-config"></select>
+      </label>
+      <label>Profile
+        <select id="plan-profile"></select>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="plan-skip-smoke"> Skip smoke tests
+      </label>
+    </div>
+    <div id="plan-body" class="loading">Choose a config to see the plan.</div>
+  </section>
+
+  <section id="view-run" class="view">
+    <div class="controls">
+      <button id="run-start" class="primary">Run the config stage</button>
+      <span id="run-state" class="state idle">idle</span>
+    </div>
+    <p class="explain">
+      This runs <code>./mkconfig.sh --config … --profile … --dry-run --skip-smoke</code>
+      for real: it resolves your config file, converts the TOML through
+      <code>scripts/toml-to-env.sh</code>, sources the result, validates the profile and
+      prints the build command lines it would execute. It does not unpack a chroot —
+      the image stages need root and take tens of minutes, and are listed on the Plan tab.
+    </p>
+    <pre id="run-log" class="log" aria-live="polite"></pre>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

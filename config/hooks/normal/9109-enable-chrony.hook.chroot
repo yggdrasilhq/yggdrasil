@@ -1,0 +1,4 @@
+#!/bin/bash
+# The package ships the unit disabled; without this the image boots with no time
+# daemon and nothing ever corrects the clock.
+systemctl enable chrony
