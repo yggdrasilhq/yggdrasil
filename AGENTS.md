@@ -62,3 +62,14 @@ Documentation lives in the separate `ygg-docs` repository and is published to yo
   name (never values).
 - Human-facing promises belong in the site; machine-checkable promises
   belong in  and the docs together.
+
+
+## Docs layout convention
+
+- `docs/site/` + `docs/index.html` — the HUMAN website (GitHub Pages,
+  served from main:/docs). Marketing tone; never any site-private value.
+- `docs/*.md` outside `docs/site/` — AGENT and operator docs: specs,
+  build-system laws, incident notes. Technical tone; may reference
+  private knob NAMES (never values).
+- Human-facing promises belong on the site; machine-checkable promises
+  belong in `tests/smoke/` and the docs together.
