@@ -43,7 +43,10 @@ a change that dies at the next reboot — OS-layer changes MUST land here.
    smoke-test that the artifact contains it.
 5. Kernel parameters on ZBM systems live inside the generated ZBM EFI —
    prove-before-boot by unpacking and grepping the initramfs.
-6. Never pkill -f a string that appears in your own command line.
+6. The kernel cmdline on ZBM systems = the ZFS property
+   org.zfsbootmenu:commandline (pool root + BE + snapshots). zfs get -r
+   before grepping files; zfs set to change; it never appears as a file.
+7. Never pkill -f a string that appears in your own command line.
 
 ## Ship
 
