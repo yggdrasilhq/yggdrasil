@@ -29,7 +29,7 @@ sudo ./mkconfig.sh --profile both    # builds server + kde ISOs
 
 - [docs/build-system.md](docs/build-system.md) — the generator, the laws,
   and where the bodies are buried.
-- [docs/site/](docs/site/) — the full story.
+- [yggdrasilhq.github.io/yggdrasil](https://yggdrasilhq.github.io/yggdrasil/) — the full story (this README also lives there).
 - ZBM recovery image: [zbm/](zbm/).
 
 GPL-3.0 — see [LICENSE](LICENSE).

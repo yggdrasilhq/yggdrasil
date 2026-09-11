@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yggdrasil — one config file, a self-healing ZFS+LXC spine</title>
+<style>
+  :root { --fg:#1a1f24; --muted:#5a6570; --accent:#0b6e4f; --bg:#fbfbfa; --line:#e4e4e0; }
+  * { box-sizing:border-box; max-width:46rem; margin:0 auto; padding:0; }
+  body { font:17px/1.65 Georgia, "Times New Roman", serif; color:var(--fg); background:var(--bg); padding:3rem 1.25rem 5rem; }
+  h1,h2 { font-family:"Helvetica Neue", Arial, sans-serif; line-height:1.2; }
+  h1 { font-size:2rem; margin-bottom:.4rem; }
+  h2 { font-size:1.15rem; margin:2.2rem 0 .6rem; color:var(--accent); }
+  p { margin:.8rem 0; }
+  .tag { font-family:"Helvetica Neue",Arial,sans-serif; font-size:.95rem; color:var(--muted); margin-bottom:2rem; }
+  code, pre { font-family:"SF Mono", ui-monospace, Menlo, monospace; font-size:.85rem; background:#f0f0ee; border-radius:4px; }
+  code { padding:.1rem .35rem; }
+  pre { padding:1rem; overflow-x:auto; margin:1rem 0; }
+  ul { margin:.8rem 0 .8rem 1.2rem; }
+  li { margin:.35rem 0; }
+  a { color:var(--accent); }
+  .line { border-top:1px solid var(--line); margin:2.5rem 0; }
+  footer { margin-top:3rem; font-size:.85rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>yggdrasil</h1>
+<p class="tag">One config file. A bootable, self-healing ZFS+LXC Debian spine.</p>
+
+<p>Most infrastructure starts as a careful manual setup and decays into
+tribal knowledge. <strong>yggdrasil</strong> goes the other way: your
+server's entire OS layer — ZFS root, boot chain, LXC containers, recovery
+image — is described by one private config file and built into a live ISO
+by a public, reviewable generator.</p>
+
+<p>And because the ISO <em>is</em> the machine, the stick that built it is
+the stick that resurrects it. If a kernel update dies at 2am, ZFSBootMenu
+boots the previous kernel — with <strong>wifi and ssh in the recovery
+image itself</strong>, so you fix the host from your desk instead of the
+desk the host sits on.</p>
+
+<h2>Principles</h2>
+<ul>
+  <li><strong>Site-private, repo-public.</strong> One
+  <code>ygg.local.toml</code> carries your proxy, keys, pools and network.
+  The repo carries the machinery and never your values.</li>
+  <li><strong>Promises are verified.</strong> If a boot parameter or
+  package list promises something, the smoke tests check the built image
+  actually contains it.</li>
+  <li><strong>Recovery is a feature, not an afterthought.</strong> The ZBM
+  boot image ships with wifi, ssh and the previous kernel. Silence is the
+  design: recovery layers never touch the boot screen.</li>
+  <li><strong>Agent-native.</strong> An agent with shell access can build,
+  test and ship the ISO end to end — the skill is in the repo.</li>
+</ul>
+
+<h2>Quickstart</h2>
+<pre>git clone https://github.com/yggdrasilhq/yggdrasil && cd yggdrasil
+cp ygg.example.toml ygg.local.toml   # your site values
+sudo ./mkconfig.sh --profile both    # builds server + kde ISOs
+./tests/smoke/run.sh                 # gates the ship</pre>
+
+<h2>Inside</h2>
+<ul>
+  <li><a href="https://github.com/yggdrasilhq/yggdrasil/blob/main/docs/build-system.md">Build system — the generator, the laws, the bodies</a></li>
+  <li><a href="https://github.com/yggdrasilhq/yggdrasil/tree/main/zbm">ZBM — the recovery boot image</a></li>
+  <li><a href="https://github.com/yggdrasilhq/yggdrasil/blob/main/.agents/skills/yggdrasil-iso/SKILL.md">The agent skill</a></li>
+</ul>
+
+<div class="line"></div>
+<footer>GPL-3.0 · built by the yggdrasilhq fleet ·
+<a href="https://github.com/yggdrasilhq/yggdrasil">source</a></footer>
+</body>
+</html>
