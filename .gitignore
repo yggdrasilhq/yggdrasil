@@ -64,3 +64,5 @@ yggdrasil-maker/target/
 .build/
 *.files
 *.packages
+config/includes.chroot/
+config/includes.chroot_before_packages/
