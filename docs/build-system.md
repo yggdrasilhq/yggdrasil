@@ -100,7 +100,7 @@ tests should verify against the built image (see the locale law above).
 ## THE ZBM COMMANDLINE LIVES IN A ZFS PROPERTY (learned the hard way, 2026-09-11)
 
 The kernel command line a ZBM system actually boots with comes from the ZFS
-user property  — set on the pool root and/or
+user property `org.zfsbootmenu:commandline` — set on the pool root and/or
 the boot environment, inherited by every snapshot. It appears NOWHERE as a
 file: not in /etc, /boot, /boot/efi, refind_linux.conf, the zbm config
 yaml, or the raw EFI binary (the cmdline travels inside the compressed
@@ -108,15 +108,15 @@ initramfs or via the property — greps find nothing).
 
 Debug/fix procedure:
 
-    zfs get -H -o name,value,source org.zfsbootmenu:commandline -r <pool>
-    sudo zfs set org.zfsbootmenu:commandline="quiet loglevel=4" <pool> [<BE> ...]
+    zfs get -H -o name,value,source org.zfsbootmenu:commandline -r POOL
+    sudo zfs set org.zfsbootmenu:commandline="quiet loglevel=4" POOL BE...
 
-- Check BEFORE grepping files: .
+- Check BEFORE grepping files: `zfs get all -r POOL | grep param`.
 - The property is settable per dataset AND per snapshot; sweep the pool
   recursively or old snapshots resurrect it.
 - Layering observed: the property overrides the config.yaml
-   embed. The BE rootfs also has /etc/kernel/cmdline
+  `Kernel: CommandLine` embed. The BE rootfs also has /etc/kernel/cmdline
   (empty on jojo — ZBM honours it when non-empty).
 - The tsc=reliable incident: the parameter survived four reboots and a ZBM
   regeneration because it rode this property on zroot, zroot/ROOT/debian,
-  and ~50 hourly snapshots. / swept all 51.
+  and ~50 hourly snapshots. A recursive `zfs set` swept all 51 datasets.
