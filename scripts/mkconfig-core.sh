@@ -911,7 +911,13 @@ DATASET=""
 [ -n "$DATASET" ] || exit 0
 POOL=${DATASET%%/*}
 
-zpool list -H -o name "$POOL" >/dev/null 2>&1 || zpool import "$POOL" 2>/dev/null
+i=0
+while [ "$i" -lt 5 ]; do
+    zpool list -H -o name "$POOL" >/dev/null 2>&1 && break
+    zpool import "$POOL" 2>/dev/null && break
+    i=$((i + 1))
+    sleep 2
+done
 zpool list -H -o name "$POOL" >/dev/null 2>&1 || { logger -p kern.warning -t ygg-var-persist "pool $POOL not importable; /var stays on the live root"; exit 0; }
 zfs list -H -o name "$DATASET" >/dev/null 2>&1 || { logger -p kern.warning -t ygg-var-persist "dataset $DATASET missing; /var stays on the live root"; exit 0; }
 
