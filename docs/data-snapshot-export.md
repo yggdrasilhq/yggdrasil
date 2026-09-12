@@ -1,17 +1,17 @@
-# The second backup leg — data snapshot export for the recovery stick
+# The second backup leg: data snapshot export for the recovery stick
 
 The host backup story has two legs:
 
-1. **Leg 1 — live replication.** A daily incremental ZFS replication of
+1. **Leg 1: live replication.** A daily incremental ZFS replication of
    irreplaceable datasets onto a second pool on the same machine
    (`jewel-backup`). Fast, automatic, and useless if the machine itself is
    lost.
-2. **Leg 2 — the stick.** `scripts/data-snapshot-export.sh` exports each
+2. **Leg 2: the stick.** `scripts/data-snapshot-export.sh` exports each
    protected dataset's newest backup snapshot as a standalone ZFS **stream
    file** into a spool directory, so the data can leave the host entirely.
    The recovery stick (Ventoy) carries the bootable ISO **and** the spool:
-   rebuild the host from the ISO, then restore the data with `zfs recv` —
-   no network, no second pool, no cloud.
+   rebuild the host from the ISO, then restore the data with `zfs recv`.
+   No network, no second pool, no cloud.
 
 ## Site configuration (generated, never committed)
 

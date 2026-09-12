@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>yggdrasil — one config file, a self-healing ZFS+LXC spine</title>
+<title>yggdrasil: one config file, a self-healing ZFS+LXC spine</title>
 <style>
   :root { --fg:#1a1f24; --muted:#5a6570; --accent:#0b6e4f; --bg:#fbfbfa; --line:#e4e4e0; }
   * { box-sizing:border-box; max-width:46rem; margin:0 auto; padding:0; }
@@ -29,13 +29,13 @@
 
 <p>Most infrastructure starts as a careful manual setup and decays into
 tribal knowledge. <strong>yggdrasil</strong> goes the other way: your
-server's entire OS layer — ZFS root, boot chain, LXC containers, recovery
-image — is described by one private config file and built into a live ISO
+server's entire OS layer (ZFS root, boot chain, LXC containers, recovery
+image) is described by one private config file and built into a live ISO
 by a public, reviewable generator.</p>
 
 <p>And because the ISO <em>is</em> the machine, the stick that built it is
 the stick that resurrects it. If a kernel update dies at 2am, ZFSBootMenu
-boots the previous kernel — with <strong>wifi and ssh in the recovery
+boots the previous kernel, with <strong>wifi and ssh in the recovery
 image itself</strong>, so you fix the host from your desk instead of the
 desk the host sits on.</p>
 
@@ -51,7 +51,7 @@ desk the host sits on.</p>
   boot image ships with wifi, ssh and the previous kernel. Silence is the
   design: recovery layers never touch the boot screen.</li>
   <li><strong>Agent-native.</strong> An agent with shell access can build,
-  test and ship the ISO end to end — the skill is in the repo.</li>
+  test and ship the ISO end to end; the skill is in the repo.</li>
 </ul>
 
 <h2>Quickstart</h2>
@@ -62,8 +62,8 @@ sudo ./mkconfig.sh --profile both    # builds server + kde ISOs
 
 <h2>Inside</h2>
 <ul>
-  <li><a href="https://github.com/yggdrasilhq/yggdrasil/blob/main/docs/build-system.md">Build system — the generator, the laws, the bodies</a></li>
-  <li><a href="https://github.com/yggdrasilhq/yggdrasil/tree/main/zbm">ZBM — the recovery boot image</a></li>
+  <li><a href="https://github.com/yggdrasilhq/yggdrasil/blob/main/docs/build-system.md">Build system: the generator, the laws, the bodies</a></li>
+  <li><a href="https://github.com/yggdrasilhq/yggdrasil/tree/main/zbm">ZBM: the recovery boot image</a></li>
   <li><a href="https://github.com/yggdrasilhq/yggdrasil/blob/main/.agents/skills/yggdrasil-iso/SKILL.md">The agent skill</a></li>
 </ul>
 

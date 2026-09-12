@@ -227,6 +227,8 @@ extract_proxy_value() {
 APT_HTTP_PROXY="${YGG_APT_HTTP_PROXY:-}"
 APT_HTTPS_PROXY="${YGG_APT_HTTPS_PROXY:-}"
 APT_PROXY_BYPASS_HOST="${YGG_APT_PROXY_BYPASS_HOST:-}"
+VAR_PERSIST_ENABLE="${YGG_VAR_PERSIST_ENABLE:-false}"
+VAR_PERSIST_DATASET="${YGG_VAR_PERSIST_DATASET:-zroot/var}"
 APT_PROXY_MODE="${YGG_APT_PROXY_MODE:-off}"
 INFISICAL_BOOT_MODE="${YGG_INFISICAL_BOOT_MODE:-disabled}"
 CERT_SENTINEL_ENDPOINTS="${YGG_CERT_SENTINEL_ENDPOINTS:-}"
@@ -883,6 +885,84 @@ EOF
 
 ln -sf ../ygg-txg-watchdog.timer \
    config/includes.chroot/etc/systemd/system/timers.target.wants/ygg-txg-watchdog.timer
+
+# =============================================================================
+# Persistent /var (SmartOS style): dataset mounted over /var before journald
+# =============================================================================
+if [[ "$VAR_PERSIST_ENABLE" == "true" ]]; then
+    mkdir -p config/includes.chroot/usr/local/sbin \
+             config/includes.chroot/etc/ygg \
+             config/includes.chroot/etc/systemd/system/sysinit.target.wants
+
+    cat > config/includes.chroot/etc/ygg/var-persist.conf <<VCONF
+DATASET="${VAR_PERSIST_DATASET}"
+VCONF
+
+    cat > config/includes.chroot/usr/local/sbin/ygg-var-persist <<'VPEOF'
+#!/bin/sh
+# Mount a ZFS dataset over /var (SmartOS style). Reads DATASET from
+# /etc/ygg/var-persist.conf. First boot populates the dataset from the
+# live /var. Every boot realigns the package database with the running
+# image afterwards: /var/lib/dpkg belongs to the ISO, not to the pool.
+CONF=/etc/ygg/var-persist.conf
+[ -r "$CONF" ] || exit 0
+DATASET=""
+[ -f "$CONF" ] && . "$CONF"
+[ -n "$DATASET" ] || exit 0
+POOL=${DATASET%%/*}
+
+zpool list -H -o name "$POOL" >/dev/null 2>&1 || zpool import "$POOL" 2>/dev/null
+zpool list -H -o name "$POOL" >/dev/null 2>&1 || { logger -p kern.warning -t ygg-var-persist "pool $POOL not importable; /var stays on the live root"; exit 0; }
+zfs list -H -o name "$DATASET" >/dev/null 2>&1 || { logger -p kern.warning -t ygg-var-persist "dataset $DATASET missing; /var stays on the live root"; exit 0; }
+
+USED=$(zfs get -H -o value used "$DATASET")
+
+# first boot: the dataset is empty, fill it from the live /var
+if [ "$USED" = "0B" ] || [ "$USED" = "0" ]; then
+    zfs set mountpoint=/mnt/ygg-var "$DATASET"
+    zfs mount "$DATASET" 2>/dev/null
+    if mountpoint -q /mnt/ygg-var; then
+        rsync -a /var/ /mnt/ygg-var/ 2>/dev/null
+        zfs unmount "$DATASET" 2>/dev/null || true
+    fi
+fi
+
+# the image's package database: belongs to the running ISO
+rm -rf /run/ygg-dpkg-image
+rsync -a /var/lib/dpkg/ /run/ygg-dpkg-image/ 2>/dev/null
+
+zfs set mountpoint=/var "$DATASET"
+if ! zfs mount -O "$DATASET" 2>/dev/null; then
+    logger -p kern.warning -t ygg-var-persist "could not mount $DATASET over /var; /var stays on the live root"
+    exit 0
+fi
+
+# realign: dpkg answers for THIS image, always
+rsync -a --delete /run/ygg-dpkg-image/ /var/lib/dpkg/ 2>/dev/null
+
+logger -t ygg-var-persist "$DATASET mounted over /var"
+VPEOF
+    chmod 755 config/includes.chroot/usr/local/sbin/ygg-var-persist
+
+    cat > config/includes.chroot/etc/systemd/system/ygg-var-persist.service <<'VUEOF'
+[Unit]
+Description=Yggdrasil persistent /var (SmartOS style)
+DefaultDependencies=no
+After=systemd-udevd-control.socket systemd-udevd-kernel.socket
+Before=sysinit.target systemd-journald.service
+ConditionPathExists=/etc/ygg/var-persist.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-var-persist
+
+[Install]
+WantedBy=sysinit.target
+VUEOF
+
+    ln -sf ../ygg-var-persist.service \
+       config/includes.chroot/etc/systemd/system/sysinit.target.wants/ygg-var-persist.service
+fi
 
 
 tee config/hooks/normal/9109-enable-chrony.hook.chroot <<'EOF'

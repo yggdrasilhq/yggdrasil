@@ -1,4 +1,4 @@
-# ZFS block-clone txg wedge — failure mode, mitigation, watchdog
+# ZFS block-clone txg wedge: failure mode, mitigation, watchdog
 
 ## Failure mode
 
@@ -15,7 +15,7 @@ in uninterruptible sleep (D state):
 
 - load average climbs (D-state processes count), ssh eventually stops
   accepting logins while the host still answers ping
-- reads degrade over minutes to well under 1 MB/s — ARC cannot evict
+- reads degrade over minutes to well under 1 MB/s: ARC cannot evict
   dirty data that cannot sync
 - `zpool sync <pool>` hangs unkillably; killing the writers does **not**
   drain the txg
@@ -25,7 +25,7 @@ in uninterruptible sleep (D state):
 Reproduced twice on zfs 2.4.2 with multi-GB image copies where the copy
 itself completed but subsequent small writes into the cloned file sat in
 the wedged txg. The trigger is the block-clone path: plain `cp` on a
-2.4.x pool uses `copy_file_range`, which is a clone — **there is no safe
+2.4.x pool uses `copy_file_range`, which is a clone: **there is no safe
 "plain cp" on an affected pool**.
 
 ## Mitigations shipped in this ISO
@@ -51,12 +51,12 @@ the wedged txg. The trigger is the block-clone path: plain `cp` on a
    highest committed txg per pool; if it stops advancing for 15 minutes
    while a pending (Q/S) txg exists, it logs one `kern.crit` line
    (`journalctl -t ygg-txg-watchdog`) and touches `/run/ygg-txg-stuck`.
-   An idle pool never alarms (no pending txgs). Detection only — decide
+   An idle pool never alarms (no pending txgs). Detection only: decide
    escalation separately.
 
 ## Operator playbook when the watchdog fires
 
-1. Confirm: `tail /proc/spl/kstat/zfs/*/txgs` — a txg sitting in `Q`
+1. Confirm: `tail /proc/spl/kstat/zfs/*/txgs`: a txg sitting in `Q`
    while the committed counter is frozen is the signature.
 2. Stop new writers to the affected pool. Killing existing writers has
    NOT historically drained the txg.

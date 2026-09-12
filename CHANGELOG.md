@@ -4,6 +4,16 @@ This file tracks user-visible changes in `yggdrasil`.
 
 ## Unreleased
 
+- new persistent /var feature (SmartOS style): with
+  var_persist_enable in the site toml the image emits a sysinit-stage
+  service that mounts the site dataset (default zroot/var) over /var
+  before journald. First boot populates the dataset from the live
+  /var; every boot realigns /var/lib/dpkg with the running image so
+  the package database always matches the ISO. Hand edited configs,
+  custom scripts and the journal now survive reboots on a live system
+- document the whole story in docs/persistent-var.md, and recompose
+  the existing docs pages in the same voice without em dashes
+
 - harden the server profile against the zfs 2.4.x block-clone txg wedge:
   ship a modprobe.d config with `zfs_bclone_enabled=0` so
   copy_file_range/reflink copies fall back to plain copies instead of
