@@ -4,6 +4,23 @@ This file tracks user-visible changes in `yggdrasil`.
 
 ## Unreleased
 
+- harden the server profile against the zfs 2.4.x block-clone txg wedge:
+  ship a modprobe.d config with `zfs_bclone_enabled=0` so
+  copy_file_range/reflink copies fall back to plain copies instead of
+  being able to stall the whole pool; large image copies should use dd
+- new ygg-txg-watchdog service+timer (1 min): logs a kern.crit entry
+  and drops /run/ygg-txg-stuck when a pool stops committing txgs while
+  txgs sit pending - the early-warning sign that preceded full hosts
+  freezing under D-state load
+- add apfs-dkms and qemu-utils to the server package list so hosts that
+  mount apfs images or serve qcow devices keep that ability across
+  reboots without hand-installing
+- fix the kde profile: track the upstream helium-browser to helium-bin
+  rename and stop pointing signed-by at an /etc/apt/keyrings/ path that
+  live-build never creates (the key file lands in trusted.gpg.d); site
+  tomls should set apt_proxy_bypass_host for hosts whose apt cache
+  cannot pass through the helium https repo
+
 - rebuild `yggdrasil-maker` as a libyggterm app: a CLI that takes over the
   yggterm viewport by declaring a web surface on its own PTY and serving its UI
   from loopback, and that degrades to printing its URL in a plain terminal

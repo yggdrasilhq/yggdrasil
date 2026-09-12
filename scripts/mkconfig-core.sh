@@ -499,6 +499,10 @@ nvtop
 zfsutils-linux
 zfs-dkms
 
+# cross-platform image work on the host (apfs mount for guests, qemu-nbd)
+apfs-dkms
+qemu-utils
+
 # minimal userland
 # cockpit
 curl
@@ -555,14 +559,14 @@ if [[ "$WITH_KDE" == "true" ]]; then
 tasksel
 virt-manager
 chromium
-helium-browser
+helium-bin
 plasma-nm
 EOF
 
    # Helium browser apt archive (yggclient image)
    mkdir -p config/archives
    cat > config/archives/helium.list.chroot <<'EOF'
-deb [arch=amd64 signed-by=/etc/apt/keyrings/helium.gpg] https://pkg.helium.computer/deb stable main
+deb [arch=amd64] https://pkg.helium.computer/deb stable main
 EOF
    echo 'xjMEaOqhEBYJKwYBBAHaRw8BAQdA+0OK9OgI98hQGR0ZI5aVuXxdeDU+6eyLiKhH4pwAaH7NQEhlbGl1bSBzaWduaW5nIGtleSAoaHR0cHM6Ly9oZWxpdW0uY29tcHV0ZXIvKSA8aGVsaXVtQGltcHV0Lm5ldD7CmQQTFgoAQRYhBL5nfBmJ016rLF8myTUWAa0B1jeOBQJo6qEQAhsDBQkFo5qABQsJCAcCAiICBhUKCQgLAgQWAgMBAh4HAheAAAoJEDUWAa0B1jeO31AA/0w52qczu5T4w0miS3up03c4uIJtdw2MfHFLIEAQN7T2AP9ZI9ozR7C2/isB0GLeQM6o10DGiXGNA0T2kmNEJqIXC844BGjqoRASCisGAQQBl1UBBQEBB0AoNTUK0xOCCMLTWO1Nvhe9el/bNuyTyMmincD7hXu5JwMBCAfCfgQYFgoAJhYhBL5nfBmJ016rLF8myTUWAa0B1jeOBQJo6qEQAhsMBQkFo5qAAAoJEDUWAa0B1jeOLYEA/ReQcxHx9axm3rYYad+1XeQQyiIPCjclCVMyeAXqS5XOAP0RBc9/md8JlXqOCGwmHuOk3VVkR5EjCgm2KJ8hqdhwBA==' | base64 -d > config/archives/helium.key.chroot
 fi
@@ -789,6 +793,97 @@ EOF
         done
     fi
 } > config/includes.chroot/etc/chrony/chrony.conf
+
+# =============================================================================
+# ZFS hardening: block-clone kill switch + txg-stall watchdog
+# (regenerated every run — lb clean --purge wipes includes.chroot)
+# =============================================================================
+mkdir -p config/includes.chroot/etc/modprobe.d \
+         config/includes.chroot/usr/local/sbin \
+         config/includes.chroot/etc/systemd/system/timers.target.wants
+
+cat > config/includes.chroot/etc/modprobe.d/zfs-bclone.conf <<'EOF'
+# Disable ZFS block cloning: on zfs 2.4.x the clone path can park a txg
+# in quiesced-never-syncs and stall every write on the pool until a
+# forced reboot. Drop this when upstream fixes the quiesce path.
+options zfs zfs_bclone_enabled=0
+EOF
+
+cat > config/includes.chroot/usr/local/sbin/ygg-txg-watchdog <<'WDEOF'
+#!/bin/sh
+# Detect a stuck ZFS txg early: highest committed (C) txg not advancing
+# for STALL_SECS while a pending (Q/S) txg exists. Logs kern.crit and
+# touches /run/ygg-txg-stuck. Detection only.
+STATE=/run/ygg-txg-stuck
+HISTORY=/run/ygg-txg-watchdog.history
+STALL_SECS="${STALL_SECS:-900}"
+mkdir -p /run
+now=$(cut -d" " -f1 /proc/uptime)
+now=${now%.*}
+tmp="$HISTORY.new"
+: > "$tmp"
+stuck=""
+for kstat in /proc/spl/kstat/zfs/*/txgs; do
+	[ -r "$kstat" ] || continue
+	pool=${kstat#/proc/spl/kstat/zfs/}
+	pool=${pool%/txgs}
+	committed=$(awk '"'"'$3=="C" && $1+0>m {m=$1+0} END{print m+0}'"'"' "$kstat")
+	pending=$(awk '"'"'($3=="Q" || $3=="S") && $1+0>c {c=$1+0} END{print c+0}'"'"' "$kstat")
+	prev=$(grep "^$pool " "$HISTORY" 2>/dev/null | tail -1)
+	prev_committed=${prev#* }
+	prev_epoch=${prev_committed#* }
+	prev_committed=${prev_committed%% *}
+	if [ "$committed" != "$prev_committed" ] || [ -z "$prev_epoch" ]; then
+		epoch=$now
+	else
+		epoch=$prev_epoch
+	fi
+	echo "$pool $committed $epoch" >> "$tmp"
+	if [ "$pending" -gt 0 ] && [ "$pending" -gt "$committed" ]; then
+		age=$((now - epoch))
+		if [ "$age" -ge "$STALL_SECS" ]; then
+			stuck="$stuck $pool(${age}s)"
+		fi
+	fi
+done
+mv "$tmp" "$HISTORY"
+if [ -n "$stuck" ]; then
+	if [ ! -f "$STATE" ]; then
+		: > "$STATE"
+		logger -p kern.crit -t ygg-txg-watchdog "ZFS txgs stuck >=${STALL_SECS}s:$stuck - writes will stall pool-wide; inspect /proc/spl/kstat/zfs/*/txgs now"
+	fi
+else
+	rm -f "$STATE"
+fi
+WDEOF
+chmod 755 config/includes.chroot/usr/local/sbin/ygg-txg-watchdog
+
+cat > config/includes.chroot/etc/systemd/system/ygg-txg-watchdog.service <<'EOF'
+[Unit]
+Description=Yggdrasil ZFS txg-stall watchdog
+After=zfs-import.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-txg-watchdog
+EOF
+
+cat > config/includes.chroot/etc/systemd/system/ygg-txg-watchdog.timer <<'EOF'
+[Unit]
+Description=Run the ZFS txg-stall watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+ln -sf ../ygg-txg-watchdog.timer \
+   config/includes.chroot/etc/systemd/system/timers.target.wants/ygg-txg-watchdog.timer
+
 
 tee config/hooks/normal/9109-enable-chrony.hook.chroot <<'EOF'
 #!/bin/bash
