@@ -23,12 +23,21 @@ git clone https://github.com/yggdrasilhq/yggdrasil && cd yggdrasil
 cp ygg.example.toml ygg.local.toml   # fill in your site values
 sudo ./mkconfig.sh --profile both    # builds server + kde ISOs
 ./tests/smoke/run.sh                 # gates the ship
+cp ventoy.example.toml ventoy.local.toml  # where the stick lives
+./scripts/ventoy-inject.sh           # ships the ISOs to the Ventoy stick
 ```
+
+The injector keeps the stick's last-working copies with a date-aware
+retention rule (a dev day of fresh builds can never rotate them off) and
+pins the boot-menu default to the third-latest ISO. Spec:
+[docs/ventoy-injection.md](docs/ventoy-injection.md).
 
 ## Docs
 
 - [docs/build-system.md](docs/build-system.md) — the generator, the laws,
   and where the bodies are buried.
+- [docs/ventoy-injection.md](docs/ventoy-injection.md) — the boot stick:
+  retention law, default entry, config contract.
 - [yggdrasilhq.github.io/yggdrasil](https://yggdrasilhq.github.io/yggdrasil/) — the full story (this README also lives there).
 - ZBM recovery image: [zbm/](zbm/).
 

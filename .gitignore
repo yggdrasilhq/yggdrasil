@@ -23,6 +23,8 @@ dist/
 # Local user config
 ygg.local.toml
 ygg.*.local.toml
+ventoy.local.toml
+ventoy.*.local.toml
 .graveyard/
 assets/ssh/*
 !assets/ssh/README.md

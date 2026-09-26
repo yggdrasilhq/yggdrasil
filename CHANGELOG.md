@@ -4,6 +4,13 @@ This file tracks user-visible changes in `yggdrasil`.
 
 ## Unreleased
 
+- ventoy injection system: scripts/ventoy-inject.sh ships freshly built
+  ISOs to the boot stick with a date-aware retention rule (the two
+  last-working copies always come from a date before today, so a day of
+  dev builds can never rotate the real fallback ISOs off the stick) and
+  pins the Ventoy boot-menu default to the third-latest ISO. Run by
+  ventoy.local.toml (gitignored), example tracked as
+  ventoy.example.toml, spec in docs/ventoy-injection.md
 - new persistent /var feature (SmartOS style): with
   var_persist_enable in the site toml the image emits a sysinit-stage
   service that mounts the site dataset (default zroot/var) over /var
