@@ -106,20 +106,24 @@ case "$SKIP_MOUNT" in true|false) ;; *) die "skip_mount must be true or false" ;
 case "$UNMOUNT_AFTER" in true|false) ;; *) die "unmount_after must be true or false" ;; esac
 
 # probe(): always executes (reads are safe). act(): faked under --dry-run.
-# For ssh, printf %q re-escapes every arg so the REMOTE shell re-splits
-# them exactly as the local shell had them (patterns and formats survive).
+# Both honor target_host: ssh re-escapes every arg with printf %q so the
+# REMOTE shell re-splits them exactly as the local shell had them.
 if [[ -n "$TARGET_HOST" ]]; then
   probe() { ssh "$TARGET_HOST" "$(printf '%q ' "$@")"; }
-  push_file() { scp -q "$1" "$TARGET_HOST:$2"; }
 else
   probe() { "$@"; }
-  push_file() { cp -f "$1" "$2"; }
 fi
 if [[ "$DRY_RUN" == "true" ]]; then
   act() { printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; }
   push_file() { printf '[dry-run] copy %s -> %s\n' "$1" "$2"; }
 else
-  act() { "$@"; }
+  if [[ -n "$TARGET_HOST" ]]; then
+    act() { ssh "$TARGET_HOST" "$(printf '%q ' "$@")"; }
+    push_file() { scp -q "$1" "$TARGET_HOST:$2"; }
+  else
+    act() { "$@"; }
+    push_file() { cp -f "$1" "$2"; }
+  fi
 fi
 
 # -- stick plumbing ---------------------------------------------------------
@@ -234,9 +238,9 @@ for src in "$ISO_SOURCE_DIR"/yggdrasil-*.hybrid.iso; do
   if (( free_mb < size_mb + MIN_FREE_MB )); then
     die "stick too full for $name: ${free_mb}MB free, need ${size_mb}MB + ${MIN_FREE_MB}MB headroom"
   fi
-  act push_file "$src" "$STICK_DIR_PATH/$name"
+  push_file "$src" "$STICK_DIR_PATH/$name"
   if [[ -f "$src.sha256" ]]; then
-    act push_file "$src.sha256" "$STICK_DIR_PATH/$name.sha256"
+    push_file "$src.sha256" "$STICK_DIR_PATH/$name.sha256"
   fi
   echo "inject: $name (${size_mb}MB)"
   copied=$((copied + 1))
@@ -311,7 +315,7 @@ if probe test -f "$USB_MOUNT/ventoy/ventoy.json"; then
   fi
 fi
 act mkdir -p "$USB_MOUNT/ventoy"
-act push_file "$JSON_TMP" "$USB_MOUNT/ventoy/ventoy.json"
+push_file "$JSON_TMP" "$USB_MOUNT/ventoy/ventoy.json"
 
 if [[ "$UNMOUNT_AFTER" == "true" && "$SKIP_MOUNT" != "true" ]]; then
   act umount "$USB_MOUNT"
