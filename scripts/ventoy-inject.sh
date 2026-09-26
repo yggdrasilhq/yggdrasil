@@ -106,8 +106,10 @@ case "$SKIP_MOUNT" in true|false) ;; *) die "skip_mount must be true or false" ;
 case "$UNMOUNT_AFTER" in true|false) ;; *) die "unmount_after must be true or false" ;; esac
 
 # probe(): always executes (reads are safe). act(): faked under --dry-run.
+# For ssh, printf %q re-escapes every arg so the REMOTE shell re-splits
+# them exactly as the local shell had them (patterns and formats survive).
 if [[ -n "$TARGET_HOST" ]]; then
-  probe() { ssh "$TARGET_HOST" "$@"; }
+  probe() { ssh "$TARGET_HOST" "$(printf '%q ' "$@")"; }
   push_file() { scp -q "$1" "$TARGET_HOST:$2"; }
 else
   probe() { "$@"; }
@@ -153,7 +155,9 @@ ensure_mounted() {
   mount the dm passthrough instead (mknod the missing /dev/mapper/<dm>
   node from 'dmsetup table', or set usb_device to it and skip_mount=true)."
     fi
-    echo "Mounted $part at $USB_MOUNT"
+    if [[ "$DRY_RUN" != "true" ]]; then
+      echo "Mounted $part at $USB_MOUNT"
+    fi
   fi
 }
 
@@ -302,14 +306,18 @@ ${EXTRA_CONTROL}        { "VTOY_DEFAULT_IMAGE": "$DEFAULT_IMAGE_BASE/$default_is
 EOF
 if probe test -f "$USB_MOUNT/ventoy/ventoy.json"; then
   act cp -f "$USB_MOUNT/ventoy/ventoy.json" "$USB_MOUNT/ventoy/ventoy.json.bak"
-  echo "backed up existing ventoy.json to ventoy.json.bak"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    echo "backed up existing ventoy.json to ventoy.json.bak"
+  fi
 fi
 act mkdir -p "$USB_MOUNT/ventoy"
 act push_file "$JSON_TMP" "$USB_MOUNT/ventoy/ventoy.json"
 
 if [[ "$UNMOUNT_AFTER" == "true" && "$SKIP_MOUNT" != "true" ]]; then
   act umount "$USB_MOUNT"
-  echo "Unmounted $USB_MOUNT"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    echo "Unmounted $USB_MOUNT"
+  fi
 fi
 
 echo
