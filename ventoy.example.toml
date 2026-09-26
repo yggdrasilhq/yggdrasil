@@ -3,7 +3,7 @@
 #
 # What it does on each run (full spec: docs/ventoy-injection.md):
 #   - copies timestamped yggdrasil-*.hybrid.iso builds from iso_source_dir
-#     that the stick does not have yet;
+#     (with their .sha256 sidecars) that the stick does not have yet;
 #   - keeps the stick's last-working copies with a DATE-AWARE rule: the
 #     two retained fallback ISOs always come from a date BEFORE today, so
 #     a dev day that keeps producing builds can never rotate the real
@@ -15,10 +15,18 @@
 target_host = ""                  # ssh alias of the host the stick is plugged into; empty = this host
 usb_mount = "/mnt/ventoy"         # mountpoint of the Ventoy data partition
 usb_label = "Ventoy"              # filesystem label used to find the data partition
-usb_device = ""                   # explicit partition, e.g. "/dev/sde1", instead of label lookup
+usb_device = ""                   # explicit device, e.g. "/dev/sde1" or a dm passthrough, instead of label lookup
 skip_mount = false                # true: usb_mount is already mounted (or a plain dir, for tests)
 iso_source_dir = "."              # timestamped build ISOs land in the repo root after ./mkconfig.sh
+iso_stick_dir = "/"               # stick-side directory holding the ISOs, e.g. "/yggdrasil"
 keep_previous_count = 2           # last-working copies retained from a date BEFORE today
 default_rank = 3                  # boot menu default = Nth latest yggdrasil ISO on the stick
 min_free_mb = 4096                # refuse an injection that would leave less free space than this
 unmount_after = true              # unmount when done (only if this run did the mounting)
+
+# Extra VTOY_* control entries preserved across every ventoy.json rewrite:
+# each ventoy_<key> line becomes { "VTOY_<KEY>": "value" }. Keep here
+# whatever your stick already relies on (its current ventoy.json shows
+# which entries are live). Leave unset for a bare default-image pin.
+# ventoy_menu_timeout = "10"
+# ventoy_secondary_boot_menu = "0"

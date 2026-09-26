@@ -57,8 +57,11 @@ JSON_TMP=""
 CONFIG_ENV="$(mktemp /tmp/ygg-ventoy-XXXXXX.env)"
 trap 'rm -f "$CONFIG_ENV" "$JSON_TMP" 2>/dev/null' EXIT
 "$SCRIPT_DIR/toml-to-env.sh" "$CONFIG" > "$CONFIG_ENV"
+# Exported on purpose: the YGG_VENTOY_* control scan below reads the env.
+set -a
 # shellcheck disable=SC1090
 source "$CONFIG_ENV"
+set +a
 
 TARGET_HOST="${YGG_TARGET_HOST:-}"
 USB_MOUNT="${YGG_USB_MOUNT:-/mnt/ventoy}"
@@ -66,10 +69,34 @@ USB_LABEL="${YGG_USB_LABEL:-Ventoy}"
 USB_DEVICE="${YGG_USB_DEVICE:-}"
 SKIP_MOUNT="${YGG_SKIP_MOUNT:-false}"
 ISO_SOURCE_DIR="${YGG_ISO_SOURCE_DIR:-.}"
+ISO_STICK_DIR="${YGG_ISO_STICK_DIR:-/}"
 KEEP_PREVIOUS="${YGG_KEEP_PREVIOUS_COUNT:-2}"
 DEFAULT_RANK="${YGG_DEFAULT_RANK:-3}"
 MIN_FREE_MB="${YGG_MIN_FREE_MB:-4096}"
 UNMOUNT_AFTER="${YGG_UNMOUNT_AFTER:-true}"
+
+# Stick-side ISO directory, "/yggdrasil" style (no trailing slash; "/" = root).
+STICK_DIR="${ISO_STICK_DIR%/}"
+[[ -z "$STICK_DIR" ]] && STICK_DIR="/"
+if [[ "$STICK_DIR" == "/" ]]; then
+  STICK_DIR_PATH="$USB_MOUNT"
+  DEFAULT_IMAGE_BASE=""
+else
+  STICK_DIR_PATH="$USB_MOUNT$STICK_DIR"
+  DEFAULT_IMAGE_BASE="$STICK_DIR"
+fi
+
+# Any YGG_VENTOY_* config key becomes an extra Ventoy control entry, so a
+# stick's existing behaviour (menu timeout, secondary menu, ...) survives
+# the rewrite. ventoy_menu_timeout = "10" -> { "VTOY_MENU_TIMEOUT": "10" }.
+EXTRA_CONTROL=""
+while IFS='=' read -r k v; do
+  [[ -n "${k:-}" ]] || continue
+  [[ "$k" == YGG_VENTOY_* ]] || continue
+  key="VTOY_${k#YGG_VENTOY_}"
+  [[ "$v" == *'"'* ]] && die "ventoy control value must not contain double quotes: $k=$v"
+  EXTRA_CONTROL+="        { \"$key\": \"$v\" },"$'\n'
+done < <(env | sort)
 
 [[ "$KEEP_PREVIOUS" =~ ^[0-9]+$ ]] || die "keep_previous_count must be a number, got: $KEEP_PREVIOUS"
 [[ "$DEFAULT_RANK" =~ ^[0-9]+$ ]] || die "default_rank must be a number, got: $DEFAULT_RANK"
@@ -120,14 +147,19 @@ ensure_mounted() {
     echo "Already mounted at: $USB_MOUNT"
   else
     act mkdir -p "$USB_MOUNT"
-    act mount "$part" "$USB_MOUNT"
+    if ! act mount "$part" "$USB_MOUNT"; then
+      die "mount $part failed. If the target host is live-booted FROM this
+  stick, the Ventoy runtime holds the partition behind device-mapper:
+  mount the dm passthrough instead (mknod the missing /dev/mapper/<dm>
+  node from 'dmsetup table', or set usb_device to it and skip_mount=true)."
+    fi
     echo "Mounted $part at $USB_MOUNT"
   fi
 }
 
 # One yggdrasil ISO name per line, from the stick.
 stick_list() {
-  probe find "$USB_MOUNT" -maxdepth 1 -name 'yggdrasil-*.hybrid.iso' -printf '%f\n' | sort
+  probe find "$STICK_DIR_PATH" -maxdepth 1 -name 'yggdrasil-*.hybrid.iso' -printf '%f\n' | sort
 }
 
 # name -> 12-digit build timestamp on stdout; fails when the name has none.
@@ -172,6 +204,9 @@ stick_free_mb() {
 
 ensure_mounted
 
+# The stick-side ISO directory must exist before anything lists or copies.
+act mkdir -p "$STICK_DIR_PATH"
+
 STICK_BEFORE="$(stick_list | sort -u)"
 if [[ -z "$STICK_BEFORE" ]]; then
   echo "note: no yggdrasil ISOs on the stick yet"
@@ -180,7 +215,7 @@ fi
 declare -A ON_STICK=()
 while IFS= read -r n; do [[ -n "$n" ]] && ON_STICK["$n"]=1; done <<< "$STICK_BEFORE"
 
-# 1. Copy ISOs the stick lacks.
+# 1. Copy ISOs the stick lacks (plus their .sha256 sidecars).
 shopt -s nullglob
 copied=0
 for src in "$ISO_SOURCE_DIR"/yggdrasil-*.hybrid.iso; do
@@ -195,7 +230,10 @@ for src in "$ISO_SOURCE_DIR"/yggdrasil-*.hybrid.iso; do
   if (( free_mb < size_mb + MIN_FREE_MB )); then
     die "stick too full for $name: ${free_mb}MB free, need ${size_mb}MB + ${MIN_FREE_MB}MB headroom"
   fi
-  act push_file "$src" "$USB_MOUNT/$name"
+  act push_file "$src" "$STICK_DIR_PATH/$name"
+  if [[ -f "$src.sha256" ]]; then
+    act push_file "$src.sha256" "$STICK_DIR_PATH/$name.sha256"
+  fi
   echo "inject: $name (${size_mb}MB)"
   copied=$((copied + 1))
   ON_STICK["$name"]=1
@@ -220,7 +258,7 @@ for group_list in "$(printf '%s\n' "$STICK_BEFORE" | grep -v -- '-kde-' || true)
 done
 delete_count=0
 for victim in ${TO_DELETE[@]+"${TO_DELETE[@]}"}; do
-  act rm -f "$USB_MOUNT/$victim"
+  act rm -f "$STICK_DIR_PATH/$victim" "$STICK_DIR_PATH/$victim.sha256"
   if [[ "$DRY_RUN" != "true" ]]; then
     echo "prune: $victim"
   fi
@@ -258,7 +296,7 @@ JSON_TMP="$(mktemp /tmp/ygg-ventoy-XXXXXX.json)"
 cat > "$JSON_TMP" <<EOF
 {
     "control": [
-        { "VTOY_DEFAULT_IMAGE": "/$default_iso" }
+${EXTRA_CONTROL}        { "VTOY_DEFAULT_IMAGE": "$DEFAULT_IMAGE_BASE/$default_iso" }
     ]
 }
 EOF
@@ -278,4 +316,4 @@ echo
 echo "ventoy-inject summary"
 echo "  copied:  $copied"
 echo "  pruned:  $delete_count"
-echo "  default: /$default_iso (rank $DEFAULT_RANK of $(printf '%s\n' "$STICK_AFTER" | grep -c .) on the stick)"
+echo "  default: $DEFAULT_IMAGE_BASE/$default_iso (rank $DEFAULT_RANK of $(printf '%s\n' "$STICK_AFTER" | grep -c .) on the stick)"

@@ -1,10 +1,11 @@
 # Ventoy injection: shipping built ISOs to the boot stick without botching it
 
 Dated: 2026-09-26. Written after a real lab incident: the lab machine
-rebooted, Ventoy highlighted an old release by default, and the freshest
-image on the stick came up as `localhost` because no site config supplied
-the real hostname. This page specifies the machinery that removes both
-difficulties from now on.
+rebooted, Ventoy highlighted an old release by default (a ventoy.json
+written during the Sep 11 build wave had pinned the then-latest ISO and
+never moved on), and the freshest image on the stick came up as
+`localhost` because no site config supplied the real hostname. This
+page specifies the machinery that removes both difficulties from now on.
 
 ## The tool
 
@@ -14,13 +15,15 @@ ISOs on the Ventoy stick. Each run:
 1. mounts the stick (by filesystem label, on `target_host` over ssh when
    the stick is not plugged into the build host);
 2. copies every timestamped `yggdrasil-*.hybrid.iso` from
-   `iso_source_dir` that the stick does not have yet, refusing the copy
-   if it would leave less than `min_free_mb` free;
+   `iso_source_dir` that the stick does not have yet, together with its
+   `.sha256` sidecar, refusing the copy if it would leave less than
+   `min_free_mb` free;
 3. applies the retention law below, per profile (server and kde
-   independently);
+   independently), deleting the `.sha256` sidecars of pruned ISOs;
 4. rewrites `ventoy/ventoy.json` on the stick (backing up any previous
    copy to `ventoy.json.bak`) so `VTOY_DEFAULT_IMAGE` pins the
-   `default_rank`-th latest timestamped ISO as the boot-menu default;
+   `default_rank`-th latest timestamped ISO as the boot-menu default,
+   keeping any extra `VTOY_*` control entries the local config supplies;
 5. unmounts, and prints a copied / pruned / default summary.
 
 `--dry-run` does every read for real and fakes every mutation. It needs
@@ -60,10 +63,31 @@ Like the build, the injector runs on a gitignored local config:
 
 - `ventoy.example.toml` is tracked and documents every key;
 - `ventoy.local.toml` is untracked site reality (stick host, mountpoint,
-  retention numbers). The script refuses to run without it;
+  stick-side ISO directory, retention numbers, extra control entries).
+  The script refuses to run without it;
 - `ygg.local.toml` is the same contract for the build itself, which is
   where the hostname lives. A stick ISO booted as `localhost` means the
   build that produced it had no real `ygg.local.toml`.hostname.
+
+Two keys deserve care on an existing stick:
+
+- `iso_stick_dir`: the stick may keep its ISOs in a subdirectory (the
+  lab stick uses `/yggdrasil`). `VTOY_DEFAULT_IMAGE` must carry that
+  path, so never change the stick layout without changing the config.
+- `ventoy_<key>` lines: each becomes an extra `VTOY_*` control entry in
+  the rewritten ventoy.json. Read the stick's current ventoy.json before
+  the first injector run and carry its live entries over (menu timeout,
+  secondary menu), or a rewrite silently changes boot behaviour.
+
+## Live-booted target hosts
+
+When the stick's host is itself live-booted FROM that stick, the Ventoy
+runtime holds the data partition behind device-mapper and a plain
+`mount /dev/sdXN` fails with `Can't open blockdev`. Mount the dm
+passthrough instead: read `dmsetup table`, `mknod` the missing
+`/dev/mapper/<name>` node (major/minor from the table), mount that, then
+run the injector with `skip_mount = true`. This is a boot-state quirk;
+a host booted from disk mounts the partition normally.
 
 ## Operator loop
 
