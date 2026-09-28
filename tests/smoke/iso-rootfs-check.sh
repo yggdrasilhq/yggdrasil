@@ -137,6 +137,19 @@ check_rootfs_contains "/usr/local/sbin/ygg-ensure-infisical" "INFISICAL_BOOT_MOD
 check_rootfs_not_contains "/usr/local/sbin/ygg-ensure-infisical" "update-stack.sh" || status=1
 check_rootfs_not_contains "/usr/local/sbin/ygg-ensure-infisical" "docker compose down" || status=1
 
+
+# Host identity: live-build 20250814 leaves /etc/hosts broken in the
+# squashfs no matter what chroot hooks write (chroot_hosts runs after the
+# hooks and again at binary prep; measured EMPTY on 2026-09-28), so the
+# promise "the image hostname resolves" is carried by the boot-time guard:
+# ygg-hosts-ensure must ship and must write the 127.0.1.1 entry. This is
+# the fix for the sudo "localhost.localdomain" mail storm, root-caused
+# 2026-09-28, board infra/kolkata ACK-5d0fadc09d.
+check_file "/etc/hostname" || status=1
+check_file "/etc/systemd/system/ygg-hosts-ensure.service" || status=1
+check_file "/usr/local/sbin/ygg-hosts-ensure" || status=1
+check_rootfs_contains "/usr/local/sbin/ygg-hosts-ensure" "127.0.1.1" || status=1
+
 if [[ "$EXPECT_KDE" == "true" ]]; then
   check_file "/usr/bin/startplasma-x11" || status=1
 fi

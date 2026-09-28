@@ -14,6 +14,9 @@ embed_ssh_keys = true
 ssh_authorized_keys_file = "/root/.ssh/authorized_keys"
 ssh_host_keys_dir = ""
 
+# Image identity: rendered into the hostname= boot param, /etc/hostname
+# and the /etc/hosts 127.0.1.1 entry. Set the real FQDN per site build
+# (e.g. "host.example.net"); a bare name is fine for the generic ISO.
 hostname = "yggdrasil"
 net_mode = "dhcp"                 # dhcp | static
 lxc_parent_if = "eno1"

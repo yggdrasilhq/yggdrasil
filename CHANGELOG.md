@@ -4,6 +4,18 @@ This file tracks user-visible changes in `yggdrasil`.
 
 ## Unreleased
 
+- fixed the "localhost.localdomain" sudo-alert mail storm (root-caused
+  2026-09-28): live-build 2025 leaves the image with an EMPTY /etc/hosts no
+  matter what chroot hooks write (its chroot_hosts step runs after the
+  hooks and again at binary prep; measured zero bytes in the built
+  squashfs), so any host where sudo cannot resolve its hostname mailed one
+  "*** SECURITY information for localhost.localdomain ***" alert per sudo
+  call — hundreds of root mails a day on container-driving hosts. The
+  image now bakes /etc/hostname from the `hostname` site value and ships
+  ygg-hosts-ensure.service, a boot-time guard that re-asserts a
+  127.0.1.1 entry for the running hostname on live AND installed systems.
+  The ISO rootfs smoke check now verifies the guard ships.
+
 - ventoy injection system: scripts/ventoy-inject.sh ships freshly built
   ISOs to the boot stick with a date-aware retention rule (the two
   last-working copies always come from a date before today, so a day of

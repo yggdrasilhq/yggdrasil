@@ -362,6 +362,82 @@ fi
 YGGEOF
 chmod +755 config/hooks/normal/1030-generate-locales.hook.chroot
 
+# /etc/hostname + /etc/hosts + a boot-time hosts guard, all rendered into
+# hook 1040.
+#
+# live-build 20250814 does not keep a sane /etc/hosts in the image: its
+# chroot_hosts step runs AFTER all chroot hooks (and again via binary-stage
+# chroot_prep), overwrites the file, and the built squashfs measured EMPTY
+# /etc/hosts on 2026-09-28. There is no live-build hook point after the
+# last stomp, so baking the file is best-effort only; the durable
+# guarantee is ygg-hosts-ensure.service, which re-asserts at every boot
+# that the running hostname resolves. Without a resolvable hostname, every
+# sudo(8) invocation logs an alert — and with the msmtp relay configured
+# (hook 9110) sudo MAILS one alert per call: the "localhost.localdomain"
+# mail storm root-caused 2026-09-28 (board infra/kolkata ACK-5d0fadc09d).
+# BOOTAPPEND_LIVE already promises hostname=${LIVE_HOSTNAME}; the guard
+# makes that promise self-healing on live AND installed systems.
+HOSTS_HOST_ALIASES="${LIVE_HOSTNAME}"
+if [[ "$LIVE_HOSTNAME" == *.* ]]; then
+    HOSTS_HOST_ALIASES="$HOSTS_HOST_ALIASES ${LIVE_HOSTNAME%%.*}"
+fi
+tee config/hooks/normal/1040-etchosts-hostname.hook.chroot <<YGGEOF
+#!/bin/sh
+
+set -e
+
+printf '%s\n' '${LIVE_HOSTNAME}' > /etc/hostname
+cat > /etc/hosts <<YGGHOSTSEOF
+127.0.0.1 localhost
+::1 localhost ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+127.0.1.1 ${HOSTS_HOST_ALIASES}
+YGGHOSTSEOF
+
+cat > /usr/local/sbin/ygg-hosts-ensure <<'YGGSCRIPTEOF'
+#!/bin/sh
+# Ensure /etc/hosts resolves the CURRENT hostname. Idempotent; runs every
+# boot (ygg-hosts-ensure.service) and heals live and installed systems.
+hn="\$(cat /etc/hostname 2>/dev/null || hostname 2>/dev/null)"
+[ -n "\$hn" ] || exit 0
+touch /etc/hosts
+if grep -Eq "(^|[[:space:]])\$hn([[:space:]]|\$)" /etc/hosts; then
+	exit 0
+fi
+short=\${hn%%.*}
+if [ "\$short" != "\$hn" ]; then
+	echo "127.0.1.1 \$hn \$short" >> /etc/hosts
+else
+	echo "127.0.1.1 \$hn" >> /etc/hosts
+fi
+YGGSCRIPTEOF
+chmod 0755 /usr/local/sbin/ygg-hosts-ensure
+
+mkdir -p /etc/systemd/system
+cat > /etc/systemd/system/ygg-hosts-ensure.service <<YGGUNITEOF
+[Unit]
+Description=Yggdrasil /etc/hosts hostname-resolution guard
+DefaultDependencies=no
+After=local-fs.target systemd-remount-fs.service
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ygg-hosts-ensure
+
+[Install]
+WantedBy=basic.target
+YGGUNITEOF
+systemctl enable ygg-hosts-ensure.service >/dev/null 2>&1 || true
+YGGEOF
+chmod +755 config/hooks/normal/1040-etchosts-hostname.hook.chroot
+chmod +755 config/hooks/normal/1040-etchosts-hostname.hook.chroot
+
+
 rm -f config/hooks/normal/8050-remove-openssh-server-host-keys.hook.chroot
 
 # =============================================================================
